@@ -1,0 +1,1423 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI 智能指挥台</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --bg-primary: #0a0e17;
+        --bg-secondary: #111827;
+        --bg-card: rgba(30, 41, 59, 0.6);
+        --border-color: rgba(75, 85, 99, 0.4);
+        --accent-blue: #3b82f6;
+        --accent-cyan: #06b6d4;
+        --accent-red: #ef4444;
+        --accent-orange: #f97316;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --text-muted: #64748b;
+        --glass-bg: rgba(17, 24, 39, 0.7);
+        --glass-border: rgba(255, 255, 255, 0.08);
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        min-height: 100vh;
+        overflow-x: hidden;
+        background-image:
+          radial-gradient(
+            circle at 20% 50%,
+            rgba(59, 130, 246, 0.15) 0%,
+            transparent 50%
+          ),
+          radial-gradient(
+            circle at 80% 80%,
+            rgba(6, 182, 212, 0.1) 0%,
+            transparent 50%
+          );
+      }
+
+      /* 顶部导航栏 */
+      .header {
+        background: var(--glass-bg);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--glass-border);
+        padding: 12px 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+
+      .header-left {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .back-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.3s;
+        font-size: 14px;
+      }
+
+      .back-btn:hover {
+        color: var(--text-primary);
+      }
+
+      .logo {
+        width: 32px;
+        height: 32px;
+        background: linear-gradient(
+          135deg,
+          var(--accent-blue),
+          var(--accent-cyan)
+        );
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        color: white;
+      }
+
+      .header-title {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 1px;
+      }
+
+      .header-right {
+        display: flex;
+        gap: 20px;
+      }
+
+      .header-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.3s;
+      }
+
+      .header-btn:hover {
+        color: var(--text-primary);
+      }
+
+      /* 主容器 */
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 24px;
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 24px;
+      }
+
+      /* 左侧主区域 */
+      .main-content {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      /* 用户输入提示 */
+      .user-prompt {
+        background: linear-gradient(
+          90deg,
+          rgba(59, 130, 246, 0.2),
+          rgba(6, 182, 212, 0.1)
+        );
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        border-radius: 12px;
+        padding: 16px 20px;
+        font-size: 15px;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        animation: slideDown 0.5s ease;
+      }
+
+      @keyframes slideDown {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .prompt-icon {
+        width: 8px;
+        height: 8px;
+        background: var(--accent-cyan);
+        border-radius: 50%;
+        box-shadow: 0 0 10px var(--accent-cyan);
+      }
+
+      /* 内容网格 */
+      .content-grid {
+        display: grid;
+        grid-template-columns: 280px 1fr 1fr;
+        gap: 16px;
+      }
+
+      /* AI 思考链卡片 */
+      .think-chain {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      .think-header {
+        background: rgba(59, 130, 246, 0.1);
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .ai-badge {
+        background: rgba(59, 130, 246, 0.2);
+        color: var(--accent-blue);
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .think-title {
+        font-size: 14px;
+        font-weight: 500;
+        flex: 1;
+      }
+
+      .dropdown-arrow {
+        transition: transform 0.3s;
+        cursor: pointer;
+      }
+
+      .dropdown-arrow.active {
+        transform: rotate(180deg);
+      }
+
+      .think-content {
+        padding: 16px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.8;
+      }
+
+      .think-item {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+        opacity: 0;
+        animation: fadeIn 0.5s forwards;
+      }
+
+      .think-item:nth-child(1) {
+        animation-delay: 0.1s;
+      }
+      .think-item:nth-child(2) {
+        animation-delay: 0.3s;
+      }
+
+      .think-time {
+        color: var(--text-muted);
+        font-family: monospace;
+        font-size: 12px;
+      }
+
+      .typing::after {
+        content: "...";
+        animation: typing 1.5s infinite;
+      }
+
+      @keyframes typing {
+        0%,
+        100% {
+          opacity: 0;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      /* 数据卡片 */
+      .data-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 20px;
+        position: relative;
+        overflow: hidden;
+        transition: all 0.3s;
+      }
+
+      .data-card:hover {
+        border-color: rgba(59, 130, 246, 0.4);
+        transform: translateY(-2px);
+      }
+
+      .data-card.alert {
+        border-color: rgba(239, 68, 68, 0.4);
+        background: linear-gradient(
+          135deg,
+          rgba(239, 68, 68, 0.1),
+          transparent
+        );
+      }
+
+      .data-card.alert:hover {
+        border-color: rgba(239, 68, 68, 0.6);
+        box-shadow: 0 4px 20px rgba(239, 68, 68, 0.2);
+      }
+
+      .card-label {
+        font-size: 14px;
+        color: var(--text-secondary);
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .alert-badge {
+        color: var(--accent-red);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .card-value {
+        font-size: 36px;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .card-value .unit {
+        font-size: 18px;
+        color: var(--text-secondary);
+        margin-left: 4px;
+      }
+
+      .card-sub {
+        font-size: 13px;
+        color: var(--text-secondary);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .trend-up {
+        color: var(--accent-red);
+      }
+
+      .progress-bar {
+        height: 4px;
+        background: rgba(75, 85, 99, 0.3);
+        border-radius: 2px;
+        margin-top: 12px;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(
+          90deg,
+          var(--accent-blue),
+          var(--accent-cyan)
+        );
+        border-radius: 2px;
+        transition: width 1s ease;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .progress-fill::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(255, 255, 255, 0.3),
+          transparent
+        );
+        animation: shimmer 2s infinite;
+      }
+
+      @keyframes shimmer {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(100%);
+        }
+      }
+
+      /* 高风险卡片 */
+      .risk-card {
+        background: linear-gradient(
+          135deg,
+          rgba(239, 68, 68, 0.15),
+          rgba(249, 115, 22, 0.1)
+        );
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 12px;
+        padding: 20px;
+        grid-column: span 2;
+      }
+
+      .risk-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .risk-icon {
+        width: 40px;
+        height: 40px;
+        background: rgba(239, 68, 68, 0.2);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        color: var(--accent-red);
+      }
+
+      .risk-title {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--accent-red);
+      }
+
+      .risk-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+
+      .risk-item {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+        padding: 12px;
+        text-align: center;
+      }
+
+      .risk-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+      }
+
+      .risk-value {
+        font-size: 20px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      .risk-unit {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-left: 2px;
+      }
+
+      .details-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        margin-top: 12px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        cursor: pointer;
+        transition: color 0.3s;
+      }
+
+      .details-btn:hover {
+        color: var(--accent-blue);
+      }
+
+      /* 代码块 */
+      .code-block {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        overflow: hidden;
+        margin-top: 16px;
+      }
+
+      .code-header {
+        background: #161b22;
+        padding: 10px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #30363d;
+      }
+
+      .code-lang {
+        color: #7d8590;
+        font-size: 12px;
+      }
+
+      .code-copy {
+        color: #7d8590;
+        font-size: 12px;
+        cursor: pointer;
+        transition: color 0.3s;
+      }
+
+      .code-copy:hover {
+        color: var(--text-primary);
+      }
+
+      .code-content {
+        padding: 16px;
+        font-family: "Consolas", "Monaco", monospace;
+        font-size: 13px;
+        line-height: 1.6;
+        overflow-x: auto;
+      }
+
+      .code-line {
+        display: flex;
+      }
+
+      .line-num {
+        color: #484f58;
+        width: 30px;
+        text-align: right;
+        margin-right: 16px;
+        user-select: none;
+      }
+
+      .code-text {
+        color: #e6edf3;
+      }
+
+      .keyword {
+        color: #ff7b72;
+      }
+      .function {
+        color: #d2a8ff;
+      }
+      .string {
+        color: #a5d6ff;
+      }
+      .comment {
+        color: #8b949e;
+      }
+
+      /* 输入框区域 */
+      .input-section {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 16px;
+      }
+
+      .quick-actions {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+      }
+
+      .quick-tag {
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        color: var(--accent-blue);
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+
+      .quick-tag:hover {
+        background: rgba(59, 130, 246, 0.2);
+        transform: translateY(-1px);
+      }
+
+      .input-box {
+        position: relative;
+      }
+
+      .input-field {
+        width: 100%;
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 12px 16px;
+        color: var(--text-primary);
+        font-size: 14px;
+        resize: none;
+        min-height: 60px;
+        outline: none;
+        transition: all 0.3s;
+      }
+
+      .input-field:focus {
+        border-color: var(--accent-blue);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+      }
+
+      .input-field::placeholder {
+        color: var(--text-muted);
+      }
+
+      .input-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 8px;
+        padding: 0 4px;
+      }
+
+      .input-hint {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      .input-buttons {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .icon-btn {
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: color 0.3s;
+        font-size: 14px;
+      }
+
+      .icon-btn:hover {
+        color: var(--text-primary);
+      }
+
+      .send-btn {
+        width: 36px;
+        height: 36px;
+        background: linear-gradient(
+          135deg,
+          var(--accent-blue),
+          var(--accent-cyan)
+        );
+        border: none;
+        border-radius: 8px;
+        color: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+      }
+
+      .send-btn:hover {
+        transform: scale(1.05);
+        box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+      }
+
+      /* 右侧边栏 */
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      /* 时间线 */
+      .timeline {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 20px;
+      }
+
+      .timeline-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .timeline-list {
+        position: relative;
+        padding-left: 24px;
+      }
+
+      .timeline-list::before {
+        content: "";
+        position: absolute;
+        left: 7px;
+        top: 8px;
+        bottom: 40px;
+        width: 2px;
+        background: linear-gradient(
+          180deg,
+          var(--accent-blue),
+          var(--accent-cyan)
+        );
+      }
+
+      .timeline-item {
+        position: relative;
+        margin-bottom: 24px;
+        opacity: 0;
+        animation: fadeIn 0.5s forwards;
+      }
+
+      .timeline-item:nth-child(1) {
+        animation-delay: 0.1s;
+      }
+      .timeline-item:nth-child(2) {
+        animation-delay: 0.3s;
+      }
+      .timeline-item:nth-child(3) {
+        animation-delay: 0.5s;
+      }
+
+      .timeline-dot {
+        position: absolute;
+        left: -20px;
+        top: 4px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--bg-secondary);
+        border: 2px solid var(--accent-blue);
+      }
+
+      .timeline-dot.active {
+        background: var(--accent-blue);
+        box-shadow: 0 0 10px var(--accent-blue);
+        animation: pulse 2s infinite;
+      }
+
+      .timeline-dot.error {
+        border-color: var(--accent-red);
+        background: var(--accent-red);
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+        }
+        50% {
+          box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);
+        }
+      }
+
+      .timeline-time {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+      }
+
+      .timeline-content {
+        font-size: 14px;
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+
+      .timeline-sub {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-top: 8px;
+        padding-left: 12px;
+        border-left: 2px solid var(--border-color);
+      }
+
+      .timeline-sub-item {
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .sub-dot {
+        width: 4px;
+        height: 4px;
+        background: var(--text-muted);
+        border-radius: 50%;
+      }
+
+      .progress-text {
+        color: var(--accent-cyan);
+        font-weight: 600;
+      }
+
+      /* 风险评论 */
+      .risk-comment {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 20px;
+      }
+
+      .risk-level {
+        background: linear-gradient(
+          135deg,
+          rgba(239, 68, 68, 0.2),
+          rgba(249, 115, 22, 0.1)
+        );
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+        text-align: center;
+      }
+
+      .risk-level-text {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--accent-red);
+        margin-bottom: 4px;
+      }
+
+      .risk-level-sub {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+
+      .risk-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .risk-stat-item {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+        padding: 12px;
+        text-align: center;
+      }
+
+      .risk-stat-label {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+      }
+
+      .risk-stat-value {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text-primary);
+      }
+
+      /* 动画 */
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* 响应式 */
+      @media (max-width: 1200px) {
+        .container {
+          grid-template-columns: 1fr;
+        }
+        .sidebar {
+          order: -1;
+        }
+        .content-grid {
+          grid-template-columns: 1fr;
+        }
+        .risk-card {
+          grid-column: span 1;
+        }
+        .risk-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* 滚动条美化 */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: var(--bg-secondary);
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: var(--border-color);
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--text-muted);
+      }
+
+      /* 加载动画 */
+      .loading-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          var(--accent-blue),
+          var(--accent-cyan)
+        );
+        animation: loading 2s ease-in-out infinite;
+        z-index: 9999;
+      }
+
+      @keyframes loading {
+        0% {
+          width: 0;
+          left: 0;
+        }
+        50% {
+          width: 100%;
+          left: 0;
+        }
+        100% {
+          width: 0;
+          left: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loading-bar" id="loadingBar"></div>
+
+    <!-- 顶部导航 -->
+    <header class="header">
+      <div class="header-left">
+        <div class="back-btn">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+          <span>返回</span>
+        </div>
+        <div class="logo">AI</div>
+        <h1 class="header-title">AI 智能指挥台</h1>
+      </div>
+      <div class="header-right">
+        <div class="header-btn">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"
+            />
+          </svg>
+          <span>全屏</span>
+        </div>
+        <div class="header-btn">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <span>帮助</span>
+        </div>
+        <div class="header-btn">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M12 1v6m0 6v6m4.22-10.22l4.24-4.24M6.34 17.66l-4.24 4.24M23 12h-6m-6 0H1m20.24 4.24l-4.24-4.24M6.34 6.34L2.1 2.1"
+            />
+          </svg>
+          <span>设置</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="container">
+      <!-- 左侧主内容 -->
+      <div class="main-content">
+        <!-- 用户提示 -->
+        <div class="user-prompt">
+          <div class="prompt-icon"></div>
+          <span>分析一下当前汛情，并启动应急预案。</span>
+        </div>
+
+        <!-- 内容网格 -->
+        <div class="content-grid">
+          <!-- AI 思考链 -->
+          <div class="think-chain">
+            <div class="think-header">
+              <span class="ai-badge">AI</span>
+              <span class="think-title">Think Chain</span>
+              <span class="dropdown-arrow" onclick="toggleThink()">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </span>
+            </div>
+            <div class="think-content" id="thinkContent">
+              <div class="think-item">
+                <span class="think-time">14:02:30</span>
+                <span class="typing">正在查询实时雨情数据</span>
+              </div>
+              <div class="think-item">
+                <span class="think-time">14:02:31</span>
+                <span>对比历史警戒水位...</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 水位卡片 1 -->
+          <div class="data-card">
+            <div class="card-label">城陵矶水位</div>
+            <div class="card-value">30.5<span class="unit">m</span></div>
+            <div class="card-sub">正常范围</div>
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: 65%"></div>
+            </div>
+          </div>
+
+          <!-- 水位卡片 2 -->
+          <div class="data-card alert">
+            <div class="card-label">
+              莲花塘
+              <span class="alert-badge">[超警]</span>
+            </div>
+            <div class="card-value">34.5<span class="unit">m</span></div>
+            <div class="card-sub">
+              持续上涨
+              <svg
+                class="trend-up"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <line x1="12" y1="19" x2="12" y2="5" />
+                <polyline points="5 12 12 5 19 12" />
+              </svg>
+            </div>
+            <div class="progress-bar">
+              <div
+                class="progress-fill"
+                style="
+                  width: 85%;
+                  background: linear-gradient(
+                    90deg,
+                    var(--accent-red),
+                    var(--accent-orange)
+                  );
+                "
+              ></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 高风险预警 -->
+        <div class="risk-card">
+          <div class="risk-header">
+            <div class="risk-icon">⚠️</div>
+            <div class="risk-title">高风险预警</div>
+          </div>
+          <div class="risk-grid">
+            <div class="risk-item">
+              <div class="risk-label">降雨量</div>
+              <div class="risk-value">
+                120<span class="risk-unit">mm/h</span>
+              </div>
+            </div>
+            <div class="risk-item">
+              <div class="risk-label">堤防裂缝</div>
+              <div class="risk-value">2<span class="risk-unit">处</span></div>
+            </div>
+            <div class="risk-item">
+              <div class="risk-label">撤离人口</div>
+              <div class="risk-value">12<span class="risk-unit">k</span></div>
+            </div>
+          </div>
+          <div class="details-btn" onclick="showDetails()">
+            <span>details</span>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
+        </div>
+
+        <!-- 代码块 -->
+        <div class="code-block">
+          <div class="code-header">
+            <span class="code-lang">python</span>
+            <span class="code-copy" onclick="copyCode()">Hover copy</span>
+          </div>
+          <div class="code-content">
+            <div class="code-line">
+              <span class="line-num">1</span>
+              <span class="code-text"
+                ><span class="keyword">def</span>
+                <span class="function">check_flood_risk</span>(water_level,
+                alarm_level):</span
+              >
+            </div>
+            <div class="code-line">
+              <span class="line-num">2</span>
+              <span class="code-text">
+                <span class="keyword">return</span> water_level >
+                alarm_level</span
+              >
+            </div>
+          </div>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="input-section">
+          <div class="quick-actions">
+            <span class="quick-tag">💡 快捷指令：</span>
+            <span class="quick-tag" onclick="insertCommand('【当前汛情】')"
+              >【当前汛情】</span
+            >
+            <span class="quick-tag" onclick="insertCommand('【启动应急预案】')"
+              >【启动应急预案】</span
+            >
+            <span class="quick-tag" onclick="insertCommand('【站点分布】')"
+              >【站点分布】</span
+            >
+            <span class="quick-tag" onclick="insertCommand('【历史对比】')"
+              >【历史对比】</span
+            >
+          </div>
+          <div class="input-box">
+            <textarea
+              class="input-field"
+              id="inputField"
+              placeholder="输入Enter 至发送，Shift+Enter 换行"
+            ></textarea>
+            <div class="input-actions">
+              <span class="input-hint">0字节 (可选) 附件 | 语音</span>
+              <div class="input-buttons">
+                <span class="icon-btn">📎</span>
+                <span class="icon-btn">🎤</span>
+                <button class="send-btn" onclick="sendMessage()">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧边栏 -->
+      <div class="sidebar">
+        <!-- 时间线 -->
+        <div class="timeline">
+          <div class="timeline-title">
+            <span style="color: var(--accent-blue)">●</span>
+            执行进度
+          </div>
+          <div class="timeline-list">
+            <div class="timeline-item">
+              <div class="timeline-dot"></div>
+              <div class="timeline-time">14:01</div>
+              <div class="timeline-content">接收指令</div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-dot active"></div>
+              <div class="timeline-time">14:03</div>
+              <div class="timeline-content">
+                水位数据分析中
+                <span class="progress-text">65%</span>
+              </div>
+              <div class="timeline-sub">
+                <div class="timeline-sub-item">
+                  <span class="sub-dot"></span>
+                  <span>1. 获取莲花塘水位</span>
+                </div>
+                <div class="timeline-sub-item">
+                  <span class="sub-dot"></span>
+                  <span>2. 获取城陵矶水位</span>
+                </div>
+                <div class="timeline-sub-item">
+                  <span class="sub-dot"></span>
+                  <span>3. 对比警戒水位</span>
+                </div>
+              </div>
+            </div>
+            <div class="timeline-item">
+              <div
+                class="timeline-dot"
+                style="border-color: var(--text-muted)"
+              ></div>
+              <div class="timeline-time" style="color: var(--text-muted)">
+                待执行
+              </div>
+              <div class="timeline-content" style="color: var(--text-muted)">
+                生成应急预案报告
+              </div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-dot error"></div>
+              <div class="timeline-time" style="color: var(--accent-red)">
+                08:30
+              </div>
+              <div class="timeline-content" style="color: var(--accent-red)">
+                昨晚预警发布失败
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 风险评论 -->
+        <div class="risk-comment">
+          <div class="timeline-title">风险评论</div>
+          <div class="risk-level">
+            <div class="risk-level-text">高</div>
+            <div class="risk-level-sub">综合风险等级</div>
+          </div>
+          <div class="risk-stats">
+            <div class="risk-stat-item">
+              <div class="risk-stat-label">降雨强度</div>
+              <div class="risk-stat-value">120mm/h</div>
+            </div>
+            <div class="risk-stat-item">
+              <div class="risk-stat-label">河道水位</div>
+              <div class="risk-stat-value">2处</div>
+            </div>
+            <div class="risk-stat-item">
+              <div class="risk-stat-label">堤防隐患</div>
+              <div class="risk-stat-value">12k</div>
+            </div>
+            <div class="risk-stat-item">
+              <div class="risk-stat-label">受灾人口</div>
+              <div class="risk-stat-value">--</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // 页面加载完成后隐藏加载条
+      window.addEventListener("load", () => {
+        setTimeout(() => {
+          document.getElementById("loadingBar").style.display = "none";
+        }, 1500);
+      });
+
+      // 切换思考链展开/收起
+      function toggleThink() {
+        const content = document.getElementById("thinkContent");
+        const arrow = document.querySelector(".dropdown-arrow");
+        if (content.style.display === "none") {
+          content.style.display = "block";
+          arrow.classList.remove("active");
+        } else {
+          content.style.display = "none";
+          arrow.classList.add("active");
+        }
+      }
+
+      // 插入快捷指令
+      function insertCommand(cmd) {
+        const input = document.getElementById("inputField");
+        input.value = cmd;
+        input.focus();
+      }
+
+      // 发送消息
+      function sendMessage() {
+        const input = document.getElementById("inputField");
+        const value = input.value.trim();
+        if (value) {
+          // 模拟发送效果
+          const btn = document.querySelector(".send-btn");
+          btn.style.transform = "scale(0.9)";
+          setTimeout(() => {
+            btn.style.transform = "scale(1)";
+            input.value = "";
+
+            // 添加新的时间线项目
+            addTimelineItem("刚刚", "已执行: " + value, "completed");
+          }, 200);
+        }
+      }
+
+      // 添加时间线项目
+      function addTimelineItem(time, content, status) {
+        const list = document.querySelector(".timeline-list");
+        const item = document.createElement("div");
+        item.className = "timeline-item";
+        item.style.animation = "fadeIn 0.5s forwards";
+
+        const dotClass = status === "completed" ? "" : "active";
+
+        item.innerHTML = `
+                <div class="timeline-dot ${dotClass}"></div>
+                <div class="timeline-time">${time}</div>
+                <div class="timeline-content">${content}</div>
+            `;
+
+        list.insertBefore(item, list.firstChild);
+      }
+
+      // 复制代码
+      function copyCode() {
+        const code = `def check_flood_risk(water_level, alarm_level):
+    return water_level > alarm_level`;
+
+        navigator.clipboard.writeText(code).then(() => {
+          const copyBtn = document.querySelector(".code-copy");
+          const originalText = copyBtn.textContent;
+          copyBtn.textContent = "已复制!";
+          copyBtn.style.color = "#4ade80";
+
+          setTimeout(() => {
+            copyBtn.textContent = originalText;
+            copyBtn.style.color = "";
+          }, 2000);
+        });
+      }
+
+      // 显示详情
+      function showDetails() {
+        alert(
+          "详情功能：\n\n降雨量: 120mm/h (极高)\n堤防裂缝: 2处 (需立即处理)\n撤离人口: 12,000人 (进行中)\n\n建议立即启动一级应急响应！",
+        );
+      }
+
+      // 输入框快捷键
+      document
+        .getElementById("inputField")
+        .addEventListener("keydown", function (e) {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+          }
+        });
+
+      // 模拟实时数据更新
+      setInterval(() => {
+        // 随机更新莲花塘水位
+        const cardValue = document.querySelector(
+          ".data-card.alert .card-value",
+        );
+        if (cardValue && Math.random() > 0.7) {
+          const current = parseFloat(cardValue.textContent);
+          const change = (Math.random() - 0.5) * 0.1;
+          const newValue = (current + change).toFixed(1);
+          cardValue.innerHTML = newValue + '<span class="unit">m</span>';
+        }
+      }, 5000);
+
+      // 模拟进度条增长
+      let progress = 65;
+      const progressInterval = setInterval(() => {
+        if (progress < 100) {
+          progress += Math.random() * 5;
+          if (progress > 100) progress = 100;
+
+          const progressText = document.querySelector(".progress-text");
+          const progressFill = document.querySelector(".timeline-dot.active");
+
+          if (progressText) {
+            progressText.textContent = Math.floor(progress) + "%";
+          }
+
+          if (progress === 100 && progressFill) {
+            progressFill.style.background = "#22c55e";
+            progressFill.style.borderColor = "#22c55e";
+            progressFill.style.boxShadow = "0 0 10px #22c55e";
+          }
+        } else {
+          clearInterval(progressInterval);
+        }
+      }, 2000);
+    </script>
+  </body>
+</html>

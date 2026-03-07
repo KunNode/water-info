@@ -1,0 +1,12 @@
+# Development Profile
+spring:
+  datasource:
+    url: jdbc:postgresql://47.104.64.17:5432/water_info
+    username: root
+    password: 123456
+
+logging:
+  level:
+    root: INFO
+    com.waterinfo.platform: DEBUG
+    org.springframework.web: DEBUG

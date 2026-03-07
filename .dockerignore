@@ -1,0 +1,21 @@
+# ─── Docker ───
+.env
+docker-compose.override.yml
+
+# ─── IDE ───
+.idea/
+.vscode/
+*.iml
+
+# ─── Build artifacts ───
+water-info-platform/target/
+water-info-ai/.venv/
+water-info-ai/__pycache__/
+
+# ─── Logs ───
+logs/
+*.log
+
+# ─── OS ───
+.DS_Store
+Thumbs.db

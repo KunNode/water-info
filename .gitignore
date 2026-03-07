@@ -1,0 +1,47 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.idea/
+.vscode/
+*.iml
+
+# Local agent/tool metadata
+.agents/
+.claude/
+.qoder/
+.trae/
+
+# Logs and runtime files
+logs/
+*.log
+*.pid
+*.pid.lock
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Java / Maven
+**/target/
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+
+# Node / Frontend
+**/node_modules/
+**/dist/
+**/coverage/
+**/*.tsbuildinfo
+
+# Temp files
+*.tmp
+*.temp

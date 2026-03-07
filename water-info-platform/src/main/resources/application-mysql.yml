@@ -1,0 +1,15 @@
+# MySQL Profile - Use with: spring.profiles.active=mysql
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/water_info?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+
+  flyway:
+    locations: classpath:db/migration/mysql
+
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: ASSIGN_UUID

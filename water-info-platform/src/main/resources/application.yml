@@ -1,0 +1,167 @@
+﻿server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: water-info-platform
+  profiles:
+    active: dev
+
+  # Redis Configuration
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:47.104.64.17}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:123456}
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: -1ms
+      timeout: 5000ms
+
+  # Cache Configuration
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=5m
+    redis:
+      time-to-live: 3600000
+
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://47.104.64.17:5432/water_info
+    username: root
+    password: 123456
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      idle-timeout: 30000
+      pool-name: WaterInfoHikariPool
+      max-lifetime: 1800000
+      connection-timeout: 30000
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-on-migrate: true
+
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.waterinfo.platform.module.*.entity
+  global-config:
+    db-config:
+      id-type: ASSIGN_UUID
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+      table-prefix: ""
+    banner: false
+  configuration:
+    map-underscore-to-camel-case: true
+    cache-enabled: false
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+# JWT Configuration
+jwt:
+  secret: 62CONvJaO3ylVpho8+IKFAw2gdkvFUX37s8pTnKDP5UL/qTW7hE+iKd1Eqdrc7LtsgqoUWWm8Hq57W9kS1p0zw==
+  expiration: 86400000  # 24 hours in milliseconds
+  refresh-expiration: 604800000  # 7 days in milliseconds
+  header: Authorization
+  prefix: "Bearer "
+
+# Initial Admin Configuration
+app:
+  admin:
+    username: admin
+    password: ${ADMIN_PASSWORD:Admin@123456}
+    real-name: System Administrator
+
+# OpenAPI / Swagger Configuration
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+    doc-expansion: none
+    disable-swagger-default-url: true
+  show-actuator: false
+  default-flat-param-object: true
+
+# Knife4j Configuration
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+    enable-swagger-models: true
+    enable-document-manage: true
+    swagger-model-name: 实体类列表
+    enable-footer: false
+    enable-footer-custom: false
+    enable-search: true
+    enable-open-api: true
+    enable-group: true
+  production: false
+
+logging:
+  level:
+    root: INFO
+    com.waterinfo.platform: DEBUG
+    com.baomidou.mybatisplus: DEBUG
+    org.springframework.security: DEBUG
+
+# Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,loggers
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+  metrics:
+    tags:
+      application: water-info-platform
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# Rate Limiting Configuration
+ratelimit:
+  enabled: true
+  defaults:
+    limit: 100
+    window-seconds: 60
+  endpoints:
+    "/api/v1/auth/login":
+      limit: 5
+      window-seconds: 60
+    "/api/v1/flood/**":
+      limit: 10
+      window-seconds: 60
+
+# AI Service Configuration
+ai:
+  service:
+    url: ${AI_SERVICE_URL:http://localhost:8100}
+    timeout-seconds: 180
+    connect-timeout-seconds: 10
