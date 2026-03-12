@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.services.llm import get_llm
 from app.state import AgentName, FloodResponseState
+from app.utils.json_parser import extract_json
 
 # ──────────────────────────────────────────────
 # 意图分类关键词
@@ -45,10 +46,10 @@ def _classify_intent(user_query: str) -> str:
         return "full_response"
     if any(kw in q for kw in _MONITOR_KEYWORDS):
         return "monitor_only"
-    if any(kw in q for kw in _DATA_ONLY_KEYWORDS):
-        return "data_only"
     if any(kw in q for kw in _RISK_ONLY_KEYWORDS):
         return "risk_only"
+    if any(kw in q for kw in _DATA_ONLY_KEYWORDS):
+        return "data_only"
     return "unknown"
 
 
@@ -64,6 +65,8 @@ def _deterministic_route(state: FloodResponseState, intent: str) -> str | None:
     """
     # 最大迭代防护
     if state.get("iteration", 0) >= 8:
+        return "__end__"
+    if state.get("error"):
         return "__end__"
 
     has_data = bool(state.get("data_summary"))
@@ -154,6 +157,29 @@ class SupervisorDecision(BaseModel):
     reasoning: str = Field(default="", description="路由决策的理由说明")
 
 
+def _extract_response_text(response: object) -> str:
+    """兼容不同模型返回格式，尽量提取纯文本内容。"""
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if text:
+                    parts.append(str(text))
+                continue
+            text = getattr(item, "text", None) or getattr(item, "content", None)
+            if text:
+                parts.append(str(text))
+        return "\n".join(parts).strip()
+    return str(content).strip()
+
+
 async def supervisor_node(state: FloodResponseState) -> dict:
     """Supervisor 节点：确定性路由引擎优先，LLM 兜底"""
     iteration = state.get("iteration", 0)
@@ -214,13 +240,34 @@ async def supervisor_node(state: FloodResponseState) -> dict:
     next_agent_raw = "__end__"
     reasoning = ""
     try:
-        structured_llm = llm.with_structured_output(SupervisorDecision)
-        decision: SupervisorDecision = await structured_llm.ainvoke(messages)
+        json_response = await llm.ainvoke(
+            messages
+            + [
+                SystemMessage(
+                    content="""请只返回一个 JSON 对象，不要附带额外说明：
+{
+  "next_agent": "data_analyst|risk_assessor|plan_generator|resource_dispatcher|notification|execution_monitor|parallel_dispatch|__end__",
+  "reasoning": "简短说明"
+}""",
+                )
+            ],
+        )
+        content = _extract_response_text(json_response)
+        parsed = extract_json(content)
+        if not isinstance(parsed, dict):
+            raise ValueError(f"无法从响应中提取 JSON: {content[:200]}")
+
+        decision = SupervisorDecision.model_validate(
+            {
+                "next_agent": parsed.get("next_agent", "__end__"),
+                "reasoning": parsed.get("reasoning", ""),
+            }
+        )
         next_agent_raw = decision.next_agent
         reasoning = decision.reasoning
         logger.debug(f"Supervisor LLM路由: {next_agent_raw}, 理由: {reasoning[:100]}")
     except Exception as e:
-        logger.warning(f"结构化路由失败，回退到文本解析: {e}")
+        logger.warning(f"JSON 路由失败，回退到文本解析: {e}")
         fallback_messages = messages + [
             SystemMessage(content="""请根据上述上下文，只回复以下之一（不要任何解释）：
 - data_analyst
@@ -233,7 +280,7 @@ async def supervisor_node(state: FloodResponseState) -> dict:
 - __end__""")
         ]
         response = await llm.ainvoke(fallback_messages)
-        content = response.content.strip().lower()
+        content = _extract_response_text(response).lower()
         valid_agents_list = ["data_analyst", "risk_assessor", "plan_generator",
             "resource_dispatcher", "notification", "execution_monitor",
             "parallel_dispatch", "__end__",

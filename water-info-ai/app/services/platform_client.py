@@ -17,15 +17,20 @@ class WaterPlatformClient:
     def __init__(self) -> None:
         self._settings = get_settings()
         self._base_url = self._settings.water_platform_base_url.rstrip("/")
+        self._api_prefix = "/api/v1"
         self._token: str | None = None
         self._client = httpx.AsyncClient(timeout=30.0)
+
+    def _build_url(self, path: str) -> str:
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        return f"{self._base_url}{self._api_prefix}{normalized_path}"
 
     async def _ensure_token(self) -> str:
         """确保持有有效 JWT token"""
         if self._token:
             return self._token
         resp = await self._client.post(
-            f"{self._base_url}/auth/login",
+            self._build_url("/auth/login"),
             json={
                 "username": self._settings.water_platform_username,
                 "password": self._settings.water_platform_password,
@@ -43,19 +48,19 @@ class WaterPlatformClient:
 
     async def _get(self, path: str, params: dict | None = None) -> dict:
         headers = await self._headers()
-        resp = await self._client.get(f"{self._base_url}{path}", headers=headers, params=params)
+        resp = await self._client.get(self._build_url(path), headers=headers, params=params)
         resp.raise_for_status()
         return resp.json()
 
     async def _post(self, path: str, json_data: dict | None = None) -> dict:
         headers = await self._headers()
-        resp = await self._client.post(f"{self._base_url}{path}", headers=headers, json=json_data)
+        resp = await self._client.post(self._build_url(path), headers=headers, json=json_data)
         resp.raise_for_status()
         return resp.json()
 
     async def _put(self, path: str, json_data: dict | None = None) -> dict:
         headers = await self._headers()
-        resp = await self._client.put(f"{self._base_url}{path}", headers=headers, json=json_data)
+        resp = await self._client.put(self._build_url(path), headers=headers, json=json_data)
         resp.raise_for_status()
         return resp.json()
 

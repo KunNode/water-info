@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import sys
+from contextvars import ContextVar
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+TRACE_ID_VAR: ContextVar[str] = ContextVar("trace_id", default="")
 
 
 class Settings(BaseSettings):
@@ -86,40 +90,46 @@ def configure_logging() -> None:
     """配置 Loguru 统一日志格式"""
     import os
     import uuid
-    from contextvars import ContextVar
+    import io
 
     from loguru import logger
 
-    # 全局 trace_id context
-    trace_id_var: ContextVar[str] = ContextVar("trace_id", default="")
-
     def _inject_trace_id(record: dict) -> None:
         """为每条日志注入 trace_id，确保格式模板中该字段始终存在"""
-        record["extra"].setdefault("trace_id", trace_id_var.get() or uuid.uuid4().hex[:16])
+        record["extra"].setdefault("trace_id", TRACE_ID_VAR.get() or uuid.uuid4().hex[:16])
+
+    stdout_sink = sys.stdout
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except OSError:
+            stdout_sink = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
     # 移除默认处理器，注册全局 patcher
     logger.remove()
-    logger.configure(patcher=_inject_trace_id)
+    logger.configure(extra={"trace_id": ""}, patcher=_inject_trace_id)
 
     settings = get_settings()
 
     if settings.log_format == "json":
-        # JSON 格式输出（适合日志收集）
+        # Windows/sandbox 环境下开启 enqueue 会触发 multiprocessing 管道权限错误，
+        # 这里统一使用同步输出，避免导入阶段就失败。
         logger.add(
-            sys.stdout,
+            stdout_sink,
             format="{message}",
             serialize=True,
             level=settings.log_level,
-            enqueue=True,
+            enqueue=False,
         )
     else:
         # 控制台格式输出（适合开发）
         # encoding="utf-8" 避免 Windows GBK 控制台 UnicodeEncodeError
         logger.add(
-            sys.stdout,
+            stdout_sink,
             format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | [<cyan>{extra[trace_id]}</cyan>] <level>{message}</level>",
             level=settings.log_level,
             encoding="utf-8",
+            enqueue=False,
         )
 
     # 文件日志（确保目录存在）
@@ -131,6 +141,7 @@ def configure_logging() -> None:
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[trace_id]} | {message}",
         level=settings.log_level,
         encoding="utf-8",
+        enqueue=False,
     )
 
     logger.info(f"日志系统初始化完成, 格式: {settings.log_format}")
@@ -138,18 +149,12 @@ def configure_logging() -> None:
 
 def get_trace_id() -> str:
     """获取当前 trace_id"""
-    from contextvars import ContextVar
-
-    trace_id_var: ContextVar[str] = ContextVar("trace_id", default="")
-    return trace_id_var.get()
+    return TRACE_ID_VAR.get()
 
 
 def set_trace_id(trace_id: str) -> None:
     """设置当前 trace_id"""
-    from contextvars import ContextVar
-
-    trace_id_var: ContextVar[str] = ContextVar("trace_id", default="")
-    trace_id_var.set(trace_id)
+    TRACE_ID_VAR.set(trace_id)
 
 
 @lru_cache

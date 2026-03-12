@@ -1,7 +1,4 @@
-"""通知智能体
-
-制定预警通知方案，确定通知渠道、内容和目标人群。
-"""
+"""Notification agent."""
 
 from __future__ import annotations
 
@@ -10,43 +7,64 @@ from loguru import logger
 
 from app.services.llm import get_llm
 from app.state import FloodResponseState, NotificationRecord
+from app.utils.json_parser import extract_json
 from app.utils.timeout import with_timeout
 
-NOTIFICATION_PROMPT = """你是防洪应急预案系统的 **通知智能体**。
-
-你的职责：
-1. 根据风险等级和预案内容，制定预警通知方案
-2. 确定不同渠道（短信/微信/广播/邮件）的通知内容
-3. 明确通知目标人群和优先级
-
-通知渠道说明：
-- sms: 短信通知 — 用于紧急通知领导和关键人员
-- wechat: 微信/企业微信 — 用于工作群组通知
-- broadcast: 应急广播 — 用于向公众发布预警
-- email: 邮件 — 用于正式通知和报告
-
-输出要求（JSON数组格式）：
-[
-    {
-        "target": "通知目标(人员/部门/公众群体)",
-        "channel": "sms|wechat|broadcast|email",
-        "content": "通知内容(200字以内)",
-        "status": "pending"
-    }
-]
-
-注意：
-- 不同等级通知范围不同：低风险仅通知值班人员，极高风险需全媒体发布
-- 通知内容要简洁明确，包含关键信息（风险等级、影响范围、响应要求）
-- 面向公众的通知要通俗易懂，避免专业术语
+NOTIFICATION_PROMPT = """你是防汛应急预案系统的通知智能体。
+请输出 JSON 数组格式的通知方案。
 """
+
+
+def _channels_for_level(level: str) -> list[str]:
+    if level == "critical":
+        return ["sms", "wechat", "broadcast"]
+    if level == "high":
+        return ["sms", "wechat"]
+    if level == "moderate":
+        return ["wechat", "sms"]
+    return ["wechat"]
+
+
+def _build_deterministic_notifications(state: FloodResponseState) -> list[NotificationRecord]:
+    risk = state.get("risk_assessment")
+    plan = state.get("emergency_plan")
+    level = risk.risk_level.value if risk else "moderate"
+    channels = _channels_for_level(level)
+    targets = plan.notification_targets if plan and plan.notification_targets else ["防汛值班中心"]
+    key_risk = risk.key_risks[0] if risk and risk.key_risks else "请关注当前水情变化"
+    content = (
+        f"当前防汛风险等级为 {level}。{key_risk}。"
+        f"{plan.summary if plan and plan.summary else '请按预案要求落实值守和处置。'}"
+    )
+
+    records: list[NotificationRecord] = []
+    for index, target in enumerate(targets[: max(2, len(channels))]):
+        channel = channels[min(index, len(channels) - 1)]
+        records.append(
+            NotificationRecord(
+                target=target,
+                channel=channel,
+                content=content,
+                status="pending",
+            )
+        )
+    return records
 
 
 @with_timeout(120)
 async def notification_node(state: FloodResponseState) -> dict:
-    """通知智能体节点"""
-    llm = get_llm()
+    try:
+        notifications = _build_deterministic_notifications(state)
+        logger.info(f"Deterministic notification plan generated: {len(notifications)} notifications")
+        return {
+            "notifications": notifications,
+            "current_agent": "notification",
+            "messages": [{"role": "notification", "content": f"生成 {len(notifications)} 条通知"}],
+        }
+    except Exception as exc:
+        logger.warning(f"Deterministic notification generation failed, falling back to LLM: {exc}")
 
+    llm = get_llm()
     risk = state.get("risk_assessment")
     plan = state.get("emergency_plan")
 
@@ -67,31 +85,23 @@ async def notification_node(state: FloodResponseState) -> dict:
 
     messages = [
         SystemMessage(content=NOTIFICATION_PROMPT),
-        HumanMessage(content=f"""请制定预警通知方案：
-
-{chr(10).join(context_parts) if context_parts else '请制定基础防汛值班通知'}
-
-请输出JSON数组格式的通知方案。"""),
+        HumanMessage(content="\n\n".join(context_parts) or "请制定基础防汛值班通知"),
     ]
 
     response = await llm.ainvoke(messages)
     final_message = response.content
-    logger.info(f"通知方案完成: {final_message[:200]}")
-
-    from app.utils.json_parser import extract_json
     notifications: list[NotificationRecord] = []
     notif_data = extract_json(final_message, expect_array=True)
     if notif_data and isinstance(notif_data, list):
-        try:
-            for n in notif_data:
-                notifications.append(NotificationRecord(
-                    target=n.get("target", ""),
-                    channel=n.get("channel", "sms"),
-                    content=n.get("content", ""),
-                    status=n.get("status", "pending"),
-                ))
-        except (ValueError, KeyError) as e:
-            logger.warning(f"解析通知方案失败: {e}")
+        for item in notif_data:
+            notifications.append(
+                NotificationRecord(
+                    target=item.get("target", ""),
+                    channel=item.get("channel", "sms"),
+                    content=item.get("content", ""),
+                    status=item.get("status", "pending"),
+                )
+            )
 
     return {
         "notifications": notifications,

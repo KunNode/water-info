@@ -1,71 +1,87 @@
-"""预案生成智能体
-
-根据风险评估等级，调用模板工具并结合 LLM 生成
-针对性的应急响应预案。
-"""
+"""Plan generator agent."""
 
 from __future__ import annotations
+
+import json
 
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
 from loguru import logger
 
 from app.services.llm import get_creative_llm
-from app.state import (
-    EmergencyAction,
-    EmergencyPlan,
-    FloodResponseState,
-    PlanStatus,
-    ResourceAllocation,
-)
-from app.tools.plan_tools import plan_generation_tools
+from app.state import EmergencyAction, EmergencyPlan, FloodResponseState, PlanStatus, ResourceAllocation, RiskLevel
+from app.tools.plan_tools import generate_plan_id, get_response_template, lookup_emergency_contacts, plan_generation_tools
+from app.utils.json_parser import extract_json
 from app.utils.timeout import with_timeout
 
-PLAN_GENERATOR_PROMPT = """你是防洪应急预案系统的 **预案生成智能体**。
-
-你的职责：
-1. 根据风险评估结果确定应急响应等级
-2. 调用模板工具获取标准响应模板
-3. 结合实际情况生成定制化的应急预案
-
-你拥有以下工具：
-- generate_plan_id: 生成唯一预案编号
-- get_response_template: 获取标准应急响应模板
-- lookup_emergency_contacts: 查询应急联系人
-
-工作流程：
-1. 生成预案编号
-2. 根据风险等级获取响应模板
-3. 查询应急联系人
-4. 基于模板和实际情况定制预案内容
-
-输出要求（JSON格式）：
-{
-    "plan_id": "预案编号",
-    "plan_name": "预案名称",
-    "risk_level": "风险等级",
-    "trigger_conditions": "触发条件描述",
-    "actions": [
-        {
-            "action_id": "措施编号",
-            "action_type": "措施类型",
-            "description": "措施描述",
-            "priority": 1-5,
-            "responsible_dept": "责任部门",
-            "deadline_minutes": 响应时限(分钟)
-        }
-    ],
-    "notification_targets": ["通知目标列表"],
-    "summary": "预案总体概述(200字以内)"
-}
+PLAN_GENERATOR_PROMPT = """你是防汛应急预案系统的预案生成智能体。
+请结合风险评估、模板和联系人信息，输出完整 JSON 预案。
 """
 
 
-@with_timeout(120)
-async def plan_generator_node(state: FloodResponseState) -> dict:
-    """预案生成节点"""
-    llm = get_creative_llm()
+def _risk_level_value(state: FloodResponseState) -> str:
+    risk = state.get("risk_assessment")
+    return risk.risk_level.value if risk else RiskLevel.MODERATE.value
 
+
+def _build_deterministic_plan(state: FloodResponseState) -> EmergencyPlan:
+    risk = state.get("risk_assessment")
+    risk_level = _risk_level_value(state)
+    template = json.loads(get_response_template.invoke({"risk_level": risk_level}))
+    contacts = json.loads(lookup_emergency_contacts.invoke({"risk_level": risk_level}))
+    plan_id = generate_plan_id.invoke({})
+
+    affected_area = (
+        ", ".join(risk.affected_stations[:3])
+        if risk and risk.affected_stations
+        else "重点防汛区域"
+    )
+
+    actions = [
+        EmergencyAction(
+            action_id=f"A-{index:03d}",
+            action_type=item.get("type", "general"),
+            description=item.get("desc", ""),
+            priority=int(item.get("priority", 3)),
+            responsible_dept=template.get("command_center", ""),
+            deadline_minutes=max(15, int(item.get("priority", 3)) * 15),
+        )
+        for index, item in enumerate(template.get("actions", []), start=1)
+    ]
+
+    resources = [
+        ResourceAllocation(
+            resource_type=item.get("type", "物资"),
+            resource_name=item.get("name", ""),
+            quantity=int(item.get("quantity", 0)),
+            source_location="市级防汛物资仓库",
+            target_location=affected_area,
+            eta_minutes=30 if risk_level in {"low", "moderate"} else 20,
+        )
+        for item in template.get("resources", [])
+    ]
+
+    top_risks = "；".join((risk.key_risks[:3] if risk else [])) or "根据当前监测数据动态调整"
+    notification_targets = [item.get("dept", "") for item in contacts if item.get("dept")]
+
+    return EmergencyPlan(
+        plan_id=plan_id,
+        plan_name=f"{template.get('response_level', 'III级响应')}防汛应急预案",
+        risk_level=risk.risk_level if risk else RiskLevel.MODERATE,
+        trigger_conditions=top_risks,
+        actions=actions,
+        resources=resources,
+        notification_targets=notification_targets,
+        status=PlanStatus.DRAFT,
+        summary=(
+            f"面向 {affected_area} 启动 {template.get('response_level', 'III级响应')}，"
+            f"由 {template.get('command_center', '防汛指挥部')} 统一调度。"
+        ),
+    )
+
+
+async def _build_llm_plan(state: FloodResponseState) -> tuple[EmergencyPlan, str]:
+    llm = get_creative_llm()
     agent = create_react_agent(
         model=llm,
         tools=plan_generation_tools,
@@ -80,13 +96,7 @@ async def plan_generator_node(state: FloodResponseState) -> dict:
             f"风险分数: {risk.risk_score}\n"
             f"受影响站点: {', '.join(risk.affected_stations)}\n"
             f"关键风险: {'; '.join(risk.key_risks)}\n"
-            f"趋势: {risk.trend}\n"
-            f"评估说明: {risk.reasoning[:500]}"
         )
-    else:
-        risk_info = "暂无风险评估数据，请基于一般性防汛要求生成预案"
-
-    data_summary = state.get("data_summary", "")
 
     prompt = f"""请根据以下风险评估结果生成应急预案：
 
@@ -94,56 +104,57 @@ async def plan_generator_node(state: FloodResponseState) -> dict:
 {risk_info}
 
 ## 数据概况
-{data_summary[:800]}
-
-请按步骤执行：
-1. 先调用 generate_plan_id 生成预案编号
-2. 调用 get_response_template 获取对应等级的标准模板
-3. 调用 lookup_emergency_contacts 获取联系人
-4. 基于上述信息，结合实际水情生成定制化预案
-
-输出完整的JSON格式预案。
+{state.get('data_summary', '')[:800]}
 """
 
-    result = await agent.ainvoke({
-        "messages": [HumanMessage(content=prompt)]
-    })
-
+    result = await agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
     final_message = result["messages"][-1].content if result["messages"] else ""
-    logger.info(f"预案生成完成: {final_message[:200]}")
-
-    # 解析预案
-    from app.utils.json_parser import extract_json
     plan_data = extract_json(final_message)
     if plan_data and isinstance(plan_data, dict):
         try:
-            actions = []
-            for i, a in enumerate(plan_data.get("actions", [])):
-                actions.append(EmergencyAction(
-                    action_id=a.get("action_id", f"A-{i+1:03d}"),
-                    action_type=a.get("action_type", "general"),
-                    description=a.get("description", ""),
-                    priority=a.get("priority", 3),
-                    responsible_dept=a.get("responsible_dept", ""),
-                    deadline_minutes=a.get("deadline_minutes"),
-                ))
-
+            actions = [
+                EmergencyAction(
+                    action_id=item.get("action_id", f"A-{index:03d}"),
+                    action_type=item.get("action_type", "general"),
+                    description=item.get("description", ""),
+                    priority=item.get("priority", 3),
+                    responsible_dept=item.get("responsible_dept", ""),
+                    deadline_minutes=item.get("deadline_minutes"),
+                )
+                for index, item in enumerate(plan_data.get("actions", []), start=1)
+            ]
             plan = EmergencyPlan(
                 plan_id=plan_data.get("plan_id", ""),
-                plan_name=plan_data.get("plan_name", "防洪应急预案"),
-                risk_level=risk.risk_level if risk else "moderate",
+                plan_name=plan_data.get("plan_name", "防汛应急预案"),
+                risk_level=risk.risk_level if risk else RiskLevel.MODERATE,
                 trigger_conditions=plan_data.get("trigger_conditions", ""),
                 actions=actions,
                 notification_targets=plan_data.get("notification_targets", []),
                 status=PlanStatus.DRAFT,
                 summary=plan_data.get("summary", ""),
             )
-        except (ValueError, KeyError) as e:
-            logger.warning(f"解析预案失败: {e}")
-            plan = EmergencyPlan(summary=final_message)
-    else:
-        plan = EmergencyPlan(summary=final_message)
+            return plan, final_message
+        except (ValueError, KeyError):
+            pass
 
+    return EmergencyPlan(summary=final_message), final_message
+
+
+@with_timeout(120)
+async def plan_generator_node(state: FloodResponseState) -> dict:
+    try:
+        plan = _build_deterministic_plan(state)
+        logger.info(f"Deterministic plan generated: {plan.plan_id}")
+        return {
+            "emergency_plan": plan,
+            "current_agent": "plan_generator",
+            "messages": [{"role": "plan_generator", "content": plan.summary}],
+        }
+    except Exception as exc:
+        logger.warning(f"Deterministic plan generation failed, falling back to LLM: {exc}")
+
+    plan, final_message = await _build_llm_plan(state)
+    logger.info(f"LLM plan generated: {final_message[:200]}")
     return {
         "emergency_plan": plan,
         "current_agent": "plan_generator",

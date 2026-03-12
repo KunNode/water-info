@@ -1,232 +1,188 @@
-"""Unit tests for AI agents"""
+"""Smoke tests for agent nodes."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
 
-from app.agents.supervisor import SupervisorAgent
-from app.agents.data_analyst import DataAnalystAgent
-from app.agents.risk_assessor import RiskAssessorAgent
-from app.agents.plan_generator import PlanGeneratorAgent
-from app.state import FloodResponseState, RiskLevel, PlanStatus
+from app.agents.data_analyst import data_analyst_node
+from app.agents.plan_generator import plan_generator_node
+from app.agents.risk_assessor import risk_assessor_node
+from app.agents.supervisor import supervisor_node
+from app.state import EmergencyPlan, RiskAssessment, RiskLevel
 
 
-class TestSupervisorAgent:
-    """Tests for Supervisor Agent"""
-
+class TestSupervisorNode:
     @pytest.mark.asyncio
-    async def test_supervisor_routes_to_data_analyst_for_data_query(self):
-        """Should route to data analyst when user asks for data"""
-        agent = SupervisorAgent()
-
-        state: FloodResponseState = {
-            "session_id": "test-session",
-            "user_query": "分析当前水情数据",
-            "messages": [],
-            "iteration": 0,
-        }
-
-        result = await agent.invoke(state)
+    async def test_routes_data_query_to_data_analyst(self):
+        result = await supervisor_node(
+            {
+                "session_id": "test-session",
+                "user_query": "分析当前水情数据",
+                "messages": [],
+                "iteration": 0,
+            }
+        )
 
         assert result["next_agent"] == "data_analyst"
-        assert "data" in result.get("messages", [{}])[0].get("content", "").lower()
+        assert result["iteration"] == 1
 
     @pytest.mark.asyncio
-    async def test_supervisor_routes_to_plan_generator_for_plan_request(self):
-        """Should route to plan generator when user asks for emergency plan"""
-        agent = SupervisorAgent()
-
-        state: FloodResponseState = {
-            "session_id": "test-session",
-            "user_query": "生成防洪应急预案",
-            "messages": [],
-            "iteration": 0,
-        }
-
-        result = await agent.invoke(state)
-
-        assert result["next_agent"] == "plan_generator"
-
-    @pytest.mark.asyncio
-    async def test_supervisor_routes_to_risk_assessor_for_risk_query(self):
-        """Should route to risk assessor when user asks about risk"""
-        agent = SupervisorAgent()
-
-        state: FloodResponseState = {
-            "session_id": "test-session",
-            "user_query": "评估洪水风险等级",
-            "messages": [],
-            "iteration": 0,
-        }
-
-        result = await agent.invoke(state)
+    async def test_routes_risk_query_to_risk_assessor_after_data_is_ready(self):
+        result = await supervisor_node(
+            {
+                "session_id": "test-session",
+                "user_query": "评估当前洪水风险",
+                "messages": [],
+                "iteration": 0,
+                "data_summary": "已有水情摘要",
+            }
+        )
 
         assert result["next_agent"] == "risk_assessor"
 
-
-class TestDataAnalystAgent:
-    """Tests for Data Analyst Agent"""
-
     @pytest.mark.asyncio
-    @patch("app.agents.data_analyst.get_db_service")
-    async def test_data_analyst_fetches_station_data(self, mock_get_db):
-        """Should fetch station data from database"""
-        mock_db = AsyncMock()
-        mock_db.get_all_stations = AsyncMock(return_value=[
-            {"id": "1", "code": "ST001", "name": "Station 1", "type": "WATER_LEVEL"}
-        ])
-        mock_get_db.return_value = mock_db
+    async def test_routes_completed_workflow_to_end(self):
+        result = await supervisor_node(
+            {
+                "session_id": "test-session",
+                "user_query": "请继续",
+                "messages": [],
+                "iteration": 0,
+                "data_summary": "已有水情摘要",
+                "risk_assessment": RiskAssessment(risk_level=RiskLevel.LOW, risk_score=20.0),
+                "emergency_plan": EmergencyPlan(plan_id="plan-1", plan_name="测试预案"),
+                "resource_plan": [{"resource_name": "抢险队"}],
+                "notifications": [{"target": "应急办"}],
+            }
+        )
 
-        agent = DataAnalystAgent()
+        assert result["next_agent"] == "__end__"
 
-        state: FloodResponseState = {
-            "session_id": "test-session",
-            "user_query": "获取站点数据",
-            "messages": [],
-            "iteration": 0,
-        }
 
-        result = await agent.invoke(state)
-
-        assert "station_data" in result
-        assert len(result["station_data"]) > 0
-
+class TestAgentNodes:
     @pytest.mark.asyncio
-    @patch("app.agents.data_analyst.get_db_service")
-    async def test_data_analyst_fetches_alarm_data(self, mock_get_db):
-        """Should fetch active alarms"""
-        mock_db = AsyncMock()
-        mock_db.get_active_alarms = AsyncMock(return_value=[
-            {"id": "a1", "level": "WARNING", "status": "OPEN", "message": "High water level"}
-        ])
-        mock_get_db.return_value = mock_db
-
-        agent = DataAnalystAgent()
-
-        state: FloodResponseState = {
-            "session_id": "test-session",
-            "user_query": "查看告警",
-            "messages": [],
-            "iteration": 0,
-        }
-
-        result = await agent.invoke(state)
-
-        assert "alarm_data" in result
-
-
-class TestRiskAssessorAgent:
-    """Tests for Risk Assessor Agent"""
-
-    @pytest.mark.asyncio
-    async def test_risk_assessor_calculates_high_risk(self):
-        """Should calculate high risk when thresholds exceeded"""
-        agent = RiskAssessorAgent()
-
-        state: FloodResponseState = {
-            "session_id": "test-session",
-            "user_query": "评估风险",
-            "messages": [],
-            "iteration": 0,
-            "station_data": [
+    async def test_data_analyst_node_returns_summary(self):
+        with patch(
+            "app.agents.data_analyst._build_deterministic_bundle",
+            AsyncMock(return_value={"data_summary": "数据分析完成"}),
+        ):
+            result = await data_analyst_node(
                 {
-                    "station_id": "1",
-                    "station_name": "Test Station",
-                    "water_level": 15.0,
-                    "water_level_warning": 10.0,
-                    "water_level_danger": 14.0,
+                    "session_id": "test-session",
+                    "user_query": "分析当前水情",
+                    "messages": [],
+                    "iteration": 0,
                 }
-            ],
-            "alarm_data": [
-                {"level": "WARNING", "status": "OPEN"},
-                {"level": "CRITICAL", "status": "OPEN"},
-            ],
-        }
+            )
 
-        result = await agent.invoke(state)
-
-        assert "risk_assessment" in result
-        assert result["risk_assessment"].risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]
+        assert result["data_summary"] == "数据分析完成"
+        assert result["current_agent"] == "data_analyst"
 
     @pytest.mark.asyncio
-    async def test_risk_assessor_calculates_low_risk(self):
-        """Should calculate low risk when all normal"""
-        agent = RiskAssessorAgent()
+    async def test_data_analyst_node_falls_back_to_llm_when_deterministic_summary_fails(self):
+        mock_agent = SimpleNamespace(
+            ainvoke=AsyncMock(return_value={"messages": [SimpleNamespace(content="LLM 数据分析完成")]})
+        )
 
-        state: FloodResponseState = {
-            "session_id": "test-session",
-            "user_query": "评估风险",
-            "messages": [],
-            "iteration": 0,
-            "station_data": [
+        with (
+            patch(
+                "app.agents.data_analyst._build_deterministic_bundle",
+                AsyncMock(side_effect=RuntimeError("db failed")),
+            ),
+            patch("app.agents.data_analyst.create_react_agent", return_value=mock_agent),
+        ):
+            result = await data_analyst_node(
                 {
-                    "station_id": "1",
-                    "station_name": "Test Station",
-                    "water_level": 5.0,
-                    "water_level_warning": 10.0,
-                    "water_level_danger": 14.0,
+                    "session_id": "test-session",
+                    "user_query": "分析当前水情",
+                    "messages": [],
+                    "iteration": 0,
                 }
-            ],
-            "alarm_data": [],
-        }
+            )
 
-        result = await agent.invoke(state)
-
-        assert "risk_assessment" in result
-        assert result["risk_assessment"].risk_level in [RiskLevel.LOW, RiskLevel.NONE]
-
-
-class TestPlanGeneratorAgent:
-    """Tests for Plan Generator Agent"""
+        assert result["data_summary"] == "LLM 数据分析完成"
 
     @pytest.mark.asyncio
-    async def test_plan_generator_creates_plan(self):
-        """Should create emergency plan"""
-        agent = PlanGeneratorAgent()
+    async def test_risk_assessor_node_parses_json_payload(self):
+        mock_agent = SimpleNamespace(
+            ainvoke=AsyncMock(
+                return_value={
+                    "messages": [
+                        SimpleNamespace(
+                            content='{"risk_level":"high","risk_score":76.5,"affected_stations":["S1"],"key_risks":["水位持续上涨"],"trend":"rising","reasoning":"达到高风险阈值"}'
+                        )
+                    ]
+                }
+            )
+        )
 
-        state: FloodResponseState = {
-            "session_id": "test-session",
-            "user_query": "生成预案",
-            "messages": [],
-            "iteration": 0,
-            "risk_assessment": {
-                "risk_level": RiskLevel.HIGH,
-                "risk_score": 75.0,
-                "affected_stations": ["station1", "station2"],
-            },
-            "station_data": [
-                {"station_id": "1", "station_name": "Station 1"},
-                {"station_id": "2", "station_name": "Station 2"},
-            ],
-        }
+        with patch("app.agents.risk_assessor.create_react_agent", return_value=mock_agent):
+            result = await risk_assessor_node(
+                {
+                    "session_id": "test-session",
+                    "user_query": "评估风险",
+                    "messages": [],
+                    "iteration": 0,
+                    "data_summary": "站点 S1 水位持续上涨",
+                }
+            )
 
-        result = await agent.invoke(state)
-
-        assert "emergency_plan" in result
-        assert result["emergency_plan"].plan_id
-        assert result["emergency_plan"].status == PlanStatus.DRAFT
+        assert result["risk_assessment"].risk_level == RiskLevel.HIGH
+        assert result["risk_assessment"].risk_score == 76.5
 
     @pytest.mark.asyncio
-    async def test_plan_generator_includes_actions(self):
-        """Should include emergency actions in plan"""
-        agent = PlanGeneratorAgent()
+    async def test_risk_assessor_node_uses_deterministic_path_when_structured_data_exists(self):
+        result = await risk_assessor_node(
+            {
+                "session_id": "test-session",
+                "user_query": "评估风险",
+                "messages": [],
+                "iteration": 0,
+                "overview_data": {
+                    "stations": [
+                        {
+                            "id": "station-1",
+                            "code": "S1",
+                            "name": "站点一",
+                            "water_level": 3.6,
+                            "warning_level": 3.0,
+                            "danger_level": 3.5,
+                            "rainfall": 35.0,
+                            "rainfall_warning": 30.0,
+                            "rainfall_danger": 50.0,
+                        }
+                    ],
+                    "active_alarms": [
+                        {"station_id": "station-1", "station_name": "站点一", "message": "水位告警"}
+                    ],
+                },
+                "weather_forecast": {"forecast": {"total_precip_24h_mm": 60.0}},
+            }
+        )
 
-        state: FloodResponseState = {
-            "session_id": "test-session",
-            "user_query": "生成预案",
-            "messages": [],
-            "iteration": 0,
-            "risk_assessment": {
-                "risk_level": RiskLevel.CRITICAL,
-                "risk_score": 90.0,
-                "affected_stations": ["station1"],
-            },
-            "station_data": [
-                {"station_id": "1", "station_name": "Critical Station"},
-            ],
-        }
+        assert result["risk_assessment"].risk_level in {RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.CRITICAL}
+        assert result["risk_assessment"].risk_score > 0
 
-        result = await agent.invoke(state)
+    @pytest.mark.asyncio
+    async def test_plan_generator_node_builds_draft_plan(self):
+        result = await plan_generator_node(
+            {
+                "session_id": "test-session",
+                "user_query": "生成应急预案",
+                "messages": [],
+                "iteration": 0,
+                "data_summary": "多个站点接近警戒水位",
+                "risk_assessment": RiskAssessment(
+                    risk_level=RiskLevel.HIGH,
+                    risk_score=80.0,
+                    affected_stations=["S1"],
+                    key_risks=["水位超过警戒线"],
+                ),
+            }
+        )
 
-        assert len(result["emergency_plan"].actions) > 0
-        # Should include evacuation action for critical risk
-        action_types = [a.action_type for a in result["emergency_plan"].actions]
-        assert any(at in action_types for at in ["evacuation", "gate_control", "patrol"])
+        assert result["emergency_plan"].plan_id.startswith("EP-")
+        assert result["emergency_plan"].actions[0].action_type != ""

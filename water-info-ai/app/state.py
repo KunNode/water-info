@@ -163,6 +163,7 @@ class FloodResponseState(TypedDict, total=False):
 
     # ---- 数据采集 ----
     station_data: list[StationData]
+    overview_data: dict[str, Any]
     alarm_data: list[dict[str, Any]]
     threshold_rules: list[dict[str, Any]]
     weather_forecast: dict[str, Any]
