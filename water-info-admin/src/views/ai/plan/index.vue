@@ -40,7 +40,14 @@
     <el-card shadow="never" class="table-card">
       <el-table :data="tableData" v-loading="loading" border stripe style="width: 100%">
         <el-table-column type="index" label="序号" width="60" align="center" />
-        <el-table-column prop="summary" label="摘要" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="summary" label="摘要" min-width="280">
+          <template #default="{ row }">
+            <div class="summary-preview">
+              <div class="summary-preview-title">{{ getSummaryTitle(row.summary) }}</div>
+              <div class="summary-preview-text">{{ getSummaryExcerpt(row.summary) }}</div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="riskLevel" label="风险等级" width="120" align="center">
           <template #default="{ row }">
             <el-tag :type="getRiskTagType(row.riskLevel)" effect="dark">
@@ -48,11 +55,19 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column prop="status" label="状态" width="130" align="center">
           <template #default="{ row }">
-            <el-tag :type="getStatusTagType(row.status)">
-              {{ getStatusLabel(row.status) }}
-            </el-tag>
+            <el-select
+              v-model="row.status"
+              size="small"
+              style="width: 110px"
+              @change="(val: string) => handleStatusChange(row, val)"
+            >
+              <el-option label="草稿" value="draft" />
+              <el-option label="已批准" value="approved" />
+              <el-option label="执行中" value="executing" />
+              <el-option label="已完成" value="completed" />
+            </el-select>
           </template>
         </el-table-column>
         <el-table-column label="行动数" width="90" align="center">
@@ -108,14 +123,33 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-tag :type="getStatusTagType(currentPlan.status)" size="small">
-              {{ getStatusLabel(currentPlan.status) }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="摘要" :span="2">
-            {{ currentPlan.summary }}
+            <el-select
+              v-model="currentPlan.status"
+              size="small"
+              style="width: 120px"
+              @change="(val: string) => handleStatusChange(currentPlan!, val)"
+            >
+              <el-option label="草稿" value="draft" />
+              <el-option label="已批准" value="approved" />
+              <el-option label="执行中" value="executing" />
+              <el-option label="已完成" value="completed" />
+            </el-select>
           </el-descriptions-item>
         </el-descriptions>
+
+        <section class="summary-panel mb-4">
+          <div class="summary-panel-header">
+            <div>
+              <div class="summary-panel-eyebrow">AI 研判摘要</div>
+              <div class="summary-panel-title">{{ getSummaryTitle(currentPlan.summary) }}</div>
+            </div>
+            <el-tag :type="getRiskTagType(currentPlan.riskLevel)" effect="plain" round>
+              {{ getRiskLabel(currentPlan.riskLevel) }}
+            </el-tag>
+          </div>
+          <div class="summary-panel-divider" />
+          <div class="summary-markdown markdown-body" v-html="renderPlanSummary(currentPlan.summary)" />
+        </section>
 
         <div class="section-title">应急行动列表 ({{ currentPlan.actions?.length || 0 }})</div>
         <el-table :data="currentPlan.actions || []" border size="small" class="mb-4">
@@ -166,7 +200,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import { Search, Document, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getPlans, getPlan, executePlan } from '@/api/flood'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+import { getPlans, getPlan, executePlan, updatePlanStatus } from '@/api/flood'
 import type { FloodPlan } from '@/types'
 
 const loading = ref(false)
@@ -267,6 +303,19 @@ const openDetail = async (row: FloodPlan) => {
   }
 }
 
+const handleStatusChange = async (row: FloodPlan, newStatus: string) => {
+  const prevStatus = row.status
+  try {
+    await updatePlanStatus(row.id, newStatus)
+    ElMessage.success('状态已更新')
+    if (currentPlan.value?.id === row.id) {
+      currentPlan.value.status = newStatus as FloodPlan['status']
+    }
+  } catch {
+    row.status = prevStatus
+  }
+}
+
 const handleExecute = (row: FloodPlan) => {
   ElMessageBox.confirm(`确定要执行预案吗？该操作将分发行动任务并发送通知。`, '执行确认', {
     confirmButtonText: '确定执行',
@@ -307,6 +356,58 @@ const executeCurrentPlan = async () => {
 }
 
 // Helpers
+const stripMarkdown = (text = '') => {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/!\[.*?\]\(.*?\)/g, ' ')
+    .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+    .replace(/^>\s?/gm, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/(\*\*|__|\*|_|~~)/g, '')
+    .replace(/\|/g, ' ')
+    .replace(/\n+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const getSummaryTitle = (summary = '') => {
+  const heading = summary.match(/^#\s+(.+)$/m)?.[1]?.trim()
+  if (heading) return heading
+
+  const plain = stripMarkdown(summary)
+  if (!plain) return '暂无摘要'
+  return plain.length > 26 ? `${plain.slice(0, 26)}...` : plain
+}
+
+const getSummaryExcerpt = (summary = '') => {
+  const plain = stripMarkdown(summary)
+  if (!plain) return '暂无摘要内容'
+
+  const title = getSummaryTitle(summary)
+  const normalized = plain.startsWith(title) ? plain.slice(title.length).trim() : plain
+  const excerpt = normalized || plain
+  return excerpt.length > 96 ? `${excerpt.slice(0, 96)}...` : excerpt
+}
+
+const renderPlanSummary = (summary = '') => {
+  if (!summary) return '<p>暂无摘要内容</p>'
+
+  const raw = marked.parse(summary, { async: false }) as string
+  return DOMPurify.sanitize(raw, {
+    ALLOWED_TAGS: [
+      'p', 'br', 'strong', 'em', 'code', 'pre', 'blockquote',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'ul', 'ol', 'li',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'hr', 'a', 'span', 'div',
+    ],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
+  })
+}
+
 const formatTime = (timeStr?: string) => {
   if (!timeStr) return '-'
   return new Date(timeStr).toLocaleString()
@@ -334,25 +435,6 @@ const getRiskTagType = (level: string): any => {
   return map[level] || 'info'
 }
 
-const getStatusLabel = (status: string) => {
-  const map: Record<string, string> = {
-    draft: '草稿',
-    approved: '已批准',
-    executing: '执行中',
-    completed: '已完成'
-  }
-  return map[status] || status || '未知'
-}
-
-const getStatusTagType = (status: string): any => {
-  const map: Record<string, string> = {
-    draft: 'info',
-    approved: 'primary',
-    executing: 'warning',
-    completed: 'success'
-  }
-  return map[status] || 'info'
-}
 </script>
 
 <style scoped>
@@ -388,8 +470,79 @@ const getStatusTagType = (status: string): any => {
   margin-top: 16px;
 }
 
+.summary-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.summary-preview-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summary-preview-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #6b7280;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .plan-detail {
   padding: 0 16px;
+}
+
+.summary-panel {
+  padding: 18px 20px;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(64, 158, 255, 0.12), transparent 38%),
+    linear-gradient(135deg, #f8fbff 0%, #f3f7fd 52%, #eef5ff 100%);
+  border: 1px solid rgba(64, 158, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.summary-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.summary-panel-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #409eff;
+  margin-bottom: 6px;
+}
+
+.summary-panel-title {
+  font-size: 22px;
+  line-height: 1.35;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.summary-panel-divider {
+  height: 1px;
+  margin: 14px 0 18px;
+  background: linear-gradient(90deg, rgba(64, 158, 255, 0.28), rgba(64, 158, 255, 0.04));
+}
+
+.summary-markdown {
+  font-size: 14px;
+  line-height: 1.85;
+  color: #374151;
 }
 
 .mb-4 {
@@ -414,5 +567,126 @@ const getStatusTagType = (status: string): any => {
   width: 4px;
   background-color: #409EFF;
   border-radius: 2px;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin: 18px 0 10px;
+  line-height: 1.4;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.markdown-body :deep(h1) {
+  font-size: 24px;
+  margin-top: 0;
+}
+
+.markdown-body :deep(h2) {
+  font-size: 19px;
+}
+
+.markdown-body :deep(h3) {
+  font-size: 16px;
+}
+
+.markdown-body :deep(h4) {
+  font-size: 15px;
+}
+
+.markdown-body :deep(p) {
+  margin: 8px 0;
+  word-break: break-word;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  padding-left: 22px;
+  margin: 10px 0;
+}
+
+.markdown-body :deep(li) {
+  margin: 6px 0;
+}
+
+.markdown-body :deep(strong) {
+  color: #111827;
+  font-weight: 700;
+}
+
+.markdown-body :deep(em) {
+  color: #2563eb;
+  font-style: normal;
+}
+
+.markdown-body :deep(code) {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  font-size: 12px;
+}
+
+.markdown-body :deep(pre) {
+  margin: 12px 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e5eefc;
+}
+
+.markdown-body :deep(pre code) {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border-left: 4px solid #f59e0b;
+  border-radius: 0 12px 12px 0;
+  background: rgba(245, 158, 11, 0.08);
+  color: #7c5a10;
+}
+
+.markdown-body :deep(hr) {
+  border: none;
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+  margin: 16px 0;
+}
+
+.markdown-body :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  padding: 10px 12px;
+  border: 1px solid #dbe7f5;
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .summary-panel-header {
+    flex-direction: column;
+  }
+
+  .summary-panel-title {
+    font-size: 18px;
+  }
 }
 </style>

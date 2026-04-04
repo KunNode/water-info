@@ -24,6 +24,93 @@ export function useSSE() {
     onEvent = cb
   }
 
+  function pushPlainText(text: string) {
+    if (!text) return
+    chunks.value.push(text)
+    fullText.value += text
+    if (chunks.value.length > MAX_CHUNKS) {
+      chunks.value.shift()
+    }
+  }
+
+  function dispatchStructuredEvent(payload: string): boolean {
+    let normalized = payload.trim()
+    if (!normalized || normalized === '[DONE]') return true
+
+    // Some proxy layers may forward already-prefixed SSE payloads again.
+    while (normalized.startsWith('data:')) {
+      normalized = normalized.slice(5).trim()
+    }
+    if (!normalized || normalized === '[DONE]') return true
+
+    const emitIfStructured = (value: unknown) => {
+      if (value && typeof value === 'object' && 'type' in value) {
+        const event = value as SSEEventType
+        structuredEvents.value.push(event)
+        onEvent?.(event)
+        return true
+      }
+      return false
+    }
+
+    try {
+      const parsed = JSON.parse(normalized)
+      if (typeof parsed === 'string') {
+        normalized = parsed.trim()
+        if (!normalized || normalized === '[DONE]') return true
+      } else if (emitIfStructured(parsed)) {
+        return true
+      } else {
+        return false
+      }
+    } catch {
+      // Fall through and let the caller decide whether this is plain text
+      // or an incomplete fragment that needs more bytes.
+    }
+
+    try {
+      return emitIfStructured(JSON.parse(normalized))
+    } catch {
+      return false
+    }
+  }
+
+  function flushChunk(chunk: string) {
+    const trimmed = chunk.trim()
+    if (!trimmed) return
+
+    const dataLines = chunk
+      .split(/\r?\n/)
+      .map(line => line.trimEnd())
+      .filter(line => line.startsWith('data:'))
+
+    if (dataLines.length > 0) {
+      const payload = dataLines
+        .map(line => line.slice(5).trim())
+        .join('\n')
+
+      if (!dispatchStructuredEvent(payload)) {
+        pushPlainText(payload)
+      }
+      return
+    }
+
+    if (!dispatchStructuredEvent(trimmed)) {
+      pushPlainText(chunk)
+    }
+  }
+
+  function looksLikeStructuredFragment(buffer: string) {
+    const trimmed = buffer.trimStart()
+    return (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('event:') ||
+      trimmed.startsWith('{') ||
+      trimmed.startsWith('[') ||
+      trimmed.startsWith('"')
+    )
+  }
+
   async function start(url: string, body: any) {
     chunks.value = []
     fullText.value = ''
@@ -54,55 +141,33 @@ export function useSSE() {
 
       if (!reader) throw new Error('No readable stream')
 
-      // Buffer incomplete lines across network chunks so we never attempt to
-      // parse a JSON payload that was split at a chunk boundary.
-      let lineBuffer = ''
-
-      const processLine = (line: string) => {
-        if (!line.startsWith('data: ')) return
-
-        const data = line.slice(6).trim()
-        if (data === '[DONE]' || !data) return
-
-        if (data.startsWith('{')) {
-          try {
-            const parsed = JSON.parse(data) as SSEEventType
-            if (parsed.type) {
-              structuredEvents.value.push(parsed)
-              onEvent?.(parsed)
-              return
-            }
-          } catch {
-            // Malformed JSON — discard silently rather than leaking raw text
-            return
-          }
-        }
-
-        // Genuine plain-text chunk (non-JSON stream)
-        chunks.value.push(data)
-        fullText.value += data
-        if (chunks.value.length > MAX_CHUNKS) {
-          chunks.value.shift()
-        }
-      }
+      // Keep incomplete fragments between reads so structured SSE blocks can
+      // span network chunks, while still allowing raw text streams to render
+      // incrementally even when the backend does not emit newline delimiters.
+      let buffer = ''
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        lineBuffer += decoder.decode(value, { stream: true })
+        buffer += decoder.decode(value, { stream: true })
 
-        // Split on newline but keep the last (potentially incomplete) fragment
-        const lines = lineBuffer.split('\n')
-        lineBuffer = lines.pop() ?? ''
+        let blockEnd = buffer.search(/\r?\n\r?\n/)
+        while (blockEnd >= 0) {
+          const block = buffer.slice(0, blockEnd)
+          flushChunk(block)
+          buffer = buffer.slice(blockEnd).replace(/^\r?\n\r?\n/, '')
+          blockEnd = buffer.search(/\r?\n\r?\n/)
+        }
 
-        for (const line of lines) {
-          processLine(line)
+        if (buffer && !looksLikeStructuredFragment(buffer)) {
+          pushPlainText(buffer)
+          buffer = ''
         }
       }
 
-      // Flush any remaining buffered content after stream closes
-      if (lineBuffer) processLine(lineBuffer)
+      // Flush any remaining buffered content after stream closes.
+      if (buffer) flushChunk(buffer)
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         error.value = err.message

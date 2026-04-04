@@ -33,6 +33,16 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
         su-exec postgres createdb -O "${POSTGRES_USER}" "${POSTGRES_DB}"
     fi
 
+    # Run init SQL scripts from /docker-entrypoint-initdb.d/
+    if [ -d /docker-entrypoint-initdb.d ]; then
+        for f in /docker-entrypoint-initdb.d/*.sql; do
+            if [ -f "$f" ]; then
+                echo "Running init script: $f"
+                su-exec postgres psql --dbname "${POSTGRES_DB}" -f "$f" || echo "Warning: $f failed, continuing..."
+            fi
+        done
+    fi
+
     su-exec postgres pg_ctl -D "$PGDATA" -m fast -w stop
 fi
 

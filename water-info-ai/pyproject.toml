@@ -1,7 +1,7 @@
 [project]
 name = "water-info-ai"
 version = "1.0.0"
-description = "轻量防洪应急AI服务 — 顺序流水线，无 LangGraph/LangChain 依赖"
+description = "基于 LangGraph 的防洪应急 AI 服务"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -11,6 +11,7 @@ dependencies = [
     "pydantic>=2.0",
     "asyncpg>=0.29.0",
     "python-dotenv>=1.0.0",
+    "langgraph>=0.2.0",
 ]
 
 [project.optional-dependencies]

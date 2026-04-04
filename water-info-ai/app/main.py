@@ -1,10 +1,10 @@
-"""FastAPI application entry point."""
+"""FastAPI application entry point backed by LangGraph."""
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
+from dataclasses import asdict
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -22,8 +22,10 @@ from app.models import (
     PlanExecuteResponse,
     SessionResponse,
 )
-from app.pipeline import FloodPipeline
-from app.platform_client import get_platform_client
+from app.graph import flood_response_graph
+from app.services import session as session_service
+from app.services.platform_client import get_platform_client
+from app.state import RiskAssessment, to_plain_data
 
 settings = get_settings()
 logging.basicConfig(
@@ -36,28 +38,99 @@ logger = logging.getLogger(__name__)
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-async def _persist_result(session_id: str, pipeline: FloodPipeline) -> None:
-    r = pipeline.result
-    if not r.plan_id:
+async def _persist_result(session_id: str, graph_state: dict) -> None:
+    plan = graph_state.get("emergency_plan")
+    if not plan:
         return
     db = get_db_service()
     try:
         await db.save_emergency_plan(
-            plan_id=r.plan_id,
-            plan_name=r.plan_name or "防汛应急预案",
-            risk_level=r.risk_level or "none",
-            trigger_conditions="",
-            status="draft",
+            plan_id=plan.plan_id,
+            plan_name=plan.plan_name or "防汛应急预案",
+            risk_level=_risk_level_value(graph_state.get("risk_assessment")),
+            trigger_conditions=plan.trigger_conditions,
+            status=plan.status or "draft",
             session_id=session_id,
-            summary=r.response[:2000],
-            actions=r.actions,
+            summary=(graph_state.get("final_response") or plan.summary or "")[:2000],
+            actions=[asdict(action) for action in plan.actions],
         )
-        if r.resources:
-            await db.save_resource_allocations(r.plan_id, r.resources)
-        if r.notifications:
-            await db.save_notifications(r.plan_id, r.notifications)
+        resources = [asdict(resource) for resource in graph_state.get("resource_plan", [])]
+        notifications = [asdict(record) for record in graph_state.get("notifications", [])]
+        if resources:
+            await db.save_resource_allocations(plan.plan_id, resources)
+        if notifications:
+            await db.save_notifications(plan.plan_id, notifications)
     except Exception as exc:
         logger.warning("[%s] persist failed (non-fatal): %s", session_id, exc)
+
+
+def _risk_level_value(assessment: RiskAssessment | None) -> str:
+    if not assessment:
+        return "none"
+    return assessment.risk_level.value
+
+
+def _build_initial_state(session_id: str, query: str, history: list[dict]) -> dict:
+    return {
+        "session_id": session_id,
+        "user_query": query,
+        "messages": history + [{"role": "user", "content": query}],
+        "iteration": 0,
+    }
+
+
+def _event_line(payload: dict) -> str:
+    import json
+
+    return f"data: {json.dumps(to_plain_data(payload), ensure_ascii=False)}\n\n"
+
+
+def _message_content(update: dict) -> str | None:
+    messages = update.get("messages") or []
+    if not messages:
+        return None
+    last = messages[-1]
+    if isinstance(last, dict):
+        return last.get("content")
+    return getattr(last, "content", None)
+
+
+def _build_stream_events(agent: str, update: dict) -> list[dict]:
+    events: list[dict] = [{"type": "agent_update", "agent": agent, "status": "active"}]
+
+    content = _message_content(update)
+    if content:
+        events.append({"type": "agent_message", "agent": agent, "content": content})
+
+    if update.get("risk_assessment"):
+        assessment = update["risk_assessment"]
+        events.append({
+            "type": "risk_update",
+            "level": assessment.risk_level.value,
+            "details": assessment.key_risks,
+        })
+
+    if update.get("emergency_plan"):
+        plan = update["emergency_plan"]
+        events.append({
+            "type": "plan_update",
+            "name": plan.plan_name,
+            "status": plan.status,
+            "total": len(plan.actions),
+            "completed": sum(1 for action in plan.actions if action.status == "completed"),
+            "failed": sum(1 for action in plan.actions if action.status == "failed"),
+        })
+
+    if update.get("final_response"):
+        events.append({
+            "type": "agent_message",
+            "agent": "final_response",
+            "content": update["final_response"],
+            "response": update["final_response"],
+        })
+
+    events.append({"type": "agent_update", "agent": agent, "status": "done"})
+    return events
 
 
 async def _do_execute_plan(plan_id: str, actions: list[dict]) -> None:
@@ -90,8 +163,9 @@ async def _do_execute_plan(plan_id: str, actions: list[dict]) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("启动水务AI轻量应急服务")
+    logger.info("启动水务AI多 Agent 应急服务")
     db = get_db_service()
+    sessions = session_service.get_session_service()
     try:
         await db._get_pool()
         await db.ensure_plan_tables()
@@ -100,17 +174,18 @@ async def lifespan(app: FastAPI):
         logger.warning("数据库预热失败（服务仍可启动）: %s", exc)
     yield
     await db.close()
+    await sessions.close()
     await get_platform_client().close()
-    logger.info("水务AI轻量应急服务已关闭")
+    logger.info("水务AI多 Agent 应急服务已关闭")
 
 
 # ── app ───────────────────────────────────────────────────────────────────────
 
 
 app = FastAPI(
-    title="水务AI防洪应急服务（轻量版）",
-    description="基于顺序流水线的防洪应急预案生成服务，无 LangGraph/LangChain 依赖",
-    version="1.0.0",
+    title="水务AI防洪应急服务（多 Agent）",
+    description="基于 LangGraph 的多 Agent 防洪应急与指挥辅助服务",
+    version="0.1.0",
     lifespan=lifespan,
 )
 
@@ -135,44 +210,61 @@ async def health_check() -> HealthResponse:
 async def flood_query(request: FloodQueryRequest) -> FloodQueryResponse:
     session_id = request.session_id or str(uuid.uuid4())
     logger.info("[%s] flood query: %s", session_id, request.query[:80])
+    sessions = session_service.get_session_service()
+    history = await sessions.get_history(session_id)
+    await sessions.save_turn(session_id, "user", request.query)
 
-    pipeline = FloodPipeline(request.query, session_id)
     try:
-        # Consume the full pipeline (non-streaming)
-        async for _ in pipeline.run():
-            pass
+        final_state = await flood_response_graph.ainvoke(_build_initial_state(session_id, request.query, history))
     except Exception as exc:
-        logger.exception("[%s] pipeline failed: %s", session_id, exc)
+        logger.exception("[%s] graph failed: %s", session_id, exc)
         raise HTTPException(status_code=500, detail=f"处理失败: {exc}") from exc
 
-    await _persist_result(session_id, pipeline)
-    r = pipeline.result
+    await sessions.save_turn(session_id, "assistant", final_state.get("final_response") or "处理完成")
+    await _persist_result(session_id, final_state)
+    assessment = final_state.get("risk_assessment")
+    plan = final_state.get("emergency_plan")
+    resources = final_state.get("resource_plan", [])
+    notifications = final_state.get("notifications", [])
     return FloodQueryResponse(
         session_id=session_id,
-        response=r.response or "处理完成",
-        risk_level=r.risk_level,
-        risk_score=r.risk_score,
-        plan_id=r.plan_id,
-        plan_name=r.plan_name,
-        actions_count=len(r.actions),
-        resources_count=len(r.resources),
-        notifications_count=len(r.notifications),
+        response=final_state.get("final_response") or "处理完成",
+        risk_level=_risk_level_value(assessment),
+        risk_score=assessment.risk_score if assessment else None,
+        plan_id=plan.plan_id if plan else None,
+        plan_name=plan.plan_name if plan else None,
+        actions_count=len(plan.actions) if plan else 0,
+        resources_count=len(resources),
+        notifications_count=len(notifications),
     )
 
 
 @app.post("/api/v1/flood/query/stream")
 async def flood_query_stream(request: FloodQueryRequest):
     session_id = request.session_id or str(uuid.uuid4())
-    pipeline = FloodPipeline(request.query, session_id)
+    sessions = session_service.get_session_service()
 
     async def event_stream():
+        history = await sessions.get_history(session_id)
+        await sessions.save_turn(session_id, "user", request.query)
+        final_state = None
         try:
-            async for chunk in pipeline.run():
-                yield chunk
-            await _persist_result(session_id, pipeline)
+            yield _event_line({"type": "session_init", "sessionId": session_id})
+            async for update in flood_response_graph.astream(
+                _build_initial_state(session_id, request.query, history),
+                stream_mode="updates",
+            ):
+                node_name, node_update = next(iter(update.items()))
+                final_state = {**(final_state or {}), **node_update}
+                for event in _build_stream_events(node_name, node_update):
+                    yield _event_line(event)
+            if final_state:
+                await sessions.save_turn(session_id, "assistant", final_state.get("final_response") or "处理完成")
+                await _persist_result(session_id, final_state)
+            yield _event_line({"type": "agent_update", "agent": "__done__", "status": "done"})
         except Exception as exc:
             logger.exception("[%s] stream failed: %s", session_id, exc)
-            yield f"data: {json.dumps({'type': 'agent_update', 'agent': '__error__', 'status': 'failed', 'error': str(exc)}, ensure_ascii=False)}\n\n"
+            yield _event_line({"type": "agent_update", "agent": "__error__", "status": "failed", "error": str(exc)})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -247,6 +339,19 @@ async def execute_plan(plan_id: str, background_tasks: BackgroundTasks, request:
     except Exception as exc:
         logger.exception("execute plan %s: %s", plan_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.patch("/api/v1/plans/{plan_id}/status")
+async def update_plan_status_endpoint(plan_id: str, body: dict):
+    valid_statuses = {"draft", "approved", "executing", "completed"}
+    status = body.get("status", "")
+    if status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"无效状态，有效值: {sorted(valid_statuses)}")
+    db = get_db_service()
+    if not await db.get_emergency_plan(plan_id):
+        raise HTTPException(status_code=404, detail="预案不存在")
+    await db.update_plan_status(plan_id, status)
+    return {"plan_id": plan_id, "status": status}
 
 
 @app.delete("/api/v1/plans/{plan_id}")

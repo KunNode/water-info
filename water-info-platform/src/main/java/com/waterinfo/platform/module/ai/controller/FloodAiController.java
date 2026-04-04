@@ -46,14 +46,9 @@ public class FloodAiController {
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
     public Flux<String> queryFloodStream(@Valid @RequestBody FloodQueryRequest request) {
         log.info("Flood stream query request: {}", request.getQuery());
-        return aiServiceClient.queryFloodStream(request)
-                .map(data -> {
-                    // Ensure proper SSE format
-                    if (data.startsWith("data: ")) {
-                        return data;
-                    }
-                    return "data: " + data;
-                });
+        // Spring WebFlux automatically prepends "data:" when serialising Flux<String>
+        // as text/event-stream — do NOT add the prefix here to avoid doubling it.
+        return aiServiceClient.queryFloodStream(request);
     }
 
     @Operation(summary = "获取应急预案列表", description = "分页获取AI生成的应急预案列表")

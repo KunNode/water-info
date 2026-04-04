@@ -1,4 +1,4 @@
-import { get, post, withAuth } from './request'
+import { get, post, patch, withAuth } from './request'
 import type { FloodPlan, FloodSession, PageResponse, PlanExecuteResult } from '@/types'
 
 export function queryFlood(data: { query: string; sessionId?: string }) {
@@ -15,6 +15,10 @@ export function getPlan(id: string) {
 
 export function executePlan(id: string) {
   return post<PlanExecuteResult>(`/plans/${id}/execute`, undefined, withAuth())
+}
+
+export function updatePlanStatus(id: string, status: string) {
+  return patch<{ plan_id: string; status: string }>(`/plans/${id}/status`, { status }, withAuth())
 }
 
 export function getSession(id: string) {

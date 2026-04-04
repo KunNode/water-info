@@ -8,10 +8,11 @@ ENV PATH="/usr/lib/postgresql16/bin:/usr/libexec/postgresql16:$PATH" \
     PGDATA=/var/lib/postgresql/data
 
 COPY docker/postgres/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY docs/sql/seed_ai_demo_data.sql /docker-entrypoint-initdb.d/
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh && \
-    mkdir -p /var/lib/postgresql/data /run/postgresql && \
-    chown -R postgres:postgres /var/lib/postgresql /run/postgresql
+    mkdir -p /var/lib/postgresql/data /run/postgresql /docker-entrypoint-initdb.d && \
+    chown -R postgres:postgres /var/lib/postgresql /run/postgresql /docker-entrypoint-initdb.d
 
 VOLUME ["/var/lib/postgresql/data"]
 EXPOSE 5432

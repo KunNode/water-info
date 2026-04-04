@@ -31,7 +31,7 @@ class FloodQueryResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "water-info-ai"
-    version: str = "1.0.0"
+    version: str = "0.1.0"
 
 
 class PlanDetailResponse(BaseModel):

@@ -61,6 +61,11 @@ import type { ChatMessageItem } from './components/ChatMessage.vue'
 
 const router = useRouter()
 const { fullText, loading, error, start, stop, reset, onStructuredEvent } = useSSE()
+const COMMAND_CACHE_KEY = 'water_ai_command_page_cache_v1'
+
+type PersistedChatMessageItem = Omit<ChatMessageItem, 'timestamp'> & {
+  timestamp: string
+}
 
 // ── Conversation state ──────────────────────────────────────────
 const messages = ref<ChatMessageItem[]>([])
@@ -71,14 +76,131 @@ const startTime = ref('')
 const queryCount = ref(0)
 
 // ── Agent timeline ──────────────────────────────────────────────
-const agentStatus = reactive<Record<string, string>>({
-  supervisor: 'pending',
-  data_analyst: 'pending',
-  risk_assessor: 'pending',
-  plan_generator: 'pending',
-  resource_dispatcher: 'pending',
-  notification: 'pending',
-})
+function createInitialAgentStatus() {
+  return {
+    supervisor: 'pending',
+    data_analyst: 'pending',
+    risk_assessor: 'pending',
+    plan_generator: 'pending',
+    resource_dispatcher: 'pending',
+    notification: 'pending',
+  }
+}
+
+const agentStatus = reactive<Record<string, string>>(createInitialAgentStatus())
+
+interface PlanInfo {
+  name: string
+  status: string
+  total: number
+  completed: number
+  failed: number
+}
+
+interface CommandPageCache {
+  version: 1
+  savedAt: string
+  sessionId: string
+  startTime: string
+  queryCount: number
+  riskLevel: string
+  planInfo: PlanInfo | null
+  agentStatus: Record<string, string>
+  messages: PersistedChatMessageItem[]
+}
+
+function applyAgentStatus(nextStatus?: Record<string, string>) {
+  Object.keys(agentStatus).forEach(key => {
+    const next = nextStatus?.[key]
+    agentStatus[key] = next ?? 'pending'
+  })
+}
+
+function getStableAgentStatusSnapshot() {
+  return Object.fromEntries(
+    Object.entries(agentStatus).map(([key, value]) => [key, value === 'active' ? 'done' : value])
+  )
+}
+
+function getStableMessagesSnapshot() {
+  return messages.value
+    .filter(message => message.role !== 'thinking')
+    .map<PersistedChatMessageItem>(message => ({
+      ...message,
+      agentStatus: message.role === 'agent' ? 'done' : message.agentStatus,
+      timestamp: message.timestamp.toISOString(),
+    }))
+}
+
+function persistPageCache() {
+  try {
+    const snapshot: CommandPageCache = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      sessionId: sessionId.value,
+      startTime: startTime.value,
+      queryCount: queryCount.value,
+      riskLevel: riskLevel.value,
+      planInfo: planInfo.value,
+      agentStatus: getStableAgentStatusSnapshot(),
+      messages: getStableMessagesSnapshot(),
+    }
+    localStorage.setItem(COMMAND_CACHE_KEY, JSON.stringify(snapshot))
+  } catch (err) {
+    console.warn('[AI Command] Failed to persist page cache', err)
+  }
+}
+
+function restorePageCache() {
+  const raw = localStorage.getItem(COMMAND_CACHE_KEY)
+  if (!raw) return
+
+  try {
+    const snapshot = JSON.parse(raw) as Partial<CommandPageCache>
+
+    messages.value = Array.isArray(snapshot.messages)
+      ? snapshot.messages
+          .filter(message => message && message.role !== 'thinking')
+          .map(message => ({
+            ...message,
+            agentStatus: message.role === 'agent' ? 'done' : message.agentStatus,
+            timestamp: new Date(message.timestamp),
+          }))
+          .filter(message => !Number.isNaN(message.timestamp.getTime()))
+      : []
+
+    sessionId.value = typeof snapshot.sessionId === 'string' ? snapshot.sessionId : ''
+    startTime.value = typeof snapshot.startTime === 'string' ? snapshot.startTime : ''
+    queryCount.value = typeof snapshot.queryCount === 'number' ? snapshot.queryCount : 0
+    riskLevel.value = typeof snapshot.riskLevel === 'string' ? snapshot.riskLevel : 'none'
+
+    const nextPlan = snapshot.planInfo
+    planInfo.value = nextPlan && typeof nextPlan === 'object'
+      ? {
+          name: String(nextPlan.name ?? ''),
+          status: String(nextPlan.status ?? ''),
+          total: Number(nextPlan.total ?? 0),
+          completed: Number(nextPlan.completed ?? 0),
+          failed: Number(nextPlan.failed ?? 0),
+        }
+      : null
+
+    const normalizedAgentStatus = Object.fromEntries(
+      Object.entries(snapshot.agentStatus ?? {}).map(([key, value]) => [
+        key,
+        value === 'active' ? 'done' : value,
+      ])
+    )
+    applyAgentStatus(normalizedAgentStatus)
+  } catch (err) {
+    console.warn('[AI Command] Failed to restore page cache', err)
+    localStorage.removeItem(COMMAND_CACHE_KEY)
+  }
+}
+
+function resetAgentStatuses() {
+  applyAgentStatus(createInitialAgentStatus())
+}
 
 // ── Typewriter queue ─────────────────────────────────────────────
 interface TypewriterTask {
@@ -98,6 +220,21 @@ const currentQueryBubbleIdx = new Map<string, number>()
 // Latest known full content per agent — updated on each agent_message event
 // so the typewriter loop always types up to the most recent content.
 const agentLatestContent = new Map<string, string>()
+
+// ── Risk state ──────────────────────────────────────────────────
+const riskLevel = ref('none')
+const riskMap: Record<string, { label: string; color: string }> = {
+  none:     { label: '正常',   color: '#6b7280' },
+  low:      { label: '低风险', color: '#3b82f6' },
+  moderate: { label: '中等风险', color: '#f59e0b' },
+  high:     { label: '高风险', color: '#ef4444' },
+  critical: { label: '极高风险', color: '#7c3aed' },
+}
+const riskLabel = computed(() => riskMap[riskLevel.value]?.label ?? '正常')
+const riskColor = computed(() => riskMap[riskLevel.value]?.color ?? '#6b7280')
+
+// ── Plan state ──────────────────────────────────────────────────
+const planInfo = ref<PlanInfo | null>(null)
 
 // Remove the "分析中..." thinking placeholder on first real content
 function removeThinkingBubble() {
@@ -176,30 +313,9 @@ async function processTypewriterQueue() {
   processTypewriterQueue()
 }
 
-// ── Risk state ──────────────────────────────────────────────────
-const riskLevel = ref('none')
-const riskMap: Record<string, { label: string; color: string }> = {
-  none:     { label: '正常',   color: '#6b7280' },
-  low:      { label: '低风险', color: '#3b82f6' },
-  moderate: { label: '中等风险', color: '#f59e0b' },
-  high:     { label: '高风险', color: '#ef4444' },
-  critical: { label: '极高风险', color: '#7c3aed' },
-}
-const riskLabel = computed(() => riskMap[riskLevel.value]?.label ?? '正常')
-const riskColor = computed(() => riskMap[riskLevel.value]?.color ?? '#6b7280')
-
-// ── Plan state ──────────────────────────────────────────────────
-interface PlanInfo {
-  name: string
-  status: string
-  total: number
-  completed: number
-  failed: number
-}
-const planInfo = ref<PlanInfo | null>(null)
-
 // ── SSE structured events ────────────────────────────────────────
 onMounted(() => {
+  restorePageCache()
   onStructuredEvent((event: SSEEventType) => {
     if (event.type === 'session_init') {
       if (!sessionId.value) {
@@ -250,6 +366,12 @@ watch(loading, (isLoading) => {
   }
 })
 
+watch(
+  [messages, sessionId, startTime, queryCount, riskLevel, planInfo, () => agentStatus],
+  persistPageCache,
+  { deep: true }
+)
+
 // ── Send query ────────────────────────────────────────────────────
 async function sendQuery(queryText: string) {
   if (!queryText.trim() || loading.value) return
@@ -257,7 +379,7 @@ async function sendQuery(queryText: string) {
   queryCount.value++
 
   // Reset agent statuses
-  Object.keys(agentStatus).forEach(key => { agentStatus[key] = 'pending' })
+  resetAgentStatuses()
 
   // Reset typewriter queue and per-query agent tracking
   typewriterQueue.value = []
