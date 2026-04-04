@@ -6,6 +6,12 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # 本地运行时从 .env 文件加载；Docker 中已由 compose 注入，无副作用
+except ImportError:
+    pass
+
 
 @dataclass
 class Settings:
