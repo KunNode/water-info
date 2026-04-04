@@ -99,6 +99,14 @@ services:
       AI_SERVICE_PORT: "8100"
     ports:
       - "8100:8100"
+    volumes:
+      - ai-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ─── Frontend Admin ───
   admin:
@@ -120,9 +128,12 @@ services:
     container_name: water-nginx
     restart: unless-stopped
     depends_on:
-      - platform
-      - ai
-      - admin
+      platform:
+        condition: service_started
+      ai:
+        condition: service_healthy
+      admin:
+        condition: service_started
     ports:
       - "80:80"
     volumes:
@@ -137,3 +148,4 @@ volumes:
   pgdata:
   redisdata:
   platform-logs:
+  ai-logs:
