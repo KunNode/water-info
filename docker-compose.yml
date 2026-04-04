@@ -90,7 +90,7 @@ services:
       PG_PASSWORD: ${PG_PASSWORD:-123456}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_API_BASE: ${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
-      OPENAI_MODEL: ${OPENAI_MODEL:-qwen/qwen3-6b-plus:free}
+      OPENAI_MODEL: ${OPENAI_MODEL:-qwen/qwen3.6-plus:free}
       WEATHER_API_KEY: ${WEATHER_API_KEY:-}
       WATER_PLATFORM_BASE_URL: http://platform:8080
       WATER_PLATFORM_USERNAME: admin
