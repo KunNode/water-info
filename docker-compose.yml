@@ -1,9 +1,11 @@
-version: "3.8"
-
 services:
   # ─── PostgreSQL ───
   postgres:
-    image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+      args:
+        DOCKER_REGISTRY_PREFIX: ${DOCKER_REGISTRY_PREFIX:-docker.m.daocloud.io/library/}
     container_name: water-postgres
     restart: unless-stopped
     environment:
@@ -15,14 +17,14 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d water_info"]
+      test: ["CMD-SHELL", "export PATH=/usr/lib/postgresql16/bin:/usr/libexec/postgresql16:$$PATH && pg_isready -U root -d water_info"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   # ─── Redis ───
   redis:
-    image: redis:7-alpine
+    image: ${DOCKER_REGISTRY_PREFIX:-docker.m.daocloud.io/library/}redis:7-alpine
     container_name: water-redis
     restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD:-123456} --appendonly yes
@@ -41,6 +43,8 @@ services:
     build:
       context: ./water-info-platform
       dockerfile: Dockerfile
+      args:
+        DOCKER_REGISTRY_PREFIX: ${DOCKER_REGISTRY_PREFIX:-docker.m.daocloud.io/library/}
     container_name: water-platform
     restart: unless-stopped
     depends_on:
@@ -56,6 +60,7 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
+      AI_SERVICE_URL: http://ai:8100
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123456}
       JWT_SECRET: ${JWT_SECRET:-62CONvJaO3ylVpho8+IKFAw2gdkvFUX37s8pTnKDP5UL/qTW7hE+iKd1Eqdrc7LtsgqoUWWm8Hq57W9kS1p0zw==}
     ports:
@@ -63,59 +68,60 @@ services:
     volumes:
       - platform-logs:/app/logs
 
-  # ─── FastAPI AI Service ───
-  ai-service:
+  # ─── AI Service (轻量版) ───
+  ai:
     build:
       context: ./water-info-ai
       dockerfile: Dockerfile
+      args:
+        DOCKER_REGISTRY_PREFIX: ${DOCKER_REGISTRY_PREFIX:-docker.m.daocloud.io/library/}
     container_name: water-ai
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+      platform:
+        condition: service_started
     environment:
       PG_HOST: postgres
       PG_PORT: 5432
       PG_DATABASE: water_info
       PG_USER: root
       PG_PASSWORD: ${PG_PASSWORD:-123456}
-      REDIS_URL: redis://redis:6379/0
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.deepseek.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-chat}
       WEATHER_API_KEY: ${WEATHER_API_KEY:-}
       WATER_PLATFORM_BASE_URL: http://platform:8080
+      WATER_PLATFORM_USERNAME: admin
+      WATER_PLATFORM_PASSWORD: ${ADMIN_PASSWORD:-Admin@123456}
       AI_SERVICE_HOST: "0.0.0.0"
       AI_SERVICE_PORT: "8100"
     ports:
       - "8100:8100"
-    volumes:
-      - ai-logs:/app/logs
 
   # ─── Frontend Admin ───
   admin:
     build:
       context: ./water-info-admin
       dockerfile: Dockerfile
+      args:
+        DOCKER_REGISTRY_PREFIX: ${DOCKER_REGISTRY_PREFIX:-docker.m.daocloud.io/library/}
     container_name: water-admin
     restart: unless-stopped
     depends_on:
       - platform
-      - ai-service
     ports:
       - "5173:80"
 
   # ─── Nginx Reverse Proxy ───
   nginx:
-    image: nginx:alpine
+    image: ${DOCKER_REGISTRY_PREFIX:-docker.m.daocloud.io/library/}nginx:alpine
     container_name: water-nginx
     restart: unless-stopped
     depends_on:
       - platform
-      - ai-service
+      - ai
       - admin
     ports:
       - "80:80"
@@ -131,4 +137,3 @@ volumes:
   pgdata:
   redisdata:
   platform-logs:
-  ai-logs:

@@ -54,42 +54,55 @@ export function useSSE() {
 
       if (!reader) throw new Error('No readable stream')
 
+      // Buffer incomplete lines across network chunks so we never attempt to
+      // parse a JSON payload that was split at a chunk boundary.
+      let lineBuffer = ''
+
+      const processLine = (line: string) => {
+        if (!line.startsWith('data: ')) return
+
+        const data = line.slice(6).trim()
+        if (data === '[DONE]' || !data) return
+
+        if (data.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(data) as SSEEventType
+            if (parsed.type) {
+              structuredEvents.value.push(parsed)
+              onEvent?.(parsed)
+              return
+            }
+          } catch {
+            // Malformed JSON — discard silently rather than leaking raw text
+            return
+          }
+        }
+
+        // Genuine plain-text chunk (non-JSON stream)
+        chunks.value.push(data)
+        fullText.value += data
+        if (chunks.value.length > MAX_CHUNKS) {
+          chunks.value.shift()
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const text = decoder.decode(value, { stream: true })
-        const lines = text.split('\n')
+        lineBuffer += decoder.decode(value, { stream: true })
+
+        // Split on newline but keep the last (potentially incomplete) fragment
+        const lines = lineBuffer.split('\n')
+        lineBuffer = lines.pop() ?? ''
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') continue
-          if (!data) continue
-
-          // Try to parse as structured JSON event
-          if (data.startsWith('{')) {
-            try {
-              const parsed = JSON.parse(data) as SSEEventType
-              if (parsed.type) {
-                structuredEvents.value.push(parsed)
-                onEvent?.(parsed)
-                continue
-              }
-            } catch {
-              // Not valid JSON, fall through to treat as text
-            }
-          }
-
-          // Plain text chunk
-          chunks.value.push(data)
-          fullText.value += data
-          if (chunks.value.length > MAX_CHUNKS) {
-            chunks.value.shift()
-          }
+          processLine(line)
         }
       }
+
+      // Flush any remaining buffered content after stream closes
+      if (lineBuffer) processLine(lineBuffer)
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         error.value = err.message

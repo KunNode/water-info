@@ -1,7 +1,15 @@
 <template>
   <div class="chat-message" :class="message.role">
+    <!-- Thinking / analyzing placeholder -->
+    <template v-if="message.role === 'thinking'">
+      <div class="thinking-bubble">
+        <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
+        <span class="thinking-label">{{ message.content }}</span>
+      </div>
+    </template>
+
     <!-- Agent 分体气泡 -->
-    <template v-if="message.role === 'agent'">
+    <template v-else-if="message.role === 'agent'">
       <div class="agent-bubble" :style="{ '--agent-color': agentColor }">
         <div class="agent-bubble-header">
           <span class="agent-dot" />
@@ -18,7 +26,7 @@
     </template>
 
     <!-- User / assistant 气泡（原有逻辑） -->
-    <template v-else>
+    <template v-else-if="message.role === 'user' || message.role === 'assistant'">
       <div class="bubble">
         <div
           v-if="message.role === 'assistant'"
@@ -39,7 +47,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 export interface ChatMessageItem {
-  role: 'user' | 'assistant' | 'agent'
+  role: 'user' | 'assistant' | 'agent' | 'thinking'
   content: string
   timestamp: Date
   agent?: string
@@ -53,8 +61,18 @@ const props = defineProps<{
 
 const renderedContent = computed(() => {
   if (!props.message.content) return ''
-  const raw = marked(props.message.content) as string
-  return DOMPurify.sanitize(raw)
+  // marked v5+ synchronous API; cast needed because overloads include Promise variant
+  const raw = marked.parse(props.message.content, { async: false }) as string
+  return DOMPurify.sanitize(raw, {
+    ALLOWED_TAGS: [
+      'p', 'br', 'strong', 'em', 'code', 'pre', 'blockquote',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'ul', 'ol', 'li',
+      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'hr', 'a', 'span', 'div',
+    ],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
+  })
 })
 
 const formattedTime = computed(() => {
@@ -309,5 +327,39 @@ const agentColor = computed(() => agentMeta.value.color)
   color: rgba(255, 255, 255, 0.3);
   margin-top: 4px;
   font-family: 'Courier New', monospace;
+}
+
+/* ── Thinking / analyzing placeholder ── */
+.thinking-bubble {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(0, 212, 255, 0.25);
+  border-radius: 8px;
+  max-width: 220px;
+}
+
+.thinking-label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.45);
+  font-style: italic;
+}
+
+.thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(0, 212, 255, 0.5);
+  animation: thinking-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes thinking-pulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.9); }
+  40% { opacity: 1; transform: scale(1.1); }
 }
 </style>

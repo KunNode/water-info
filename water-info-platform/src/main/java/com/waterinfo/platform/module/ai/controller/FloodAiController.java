@@ -2,9 +2,11 @@ package com.waterinfo.platform.module.ai.controller;
 
 import com.waterinfo.platform.common.api.ApiResponse;
 import com.waterinfo.platform.module.ai.client.AiServiceClient;
+import com.waterinfo.platform.module.ai.dto.FloodPlanPageResponse;
 import com.waterinfo.platform.module.ai.dto.FloodPlanResponse;
 import com.waterinfo.platform.module.ai.dto.FloodQueryRequest;
 import com.waterinfo.platform.module.ai.dto.FloodQueryResponse;
+import com.waterinfo.platform.module.ai.dto.PlanExecuteResponse;
 import com.waterinfo.platform.module.ai.dto.SessionResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -16,8 +18,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-
-import java.util.Map;
 
 /**
  * Flood AI emergency response controller
@@ -59,7 +59,7 @@ public class FloodAiController {
     @Operation(summary = "获取应急预案列表", description = "分页获取AI生成的应急预案列表")
     @GetMapping("/plans")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Mono<ApiResponse<Map<String, Object>>> getPlans(
+    public Mono<ApiResponse<FloodPlanPageResponse>> getPlans(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         log.debug("Get plans request, page: {}, size: {}", page, size);
@@ -79,7 +79,7 @@ public class FloodAiController {
     @Operation(summary = "执行应急预案", description = "执行指定的应急预案")
     @PostMapping("/plans/{id}/execute")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
-    public Mono<ApiResponse<FloodPlanResponse>> executePlan(@PathVariable String id) {
+    public Mono<ApiResponse<PlanExecuteResponse>> executePlan(@PathVariable String id) {
         log.info("Execute plan request: {}", id);
         return aiServiceClient.executePlan(id)
                 .map(ApiResponse::success);

@@ -91,7 +91,48 @@ const isTyping = ref(false)
 const CHARS_PER_TICK = 4
 const TICK_MS = 16
 
+// Maps agent name → messages array index for the current query.
+// Cleared on each new sendQuery so cross-query dedup doesn't happen.
+const currentQueryBubbleIdx = new Map<string, number>()
+
+// Latest known full content per agent — updated on each agent_message event
+// so the typewriter loop always types up to the most recent content.
+const agentLatestContent = new Map<string, string>()
+
+// Remove the "分析中..." thinking placeholder on first real content
+function removeThinkingBubble() {
+  const idx = messages.value.findIndex(m => m.role === 'thinking')
+  if (idx >= 0) {
+    messages.value.splice(idx, 1)
+    // All currentQueryBubbleIdx entries that were recorded after the removed
+    // bubble need their index decremented by 1.
+    for (const [k, v] of currentQueryBubbleIdx.entries()) {
+      if (v > idx) currentQueryBubbleIdx.set(k, v - 1)
+    }
+  }
+}
+
 function enqueueAgentMessage(agent: string, content: string) {
+  removeThinkingBubble()
+  agentLatestContent.set(agent, content)
+
+  const existingIdx = currentQueryBubbleIdx.get(agent) ?? -1
+
+  if (existingIdx >= 0) {
+    const existing = messages.value[existingIdx]
+    if (existing.agentStatus === 'typing') {
+      // Typewriter is already running — agentLatestContent is already updated,
+      // the loop will pick up the new target on the next tick. Nothing else to do.
+      return
+    }
+    // Bubble is done — silently replace content (no re-animation to avoid flash)
+    existing.content = content
+    return
+  }
+
+  // First message for this agent in this query — create a new bubble
+  const idx = messages.value.length
+  currentQueryBubbleIdx.set(agent, idx)
   messages.value.push({
     role: 'agent',
     content: '',
@@ -100,9 +141,7 @@ function enqueueAgentMessage(agent: string, content: string) {
     agentStatus: 'typing',
   })
   typewriterQueue.value.push({ agent, fullContent: content })
-  if (!isTyping.value) {
-    processTypewriterQueue()
-  }
+  if (!isTyping.value) processTypewriterQueue()
 }
 
 async function processTypewriterQueue() {
@@ -113,26 +152,18 @@ async function processTypewriterQueue() {
   isTyping.value = true
   const task = typewriterQueue.value.shift()!
 
-  // Find the placeholder bubble: last agent bubble with matching agent name and status 'typing'
-  let actualIdx = -1
-  for (let i = messages.value.length - 1; i >= 0; i--) {
-    const m = messages.value[i]
-    if (m.role === 'agent' && m.agent === task.agent && m.agentStatus === 'typing') {
-      actualIdx = i
-      break
-    }
-  }
-
+  const actualIdx = currentQueryBubbleIdx.get(task.agent) ?? -1
   if (actualIdx < 0) {
-    // Bubble not found, skip to next
     processTypewriterQueue()
     return
   }
 
-  // Type out characters
-  const full = task.fullContent
-  let pos = 0
-  while (pos < full.length) {
+  // Type characters — always read the latest known content so mid-stream
+  // updates (agentLatestContent) are picked up without restarting from zero.
+  let pos = messages.value[actualIdx].content.length
+  while (true) {
+    const full = agentLatestContent.get(task.agent) ?? task.fullContent
+    if (pos >= full.length) break
     pos = Math.min(pos + CHARS_PER_TICK, full.length)
     messages.value[actualIdx].content = full.slice(0, pos)
     await nextTick()
@@ -142,7 +173,6 @@ async function processTypewriterQueue() {
   // Mark done
   messages.value[actualIdx].agentStatus = 'done'
 
-  // Process next task
   processTypewriterQueue()
 }
 
@@ -194,11 +224,17 @@ onMounted(() => {
   })
 })
 
-// ── Keep last assistant message in sync with streaming text ─────
+// ── Keep assistant message in sync with streaming plain-text ────
+// Lazily create the assistant bubble on the first non-empty chunk so that
+// queries answered entirely via agent_message events leave no ghost placeholder.
 watch(fullText, (val) => {
+  if (!val) return
+  removeThinkingBubble()
   const last = messages.value[messages.value.length - 1]
   if (last?.role === 'assistant') {
     last.content = val
+  } else {
+    messages.value.push({ role: 'assistant', content: val, timestamp: new Date() })
   }
 })
 
@@ -223,15 +259,17 @@ async function sendQuery(queryText: string) {
   // Reset agent statuses
   Object.keys(agentStatus).forEach(key => { agentStatus[key] = 'pending' })
 
-  // Reset typewriter queue
+  // Reset typewriter queue and per-query agent tracking
   typewriterQueue.value = []
   isTyping.value = false
+  currentQueryBubbleIdx.clear()
+  agentLatestContent.clear()
 
   // Push user message
   messages.value.push({ role: 'user', content: queryText, timestamp: new Date() })
 
-  // Push empty assistant placeholder (will be filled by streaming)
-  messages.value.push({ role: 'assistant', content: '', timestamp: new Date() })
+  // Push thinking placeholder — removed automatically on first real content
+  messages.value.push({ role: 'thinking', content: '正在分析，请稍候…', timestamp: new Date() })
 
   // Reset SSE accumulator
   reset()
@@ -243,10 +281,7 @@ async function sendQuery(queryText: string) {
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     ElMessage.error(error.value || msg || '请求失败')
-    // Remove empty assistant placeholder on error
-    if (messages.value[messages.value.length - 1]?.content === '') {
-      messages.value.pop()
-    }
+    removeThinkingBubble()
   }
 }
 

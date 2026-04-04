@@ -311,6 +311,19 @@ export interface FloodPlan {
   updatedAt: string
 }
 
+export interface PlanExecuteResult {
+  planId: string
+  status: string
+  executedActions: number
+  message: string
+}
+
+export interface FloodSession {
+  sessionId: string
+  plans: FloodPlan[]
+  createdAt: string
+}
+
 export interface PlanAction {
   id: string
   description: string

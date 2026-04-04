@@ -10,6 +10,29 @@ const service: AxiosInstance = axios.create({
   timeout: 30000,
 })
 
+function resolveAuthorizationHeader(config?: AxiosRequestConfig | InternalAxiosRequestConfig): string | undefined {
+  const headers = config?.headers as Record<string, unknown> | undefined
+  const value = headers?.Authorization ?? headers?.authorization
+  return typeof value === 'string' ? value : undefined
+}
+
+function handleUnauthorized(config?: AxiosRequestConfig | InternalAxiosRequestConfig) {
+  const storedToken = getToken()
+  const sentAuthorization = resolveAuthorizationHeader(config)
+
+  // If the client still has a token but this request went out without Authorization,
+  // avoid clearing the whole session because that usually indicates a client-side race
+  // or a missing header on a single request rather than an expired login.
+  if (storedToken && !sentAuthorization) {
+    ElMessage.error('请求未携带登录凭证，请刷新页面后重试')
+    return
+  }
+
+  clearAuth()
+  router.push('/login')
+  ElMessage.error('登录已过期，请重新登录')
+}
+
 // Request interceptor — attach JWT token
 service.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -29,8 +52,7 @@ service.interceptors.response.use(
     if (res.code !== 200) {
       ElMessage.error(res.message || '请求失败')
       if (res.code === 401) {
-        clearAuth()
-        router.push('/login')
+        handleUnauthorized(response.config)
       }
       return Promise.reject(new Error(res.message || '请求失败'))
     }
@@ -40,9 +62,7 @@ service.interceptors.response.use(
     if (error.response) {
       const status = error.response.status
       if (status === 401) {
-        clearAuth()
-        router.push('/login')
-        ElMessage.error('登录已过期，请重新登录')
+        handleUnauthorized(error.config)
       } else if (status === 403) {
         ElMessage.error('没有操作权限')
       } else if (status === 404) {
@@ -74,6 +94,15 @@ export function put<T = any>(url: string, data?: any, config?: AxiosRequestConfi
 
 export function del<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
   return service.delete(url, config) as any
+}
+
+export function withAuth(config: AxiosRequestConfig = {}): AxiosRequestConfig {
+  const token = getToken()
+  const headers = {
+    ...(config.headers as Record<string, unknown> | undefined),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+  return { ...config, headers }
 }
 
 export default service
