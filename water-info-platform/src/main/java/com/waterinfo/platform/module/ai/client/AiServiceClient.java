@@ -2,6 +2,11 @@ package com.waterinfo.platform.module.ai.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.waterinfo.platform.module.ai.config.AiServiceProperties;
+import com.waterinfo.platform.module.ai.context.AiUserContext;
+import com.waterinfo.platform.module.ai.context.AiUserContext.UserInfo;
+import com.waterinfo.platform.module.ai.dto.ConversationDetail;
+import com.waterinfo.platform.module.ai.dto.ConversationItem;
+import com.waterinfo.platform.module.ai.dto.CreateConversationResponse;
 import com.waterinfo.platform.module.ai.dto.FloodPlanPageResponse;
 import com.waterinfo.platform.module.ai.dto.FloodPlanResponse;
 import com.waterinfo.platform.module.ai.dto.FloodQueryRequest;
@@ -23,7 +28,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * AI service client for communicating with the Python AI service
+ * AI service client for communicating with the Python AI service.
+ * Automatically forwards user identity via X-User-Id and X-Username headers.
  */
 @Slf4j
 @Component
@@ -31,6 +37,7 @@ import java.util.List;
 public class AiServiceClient {
 
     private final AiServiceProperties properties;
+    private final AiUserContext userContext;
     private WebClient webClient;
 
     @PostConstruct
@@ -47,13 +54,15 @@ public class AiServiceClient {
     public Mono<FloodQueryResponse> queryFlood(FloodQueryRequest request) {
         log.debug("Sending flood query to AI service: {}", request.getQuery());
 
-        return webClient.post()
-                .uri("/api/v1/flood/query")
-                .bodyValue(request)
-                .retrieve()
-                .bodyToMono(FloodQueryResponse.class)
-                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
-                .doOnError(error -> log.error("Error calling AI service query: {}", error.getMessage()));
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.post()
+                        .uri("/api/v1/flood/query")
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .bodyValue(request)
+                        .retrieve()
+                        .bodyToMono(FloodQueryResponse.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(error -> log.error("Error calling AI service query: {}", error.getMessage())));
     }
 
     /**
@@ -62,13 +71,15 @@ public class AiServiceClient {
     public Flux<String> queryFloodStream(FloodQueryRequest request) {
         log.debug("Sending flood stream query to AI service: {}", request.getQuery());
 
-        return webClient.post()
-                .uri("/api/v1/flood/query/stream")
-                .header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
-                .bodyValue(request)
-                .retrieve()
-                .bodyToFlux(String.class)
-                .doOnError(error -> log.error("Error calling AI service stream: {}", error.getMessage()));
+        return userContext.getCurrentUser()
+                .flatMapMany(user -> webClient.post()
+                        .uri("/api/v1/flood/query/stream")
+                        .header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .bodyValue(request)
+                        .retrieve()
+                        .bodyToFlux(String.class)
+                        .doOnError(error -> log.error("Error calling AI service stream: {}", error.getMessage())));
     }
 
     /**
@@ -149,13 +160,216 @@ public class AiServiceClient {
     public Mono<SessionResponse> getSession(String id) {
         log.debug("Fetching session from AI service: {}", id);
 
-        return webClient.get()
-                .uri("/api/v1/sessions/{id}", id)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .map(this::mapSessionResponse)
-                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
-                .doOnError(error -> log.error("Error fetching session {}: {}", id, error.getMessage()));
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.get()
+                        .uri("/api/v1/sessions/{id}", id)
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .map(this::mapSessionResponse)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(error -> log.error("Error fetching session {}: {}", id, error.getMessage())));
+    }
+
+    // ── Conversation (session with memory) ──────────────────────────────────
+
+    /**
+     * List all conversation sessions for the current user.
+     */
+    public Mono<List<ConversationItem>> listConversations(int limit, int offset) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.get()
+                        .uri(u -> u.path("/api/v1/conversations")
+                                .queryParam("limit", limit)
+                                .queryParam("offset", offset)
+                                .build())
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .map(this::mapConversationList)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error listing conversations: {}", e.getMessage())));
+    }
+
+    /**
+     * Get messages for a conversation session.
+     */
+    public Mono<ConversationDetail> getConversationMessages(String sessionId) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.get()
+                        .uri("/api/v1/conversations/{sessionId}/messages", sessionId)
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .map(this::mapConversationDetail)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error fetching conversation {}: {}", sessionId, e.getMessage())));
+    }
+
+    /**
+     * Get full conversation details including session and snapshot.
+     */
+    public Mono<ConversationDetail> getConversation(String sessionId) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.get()
+                        .uri("/api/v1/conversations/{sessionId}", sessionId)
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .map(this::mapConversationFull)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error fetching conversation {}: {}", sessionId, e.getMessage())));
+    }
+
+    /**
+     * Create a new conversation session.
+     */
+    public Mono<CreateConversationResponse> createConversation(String title) {
+        java.util.Map<String, Object> body = new java.util.HashMap<>();
+        if (title != null && !title.isBlank()) body.put("title", title);
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.post()
+                        .uri("/api/v1/conversations")
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .bodyValue(body)
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .map(this::mapCreateConversationResponse)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error creating conversation: {}", e.getMessage())));
+    }
+
+    /**
+     * Rename a conversation session.
+     */
+    public Mono<Void> renameConversation(String sessionId, String title) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.patch()
+                        .uri("/api/v1/conversations/{sessionId}", sessionId)
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .bodyValue(java.util.Map.of("title", title))
+                        .retrieve()
+                        .bodyToMono(Void.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error renaming conversation {}: {}", sessionId, e.getMessage())));
+    }
+
+    /**
+     * Delete a conversation session.
+     */
+    public Mono<Void> deleteConversation(String sessionId) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.delete()
+                        .uri("/api/v1/conversations/{sessionId}", sessionId)
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(Void.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error deleting conversation {}: {}", sessionId, e.getMessage())));
+    }
+
+    /**
+     * Add user identity headers to a request.
+     */
+    private void addUserHeaders(HttpHeaders headers, UserInfo user) {
+        if (user != null && user.isAuthenticated()) {
+            headers.set(AiUserContext.HEADER_USER_ID, user.userId());
+            headers.set(AiUserContext.HEADER_USERNAME, user.username());
+        }
+    }
+
+    private List<ConversationItem> mapConversationList(JsonNode node) {
+        List<ConversationItem> items = new ArrayList<>();
+        if (node == null || !node.isArray()) return items;
+        node.forEach(n -> {
+            ConversationItem item = new ConversationItem();
+            item.setSessionId(text(n, "session_id"));
+            item.setTitle(text(n, "title"));
+            JsonNode mc = n.get("message_count");
+            item.setMessageCount(mc != null && !mc.isNull() ? mc.asInt() : 0);
+            item.setLastMessage(text(n, "last_message"));
+            item.setCreatedAt(text(n, "created_at"));
+            item.setUpdatedAt(text(n, "updated_at"));
+            items.add(item);
+        });
+        return items;
+    }
+
+    private ConversationDetail mapConversationDetail(JsonNode node) {
+        ConversationDetail detail = new ConversationDetail();
+        detail.setSessionId(text(node, "session_id"));
+        detail.setTitle(text(node, "title"));
+        detail.setCreatedAt(text(node, "created_at"));
+        List<ConversationDetail.ConversationMessage> msgs = new ArrayList<>();
+        JsonNode arr = node.path("messages");
+        if (arr.isArray()) {
+            arr.forEach(m -> {
+                ConversationDetail.ConversationMessage msg = new ConversationDetail.ConversationMessage();
+                msg.setRole(text(m, "role"));
+                msg.setContent(text(m, "content"));
+                msg.setCreatedAt(text(m, "created_at"));
+                msgs.add(msg);
+            });
+        }
+        detail.setMessages(msgs);
+        // Map snapshot if present
+        JsonNode snapshot = node.get("snapshot");
+        if (snapshot != null && !snapshot.isNull()) {
+            ConversationDetail.ConversationSnapshot snap = new ConversationDetail.ConversationSnapshot();
+            snap.setRiskLevel(text(snapshot, "risk_level"));
+            snap.setQueryCount(integer(snapshot, "query_count"));
+            JsonNode planInfo = snapshot.get("plan_info");
+            if (planInfo != null && !planInfo.isNull() && planInfo.isObject()) {
+                snap.setPlanInfo(planInfo);
+            }
+            JsonNode agentStatus = snapshot.get("agent_status_summary");
+            if (agentStatus != null && !agentStatus.isNull() && agentStatus.isObject()) {
+                snap.setAgentStatusSummary(agentStatus);
+            }
+            detail.setSnapshot(snap);
+        }
+        // Map hasMore for pagination
+        JsonNode hasMore = node.get("has_more");
+        if (hasMore != null && !hasMore.isNull()) {
+            detail.setHasMore(hasMore.asBoolean(false));
+        }
+        return detail;
+    }
+
+    private ConversationDetail mapConversationFull(JsonNode node) {
+        ConversationDetail detail = new ConversationDetail();
+        // Map session
+        JsonNode session = node.get("session");
+        if (session != null && !session.isNull()) {
+            detail.setSessionId(text(session, "session_id"));
+            detail.setTitle(text(session, "title"));
+            detail.setCreatedAt(text(session, "created_at"));
+        }
+        // Map snapshot if present
+        JsonNode snapshot = node.get("snapshot");
+        if (snapshot != null && !snapshot.isNull()) {
+            ConversationDetail.ConversationSnapshot snap = new ConversationDetail.ConversationSnapshot();
+            snap.setRiskLevel(text(snapshot, "risk_level"));
+            snap.setQueryCount(integer(snapshot, "query_count"));
+            JsonNode planInfo = snapshot.get("plan_info");
+            if (planInfo != null && !planInfo.isNull() && planInfo.isObject()) {
+                snap.setPlanInfo(planInfo);
+            }
+            JsonNode agentStatus = snapshot.get("agent_status_summary");
+            if (agentStatus != null && !agentStatus.isNull() && agentStatus.isObject()) {
+                snap.setAgentStatusSummary(agentStatus);
+            }
+            detail.setSnapshot(snap);
+        }
+        return detail;
+    }
+
+    private CreateConversationResponse mapCreateConversationResponse(JsonNode node) {
+        CreateConversationResponse r = new CreateConversationResponse();
+        r.setSessionId(text(node, "session_id"));
+        r.setTitle(text(node, "title"));
+        r.setCreatedAt(text(node, "created_at"));
+        return r;
     }
 
     /**

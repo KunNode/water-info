@@ -6,12 +6,12 @@
         <el-icon class="logo-icon"><Platform /></el-icon>
         <span class="title">AI 智能指挥台</span>
       </div>
-      <div class="header-center" v-if="sessionId">
-        <span class="session-badge">Session: {{ sessionId.slice(0, 8) }}...</span>
+      <div class="header-center" v-if="store.currentSessionId">
+        <span class="session-badge">Session: {{ store.currentSessionId.slice(0, 8) }}...</span>
       </div>
       <div class="header-right">
         <el-tag
-          v-if="riskLevel !== 'none'"
+          v-if="store.riskLevel !== 'none'"
           :color="riskColor"
           effect="dark"
           style="border: none; margin-right: 16px;"
@@ -27,28 +27,38 @@
     <!-- Main -->
     <main class="main-content">
       <!-- Left: Chat -->
-      <ChatPanel :messages="messages" :loading="loading" @send="sendQuery" />
+      <ChatPanel :messages="store.messages" :loading="loading" @send="sendQuery" />
 
-      <!-- Right: Sidebar -->
-      <aside class="sidebar">
-        <AgentTimeline :agentStatus="agentStatus" />
-        <RiskPanel :riskLevel="riskLevel" />
-        <PlanStatus :planInfo="planInfo" />
-        <ActiveAlerts />
-        <SessionInfo :sessionId="sessionId" :startTime="startTime" :queryCount="queryCount" />
-      </aside>
+      <!-- Right: Sidebar + Session Drawer -->
+      <div class="sidebar-wrapper">
+        <aside class="sidebar">
+          <AgentTimeline :agentStatus="store.agentStatus" />
+          <RiskPanel :riskLevel="store.riskLevel" />
+          <PlanStatus :planInfo="store.planInfo" />
+          <ActiveAlerts />
+          <SessionInfo :sessionId="store.currentSessionId" :startTime="startTime" :queryCount="store.queryCount" />
+        </aside>
+        <SessionDrawer
+          ref="sessionDrawerRef"
+          v-model="store.drawerOpen"
+          :currentSessionId="store.currentSessionId"
+          @select="handleSessionSelect"
+          @new="handleNewSession"
+        />
+      </div>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { Platform, Back } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useSSE } from '@/composables/useSSE'
 import type { SSEEventType } from '@/composables/useSSE'
 import { getStreamUrl } from '@/api/flood'
+import { useAiConversationStore, type ChatMessageItem } from '@/stores/aiConversation'
 
 // Sub-components
 import ChatPanel from './components/ChatPanel.vue'
@@ -57,149 +67,49 @@ import RiskPanel from './components/RiskPanel.vue'
 import PlanStatus from './components/PlanStatus.vue'
 import ActiveAlerts from './components/ActiveAlerts.vue'
 import SessionInfo from './components/SessionInfo.vue'
-import type { ChatMessageItem } from './components/ChatMessage.vue'
+import SessionDrawer from './components/SessionDrawer.vue'
 
 const router = useRouter()
+const route = useRoute()
+const store = useAiConversationStore()
 const { fullText, loading, error, start, stop, reset, onStructuredEvent } = useSSE()
-const COMMAND_CACHE_KEY = 'water_ai_command_page_cache_v1'
 
-type PersistedChatMessageItem = Omit<ChatMessageItem, 'timestamp'> & {
-  timestamp: string
-}
+// True once the current query receives at least one agent_message structured event.
+const hasAgentMessages = ref(false)
 
-// ── Conversation state ──────────────────────────────────────────
-const messages = ref<ChatMessageItem[]>([])
-
-// ── Session state ───────────────────────────────────────────────
-const sessionId = ref('')
+// ── Session drawer ──────────────────────────────────────────────
+const sessionDrawerRef = ref<InstanceType<typeof SessionDrawer> | null>(null)
 const startTime = ref('')
-const queryCount = ref(0)
 
-// ── Agent timeline ──────────────────────────────────────────────
-function createInitialAgentStatus() {
-  return {
-    supervisor: 'pending',
-    data_analyst: 'pending',
-    risk_assessor: 'pending',
-    plan_generator: 'pending',
-    resource_dispatcher: 'pending',
-    notification: 'pending',
-  }
+async function handleSessionSelect(newSessionId: string) {
+  if (!newSessionId || newSessionId === store.currentSessionId) return
+  
+  // Load session from server
+  await store.loadSession(newSessionId)
+  startTime.value = new Date().toLocaleTimeString()
+  
+  // Reset transient state
+  typewriterQueue.value = []
+  isTyping.value = false
+  currentQueryBubbleIdx.clear()
+  agentLatestContent.clear()
+  reset()
+  
+  // Update URL
+  router.replace({ name: 'AICommandSession', params: { sessionId: newSessionId } })
 }
 
-const agentStatus = reactive<Record<string, string>>(createInitialAgentStatus())
-
-interface PlanInfo {
-  name: string
-  status: string
-  total: number
-  completed: number
-  failed: number
-}
-
-interface CommandPageCache {
-  version: 1
-  savedAt: string
-  sessionId: string
-  startTime: string
-  queryCount: number
-  riskLevel: string
-  planInfo: PlanInfo | null
-  agentStatus: Record<string, string>
-  messages: PersistedChatMessageItem[]
-}
-
-function applyAgentStatus(nextStatus?: Record<string, string>) {
-  Object.keys(agentStatus).forEach(key => {
-    const next = nextStatus?.[key]
-    agentStatus[key] = next ?? 'pending'
-  })
-}
-
-function getStableAgentStatusSnapshot() {
-  return Object.fromEntries(
-    Object.entries(agentStatus).map(([key, value]) => [key, value === 'active' ? 'done' : value])
-  )
-}
-
-function getStableMessagesSnapshot() {
-  return messages.value
-    .filter(message => message.role !== 'thinking')
-    .map<PersistedChatMessageItem>(message => ({
-      ...message,
-      agentStatus: message.role === 'agent' ? 'done' : message.agentStatus,
-      timestamp: message.timestamp.toISOString(),
-    }))
-}
-
-function persistPageCache() {
-  try {
-    const snapshot: CommandPageCache = {
-      version: 1,
-      savedAt: new Date().toISOString(),
-      sessionId: sessionId.value,
-      startTime: startTime.value,
-      queryCount: queryCount.value,
-      riskLevel: riskLevel.value,
-      planInfo: planInfo.value,
-      agentStatus: getStableAgentStatusSnapshot(),
-      messages: getStableMessagesSnapshot(),
-    }
-    localStorage.setItem(COMMAND_CACHE_KEY, JSON.stringify(snapshot))
-  } catch (err) {
-    console.warn('[AI Command] Failed to persist page cache', err)
-  }
-}
-
-function restorePageCache() {
-  const raw = localStorage.getItem(COMMAND_CACHE_KEY)
-  if (!raw) return
-
-  try {
-    const snapshot = JSON.parse(raw) as Partial<CommandPageCache>
-
-    messages.value = Array.isArray(snapshot.messages)
-      ? snapshot.messages
-          .filter(message => message && message.role !== 'thinking')
-          .map(message => ({
-            ...message,
-            agentStatus: message.role === 'agent' ? 'done' : message.agentStatus,
-            timestamp: new Date(message.timestamp),
-          }))
-          .filter(message => !Number.isNaN(message.timestamp.getTime()))
-      : []
-
-    sessionId.value = typeof snapshot.sessionId === 'string' ? snapshot.sessionId : ''
-    startTime.value = typeof snapshot.startTime === 'string' ? snapshot.startTime : ''
-    queryCount.value = typeof snapshot.queryCount === 'number' ? snapshot.queryCount : 0
-    riskLevel.value = typeof snapshot.riskLevel === 'string' ? snapshot.riskLevel : 'none'
-
-    const nextPlan = snapshot.planInfo
-    planInfo.value = nextPlan && typeof nextPlan === 'object'
-      ? {
-          name: String(nextPlan.name ?? ''),
-          status: String(nextPlan.status ?? ''),
-          total: Number(nextPlan.total ?? 0),
-          completed: Number(nextPlan.completed ?? 0),
-          failed: Number(nextPlan.failed ?? 0),
-        }
-      : null
-
-    const normalizedAgentStatus = Object.fromEntries(
-      Object.entries(snapshot.agentStatus ?? {}).map(([key, value]) => [
-        key,
-        value === 'active' ? 'done' : value,
-      ])
-    )
-    applyAgentStatus(normalizedAgentStatus)
-  } catch (err) {
-    console.warn('[AI Command] Failed to restore page cache', err)
-    localStorage.removeItem(COMMAND_CACHE_KEY)
-  }
-}
-
-function resetAgentStatuses() {
-  applyAgentStatus(createInitialAgentStatus())
+function handleNewSession(newId?: string) {
+  store.startNewSession()
+  startTime.value = ''
+  typewriterQueue.value = []
+  isTyping.value = false
+  currentQueryBubbleIdx.clear()
+  agentLatestContent.clear()
+  reset()
+  
+  // Update URL to base command route
+  router.replace({ name: 'AICommand' })
 }
 
 // ── Typewriter queue ─────────────────────────────────────────────
@@ -213,16 +123,10 @@ const isTyping = ref(false)
 const CHARS_PER_TICK = 4
 const TICK_MS = 16
 
-// Maps agent name → messages array index for the current query.
-// Cleared on each new sendQuery so cross-query dedup doesn't happen.
 const currentQueryBubbleIdx = new Map<string, number>()
-
-// Latest known full content per agent — updated on each agent_message event
-// so the typewriter loop always types up to the most recent content.
 const agentLatestContent = new Map<string, string>()
 
-// ── Risk state ──────────────────────────────────────────────────
-const riskLevel = ref('none')
+// ── Risk state (computed from store) ────────────────────────────
 const riskMap: Record<string, { label: string; color: string }> = {
   none:     { label: '正常',   color: '#6b7280' },
   low:      { label: '低风险', color: '#3b82f6' },
@@ -230,19 +134,14 @@ const riskMap: Record<string, { label: string; color: string }> = {
   high:     { label: '高风险', color: '#ef4444' },
   critical: { label: '极高风险', color: '#7c3aed' },
 }
-const riskLabel = computed(() => riskMap[riskLevel.value]?.label ?? '正常')
-const riskColor = computed(() => riskMap[riskLevel.value]?.color ?? '#6b7280')
+const riskLabel = computed(() => riskMap[store.riskLevel]?.label ?? '正常')
+const riskColor = computed(() => riskMap[store.riskLevel]?.color ?? '#6b7280')
 
-// ── Plan state ──────────────────────────────────────────────────
-const planInfo = ref<PlanInfo | null>(null)
-
-// Remove the "分析中..." thinking placeholder on first real content
+// ── Message helpers ─────────────────────────────────────────────
 function removeThinkingBubble() {
-  const idx = messages.value.findIndex(m => m.role === 'thinking')
+  const idx = store.messages.findIndex(m => m.role === 'thinking')
   if (idx >= 0) {
-    messages.value.splice(idx, 1)
-    // All currentQueryBubbleIdx entries that were recorded after the removed
-    // bubble need their index decremented by 1.
+    store.messages.splice(idx, 1)
     for (const [k, v] of currentQueryBubbleIdx.entries()) {
       if (v > idx) currentQueryBubbleIdx.set(k, v - 1)
     }
@@ -256,21 +155,17 @@ function enqueueAgentMessage(agent: string, content: string) {
   const existingIdx = currentQueryBubbleIdx.get(agent) ?? -1
 
   if (existingIdx >= 0) {
-    const existing = messages.value[existingIdx]
+    const existing = store.messages[existingIdx]
     if (existing.agentStatus === 'typing') {
-      // Typewriter is already running — agentLatestContent is already updated,
-      // the loop will pick up the new target on the next tick. Nothing else to do.
       return
     }
-    // Bubble is done — silently replace content (no re-animation to avoid flash)
     existing.content = content
     return
   }
 
-  // First message for this agent in this query — create a new bubble
-  const idx = messages.value.length
+  const idx = store.messages.length
   currentQueryBubbleIdx.set(agent, idx)
-  messages.value.push({
+  store.addMessage({
     role: 'agent',
     content: '',
     timestamp: new Date(),
@@ -295,111 +190,121 @@ async function processTypewriterQueue() {
     return
   }
 
-  // Type characters — always read the latest known content so mid-stream
-  // updates (agentLatestContent) are picked up without restarting from zero.
-  let pos = messages.value[actualIdx].content.length
+  let pos = store.messages[actualIdx].content.length
   while (true) {
     const full = agentLatestContent.get(task.agent) ?? task.fullContent
     if (pos >= full.length) break
     pos = Math.min(pos + CHARS_PER_TICK, full.length)
-    messages.value[actualIdx].content = full.slice(0, pos)
+    store.messages[actualIdx].content = full.slice(0, pos)
     await nextTick()
     await new Promise<void>(r => setTimeout(r, TICK_MS))
   }
 
-  // Mark done
-  messages.value[actualIdx].agentStatus = 'done'
-
+  store.messages[actualIdx].agentStatus = 'done'
   processTypewriterQueue()
 }
 
 // ── SSE structured events ────────────────────────────────────────
-onMounted(() => {
-  restorePageCache()
+onMounted(async () => {
+  // Initialize store from localStorage
+  store.initFromLocalStorage()
+  
+  // Fetch session list
+  await store.fetchSessions()
+  
+  // Check if URL has sessionId param
+  const sessionIdFromRoute = route.params.sessionId as string | undefined
+  
+  if (sessionIdFromRoute) {
+    // Load session from URL
+    await store.loadSession(sessionIdFromRoute)
+    startTime.value = new Date().toLocaleTimeString()
+  } else if (store.currentSessionId) {
+    // Load previously active session from localStorage
+    await store.loadSession(store.currentSessionId)
+    startTime.value = new Date().toLocaleTimeString()
+  }
+  
+  // Set up SSE event handlers
   onStructuredEvent((event: SSEEventType) => {
     if (event.type === 'session_init') {
-      if (!sessionId.value) {
-        sessionId.value = event.sessionId
+      if (!store.currentSessionId) {
+        store.setSessionId(event.sessionId)
         startTime.value = new Date().toLocaleTimeString()
+        // Update URL with new session ID
+        router.replace({ name: 'AICommandSession', params: { sessionId: event.sessionId } })
       }
     } else if (event.type === 'agent_update') {
-      agentStatus[event.agent] = event.status
+      store.setAgentStatus(event.agent, event.status)
     } else if (event.type === 'risk_update') {
-      riskLevel.value = event.level
+      store.updateSnapshot({ risk_level: event.level })
     } else if (event.type === 'plan_update') {
-      planInfo.value = {
-        name: event.name,
-        status: event.status,
-        total: event.total,
-        completed: event.completed,
-        failed: event.failed,
-      }
+      store.updateSnapshot({
+        plan_info: {
+          plan_name: event.name,
+          status: event.status,
+          actions_count: event.total,
+        }
+      })
     } else if (event.type === 'agent_message') {
+      hasAgentMessages.value = true
       enqueueAgentMessage(event.agent, event.content)
     }
   })
 })
 
 // ── Keep assistant message in sync with streaming plain-text ────
-// Lazily create the assistant bubble on the first non-empty chunk so that
-// queries answered entirely via agent_message events leave no ghost placeholder.
 watch(fullText, (val) => {
-  if (!val) return
+  if (!val || hasAgentMessages.value) return
   removeThinkingBubble()
-  const last = messages.value[messages.value.length - 1]
+  const last = store.messages[store.messages.length - 1]
   if (last?.role === 'assistant') {
     last.content = val
   } else {
-    messages.value.push({ role: 'assistant', content: val, timestamp: new Date() })
+    store.addMessage({ role: 'assistant', content: val, timestamp: new Date() })
   }
 })
 
 // ── Auto-activate supervisor when loading starts ──────────────────
 watch(loading, (isLoading) => {
   if (isLoading) {
-    const hasActive = Object.values(agentStatus).some(s => s === 'active' || s === 'done')
-    if (!hasActive) agentStatus.supervisor = 'active'
+    const hasActive = Object.values(store.agentStatus).some(s => s === 'active' || s === 'done')
+    if (!hasActive) store.setAgentStatus('supervisor', 'active')
   } else {
-    Object.keys(agentStatus).forEach(key => {
-      if (agentStatus[key] === 'active') agentStatus[key] = 'done'
-    })
+    store.finalizeAgentStatuses()
   }
 })
-
-watch(
-  [messages, sessionId, startTime, queryCount, riskLevel, planInfo, () => agentStatus],
-  persistPageCache,
-  { deep: true }
-)
 
 // ── Send query ────────────────────────────────────────────────────
 async function sendQuery(queryText: string) {
   if (!queryText.trim() || loading.value) return
 
-  queryCount.value++
-
   // Reset agent statuses
-  resetAgentStatuses()
+  store.resetAgentStatus()
 
   // Reset typewriter queue and per-query agent tracking
+  hasAgentMessages.value = false
   typewriterQueue.value = []
   isTyping.value = false
   currentQueryBubbleIdx.clear()
   agentLatestContent.clear()
 
   // Push user message
-  messages.value.push({ role: 'user', content: queryText, timestamp: new Date() })
+  store.addMessage({ role: 'user', content: queryText, timestamp: new Date() })
 
-  // Push thinking placeholder — removed automatically on first real content
-  messages.value.push({ role: 'thinking', content: '正在分析，请稍候…', timestamp: new Date() })
+  // Push thinking placeholder
+  store.addMessage({ role: 'thinking', content: '正在分析，请稍候…', timestamp: new Date() })
 
   // Reset SSE accumulator
   reset()
 
   try {
     const payload: { query: string; sessionId?: string } = { query: queryText }
-    if (sessionId.value) payload.sessionId = sessionId.value
+    if (store.currentSessionId) payload.sessionId = store.currentSessionId
     await start(getStreamUrl(), payload)
+    // Refresh session list so title/last-message stays current
+    await store.fetchSessions()
+    sessionDrawerRef.value?.refresh()
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     ElMessage.error(error.value || msg || '请求失败')
@@ -482,11 +387,19 @@ function goBack() {
 .main-content {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 300px;
+  grid-template-columns: 1fr auto;
   gap: 20px;
   padding: 20px;
   min-height: 0;
   overflow: hidden;
+}
+
+.sidebar-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  position: relative;
+  min-height: 0;
 }
 
 /* glass-panel is used by ChatPanel and sidebar sub-components */
@@ -498,6 +411,8 @@ function goBack() {
 }
 
 .sidebar {
+  width: 300px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;

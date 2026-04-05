@@ -324,6 +324,61 @@ export interface FloodSession {
   createdAt: string
 }
 
+// ─── Conversation (AI session with memory) ───
+export interface ConversationItem {
+  session_id: string
+  title: string
+  message_count: number
+  last_message: string | null
+  status?: string
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ConversationMessage {
+  id?: number
+  role: 'user' | 'assistant'
+  content: string
+  message_type?: string
+  status?: string
+  created_at: string | null
+}
+
+export interface ConversationSnapshot {
+  risk_level: string
+  plan_info: Record<string, any> | null
+  agent_status_summary: Record<string, any> | null
+  query_count: number
+}
+
+export interface ConversationSession {
+  session_id: string
+  title: string
+  status: string
+  user_id?: string
+  username?: string
+  last_message_at?: string
+  last_message_preview?: string
+  title_source?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ConversationDetail {
+  session_id: string
+  title: string
+  messages: ConversationMessage[]
+  snapshot?: ConversationSnapshot | null
+  has_more?: boolean
+  created_at: string | null
+}
+
+export interface ConversationFullResponse {
+  session: ConversationSession
+  snapshot?: ConversationSnapshot | null
+  latest_plan_summary?: Record<string, any> | null
+}
+
 export interface PlanAction {
   id: string
   description: string

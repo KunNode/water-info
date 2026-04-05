@@ -23,10 +23,15 @@ class ChatResult:
 class OpenAICompatibleLLM:
     def __init__(self) -> None:
         self._settings = get_settings()
+        # Shared client — reused across all calls to avoid per-call TCP/TLS overhead
+        self._client = httpx.AsyncClient(timeout=self._settings.llm_timeout)
 
     @property
     def is_enabled(self) -> bool:
         return bool(self._settings.openai_api_key)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
     async def ainvoke(
         self,
@@ -45,6 +50,8 @@ class OpenAICompatibleLLM:
             "messages": self._build_messages(prompt, system_prompt),
             "temperature": temperature,
             "stream": False,
+            # Disable extended thinking/reasoning to reduce latency (Qwen3, etc.)
+            "enable_thinking": False,
         }
         if response_format:
             payload["response_format"] = response_format
@@ -54,10 +61,9 @@ class OpenAICompatibleLLM:
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=self._settings.llm_timeout) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
 
         content = (
             data.get("choices", [{}])[0]
@@ -76,7 +82,8 @@ class OpenAICompatibleLLM:
             messages = prompt
         else:
             if isinstance(prompt, (dict, list)):
-                prompt = json.dumps(prompt, ensure_ascii=False, indent=2)
+                # Compact JSON — no indent to reduce token count
+                prompt = json.dumps(prompt, ensure_ascii=False)
             else:
                 prompt = str(prompt)
             messages = [{"role": "user", "content": prompt}]

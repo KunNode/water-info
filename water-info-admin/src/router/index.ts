@@ -94,6 +94,13 @@ export const constantRoutes: RouteRecordRaw[] = [
         meta: { title: '智能指挥台', icon: 'ChatDotRound' },
       },
       {
+        // Route with optional sessionId parameter for deep linking
+        path: 'command/:sessionId',
+        name: 'AICommandSession',
+        component: () => import('@/views/ai/command/index.vue'),
+        meta: { title: '智能指挥台', icon: 'ChatDotRound', hidden: true },
+      },
+      {
         path: 'plan',
         name: 'AIPlan',
         component: () => import('@/views/ai/plan/index.vue'),

@@ -45,14 +45,7 @@
 import { computed } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-
-export interface ChatMessageItem {
-  role: 'user' | 'assistant' | 'agent' | 'thinking'
-  content: string
-  timestamp: Date
-  agent?: string
-  agentStatus?: 'typing' | 'done'
-}
+import type { ChatMessageItem } from '@/stores/aiConversation'
 
 const props = defineProps<{
   message: ChatMessageItem

@@ -2,6 +2,9 @@ package com.waterinfo.platform.module.ai.controller;
 
 import com.waterinfo.platform.common.api.ApiResponse;
 import com.waterinfo.platform.module.ai.client.AiServiceClient;
+import com.waterinfo.platform.module.ai.dto.ConversationDetail;
+import com.waterinfo.platform.module.ai.dto.ConversationItem;
+import com.waterinfo.platform.module.ai.dto.CreateConversationResponse;
 import com.waterinfo.platform.module.ai.dto.FloodPlanPageResponse;
 import com.waterinfo.platform.module.ai.dto.FloodPlanResponse;
 import com.waterinfo.platform.module.ai.dto.FloodQueryRequest;
@@ -87,5 +90,64 @@ public class FloodAiController {
         log.debug("Get session request: {}", id);
         return aiServiceClient.getSession(id)
                 .map(ApiResponse::success);
+    }
+
+    // ── Conversation (session with memory) ──────────────────────────────────
+
+    @Operation(summary = "会话列表", description = "获取所有会话列表（含最近消息预览）")
+    @GetMapping("/conversations")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<java.util.List<ConversationItem>>> listConversations(
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        return aiServiceClient.listConversations(limit, offset)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "获取会话详情", description = "获取会话元数据和业务快照（不含消息）")
+    @GetMapping("/conversations/{sessionId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<ConversationDetail>> getConversation(@PathVariable String sessionId) {
+        return aiServiceClient.getConversation(sessionId)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "获取会话消息", description = "根据会话ID获取完整消息历史")
+    @GetMapping("/conversations/{sessionId}/messages")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<ConversationDetail>> getConversationMessages(
+            @PathVariable String sessionId,
+            @RequestParam(defaultValue = "40") int limit,
+            @RequestParam(required = false) Long beforeId) {
+        return aiServiceClient.getConversationMessages(sessionId)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "新建会话", description = "创建一个新的会话")
+    @PostMapping("/conversations")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<CreateConversationResponse>> createConversation(
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        String title = body != null ? body.getOrDefault("title", null) : null;
+        return aiServiceClient.createConversation(title)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "重命名会话", description = "修改会话标题")
+    @PatchMapping("/conversations/{sessionId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<Void>> renameConversation(
+            @PathVariable String sessionId,
+            @RequestBody java.util.Map<String, String> body) {
+        return aiServiceClient.renameConversation(sessionId, body.getOrDefault("title", ""))
+                .then(Mono.just(ApiResponse.<Void>success(null)));
+    }
+
+    @Operation(summary = "删除会话", description = "删除指定会话及其所有消息")
+    @DeleteMapping("/conversations/{sessionId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<Void>> deleteConversation(@PathVariable String sessionId) {
+        return aiServiceClient.deleteConversation(sessionId)
+                .then(Mono.just(ApiResponse.<Void>success(null)));
     }
 }

@@ -69,3 +69,79 @@ class SessionResponse(BaseModel):
     session_id: str
     plans: list[dict]
     created_at: str | None = None
+
+
+# ── Conversation models ───────────────────────────────────────────────────────
+
+
+class ConversationMessage(BaseModel):
+    """Individual message in a conversation."""
+
+    id: int | None = None
+    role: str
+    content: str
+    message_type: str = "chat"
+    status: str = "completed"
+    metadata: dict | None = None
+    created_at: str | None = None
+
+
+class ConversationSnapshot(BaseModel):
+    """Business state snapshot for a conversation."""
+
+    risk_level: str = "none"
+    plan_info: dict | None = None
+    agent_status_summary: dict | None = None
+    query_count: int = 0
+
+
+class ConversationSession(BaseModel):
+    """Session metadata."""
+
+    session_id: str
+    title: str
+    status: str = "active"
+    user_id: str | None = None
+    username: str | None = None
+    last_message_at: str | None = None
+    last_message_preview: str | None = None
+    title_source: str = "auto_first_query"
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ConversationItem(BaseModel):
+    """Session item for list view."""
+
+    session_id: str
+    title: str
+    message_count: int = 0
+    last_message: str | None = None
+    status: str = "active"
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ConversationDetailResponse(BaseModel):
+    """Full conversation detail with messages and snapshot."""
+
+    session_id: str
+    title: str
+    messages: list[ConversationMessage]
+    snapshot: ConversationSnapshot | None = None
+    has_more: bool = False
+    created_at: str | None = None
+
+
+class ConversationFullResponse(BaseModel):
+    """Complete conversation data for session recovery."""
+
+    session: ConversationSession
+    snapshot: ConversationSnapshot | None = None
+    latest_plan_summary: dict | None = None
+
+
+class CreateConversationResponse(BaseModel):
+    session_id: str
+    title: str
+    created_at: str

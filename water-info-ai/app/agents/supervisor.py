@@ -224,14 +224,15 @@ async def supervisor_node(state: dict) -> dict:
 
     deterministic = _deterministic_route(state)
     llm = get_llm()
-    if not llm.is_enabled and deterministic:
+    # When LLM is unavailable, fall back to deterministic routing immediately.
+    if not llm.is_enabled:
         return {
-            "next_agent": deterministic,
+            "next_agent": deterministic or "__end__",
             "iteration": iteration,
             "current_agent": "supervisor",
             "intent": inferred_intent,
             "focus_station_query": inferred_focus_station,
-            "supervisor_reasoning": "deterministic fallback",
+            "supervisor_reasoning": "deterministic (no llm)",
         }
 
     prompt = json.dumps({
@@ -247,7 +248,7 @@ async def supervisor_node(state: dict) -> dict:
             "notifications": bool(state.get("notifications")),
         },
         "suggested_route": deterministic,
-    }, ensure_ascii=False, indent=2)
+    }, ensure_ascii=False)
 
     parsed = None
     if llm.is_enabled:

@@ -46,17 +46,23 @@ service.interceptors.request.use(
 )
 
 // Response interceptor — unwrap ApiResponse, handle errors
+// Handles both Spring Boot ApiResponse wrapper and plain FastAPI JSON
 service.interceptors.response.use(
   (response) => {
-    const res = response.data as ApiResponse
-    if (res.code !== 200) {
-      ElMessage.error(res.message || '请求失败')
-      if (res.code === 401) {
-        handleUnauthorized(response.config)
+    const res = response.data
+    // Spring Boot wraps responses in { code, message, data, ... }
+    if (res !== null && typeof res === 'object' && !Array.isArray(res) && typeof res.code === 'number') {
+      if (res.code !== 200) {
+        ElMessage.error(res.message || '请求失败')
+        if (res.code === 401) {
+          handleUnauthorized(response.config)
+        }
+        return Promise.reject(new Error(res.message || '请求失败'))
       }
-      return Promise.reject(new Error(res.message || '请求失败'))
+      return res  // return full ApiResponse so callers can access .data, .pagination, etc.
     }
-    return response.data
+    // Plain JSON from FastAPI AI service — wrap in a pseudo-ApiResponse for uniform access
+    return { code: 200, data: res, message: 'ok' } as ApiResponse
   },
   (error) => {
     if (error.response) {

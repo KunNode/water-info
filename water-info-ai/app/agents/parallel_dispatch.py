@@ -1,14 +1,18 @@
-"""Combined dispatch node used as a placeholder for parallel fan-out."""
+"""Combined dispatch node — runs resource_dispatcher and notification in true parallel."""
 
 from __future__ import annotations
+
+import asyncio
 
 from app.agents.notification import notification_node
 from app.agents.resource_dispatcher import resource_dispatcher_node
 
 
 async def parallel_dispatch_node(state: dict) -> dict:
-    resource_update = await resource_dispatcher_node(state)
-    notification_update = await notification_node({**state, **resource_update})
+    resource_update, notification_update = await asyncio.gather(
+        resource_dispatcher_node(state),
+        notification_node(state),
+    )
     return {
         "resource_plan": resource_update.get("resource_plan", []),
         "notifications": notification_update.get("notifications", []),
