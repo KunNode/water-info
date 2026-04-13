@@ -42,6 +42,8 @@ logs/
 **/coverage/
 **/*.tsbuildinfo
 
+/docs/*
+
 # Temp files
 *.tmp
 *.temp
