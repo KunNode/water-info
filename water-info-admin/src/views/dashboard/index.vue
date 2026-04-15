@@ -1,6 +1,5 @@
 <template>
   <div class="page-container">
-    <!-- Big Screen Entry -->
     <el-card shadow="hover" class="bigscreen-entry" :body-style="{ padding: '16px 24px' }">
       <div class="entry-content">
         <div class="entry-left">
@@ -17,7 +16,6 @@
       </div>
     </el-card>
 
-    <!-- Stats cards -->
     <el-row :gutter="16" class="stats-row">
       <el-col :span="6" v-for="card in statsCards" :key="card.title">
         <el-card shadow="hover" class="stat-card" :body-style="{ padding: '20px' }">
@@ -26,16 +24,13 @@
               <div class="stat-title">{{ card.title }}</div>
               <div class="stat-value" :style="{ color: card.color }">{{ card.value }}</div>
             </div>
-            <el-icon class="stat-icon" :style="{ color: card.color }">
-              <component :is="card.icon" />
-            </el-icon>
+            <el-icon class="stat-icon" :style="{ color: card.color }"><component :is="card.icon" /></el-icon>
           </div>
         </el-card>
       </el-col>
     </el-row>
 
     <el-row :gutter="16">
-      <!-- Water level trend -->
       <el-col :span="16">
         <el-card shadow="hover">
           <template #header>
@@ -47,8 +42,6 @@
           <div ref="waterLevelChartRef" class="chart-container"></div>
         </el-card>
       </el-col>
-
-      <!-- Recent alarms -->
       <el-col :span="8">
         <el-card shadow="hover">
           <template #header>
@@ -72,22 +65,15 @@
     </el-row>
 
     <el-row :gutter="16" style="margin-top: 16px">
-      <!-- Rainfall chart -->
       <el-col :span="12">
         <el-card shadow="hover">
-          <template #header>
-            <span>降雨量统计</span>
-          </template>
+          <template #header><span>降雨量统计</span></template>
           <div ref="rainfallChartRef" class="chart-container"></div>
         </el-card>
       </el-col>
-
-      <!-- Station status -->
       <el-col :span="12">
         <el-card shadow="hover">
-          <template #header>
-            <span>站点状态概览</span>
-          </template>
+          <template #header><span>站点状态概览</span></template>
           <div ref="stationPieRef" class="chart-container"></div>
         </el-card>
       </el-col>
@@ -103,17 +89,13 @@ import { getAlarms } from '@/api/alarm'
 import { getStations } from '@/api/station'
 import { getSensors } from '@/api/sensor'
 import { getObservations } from '@/api/observation'
-import { formatDate, alarmLevelMap, alarmStatusMap } from '@/utils/format'
+import { formatDate, alarmLevelMap, alarmStatusMap, stationTypeMap } from '@/utils/format'
 import type { Alarm } from '@/types'
-
-// Icon components for stats cards
-const iconComponents = { MapLocation, Cpu, Bell, DataLine }
 
 const waterLevelChartRef = ref<HTMLElement>()
 const rainfallChartRef = ref<HTMLElement>()
 const stationPieRef = ref<HTMLElement>()
 const recentAlarms = ref<Alarm[]>([])
-
 let charts: echarts.ECharts[] = []
 
 const statsCards = ref([
@@ -125,26 +107,22 @@ const statsCards = ref([
 
 async function loadData() {
   try {
-    // Load stations count
-    const stationsRes = await getStations({ page: 1, size: 1 })
+    const [stationsRes, sensorsRes, alarmsRes] = await Promise.all([
+      getStations({ page: 1, size: 1000 }),
+      getSensors({ page: 1, size: 1, status: 'ONLINE' }),
+      getAlarms({ page: 1, size: 10, status: 'OPEN' }),
+    ])
     if (stationsRes.data?.total !== undefined) {
       statsCards.value[0].value = String(stationsRes.data.total)
     }
-
-    // Load sensors count (ONLINE status)
-    const sensorsRes = await getSensors({ page: 1, size: 1, status: 'ONLINE' })
     if (sensorsRes.data?.total !== undefined) {
       statsCards.value[1].value = String(sensorsRes.data.total)
     }
-
-    // Load alarms
-    const alarmsRes = await getAlarms({ page: 1, size: 10, status: 'OPEN' })
     recentAlarms.value = alarmsRes.data?.records || []
     if (alarmsRes.data?.total !== undefined) {
       statsCards.value[2].value = String(alarmsRes.data.total)
     }
 
-    // Load today's observation count
     const today = new Date()
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString()
     const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString()
@@ -152,8 +130,11 @@ async function loadData() {
     if (observationsRes.data?.total !== undefined) {
       statsCards.value[3].value = String(observationsRes.data.total)
     }
+
+    updateStationPieChart(stationsRes.data?.records || [])
+    await Promise.all([updateWaterLevelChart(stationsRes.data?.records || []), updateRainfallChart(stationsRes.data?.records || [])])
   } catch {
-    // Dashboard data is best-effort
+    // best effort
   }
 }
 
@@ -161,87 +142,128 @@ function initWaterLevelChart() {
   if (!waterLevelChartRef.value) return
   const chart = echarts.init(waterLevelChartRef.value)
   charts.push(chart)
-
-  // Generate demo time-series data for last 24 hours
-  const now = Date.now()
-  const data = Array.from({ length: 24 }, (_, i) => {
-    const time = new Date(now - (23 - i) * 3600000)
-    return [time.toISOString(), (5 + Math.random() * 3).toFixed(2)]
-  })
-
   chart.setOption({
     tooltip: { trigger: 'axis' },
     grid: { left: 50, right: 20, top: 20, bottom: 30 },
-    xAxis: { type: 'time' },
-    yAxis: { type: 'value', name: '水位(m)', min: 4, max: 10 },
-    series: [
-      {
-        name: '水位',
-        type: 'line',
-        data,
-        smooth: true,
-        areaStyle: { opacity: 0.15 },
-        lineStyle: { width: 2 },
-        itemStyle: { color: '#409EFF' },
-      },
-    ],
+    xAxis: { type: 'category', data: [] },
+    yAxis: { type: 'value', name: '水位(m)' },
+    series: [{ name: '水位', type: 'line', data: [], smooth: true, areaStyle: { opacity: 0.15 }, lineStyle: { width: 2 }, itemStyle: { color: '#409EFF' } }],
   })
+}
+
+async function updateWaterLevelChart(stations: any[]) {
+  const chart = charts[0]
+  if (!chart) return
+  const station = stations.find((s) => s.code === 'ST_WL_CP_01') || stations.find((s) => s.type === 'WATER_LEVEL')
+  if (!station) {
+    chart.setOption({ xAxis: { data: [] }, series: [{ data: [] }] })
+    return
+  }
+  const now = new Date()
+  const start = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+  const res = await getObservations({ stationId: station.id, metricType: 'WATER_LEVEL', start, end: now.toISOString(), page: 1, size: 240 })
+  const records = [...(res.data?.records || [])].reverse()
+  const times = records.map((r) => formatDate(r.observedAt, 'HH:mm'))
+  const values = records.map((r) => Number(Number(r.value).toFixed(2)))
+  chart.setOption({ xAxis: { data: times }, series: [{ data: values }] })
 }
 
 function initRainfallChart() {
   if (!rainfallChartRef.value) return
   const chart = echarts.init(rainfallChartRef.value)
   charts.push(chart)
-
-  const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-  const data = days.map(() => Math.round(Math.random() * 80))
-
   chart.setOption({
     tooltip: { trigger: 'axis' },
     grid: { left: 50, right: 20, top: 20, bottom: 30 },
-    xAxis: { type: 'category', data: days },
+    xAxis: { type: 'category', data: [] },
     yAxis: { type: 'value', name: '降雨量(mm)' },
-    series: [
-      {
-        name: '降雨量',
-        type: 'bar',
-        data,
-        itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: '#409EFF' },
-            { offset: 1, color: '#79bbff' },
-          ]),
-          borderRadius: [4, 4, 0, 0],
-        },
-      },
-    ],
+    series: [{
+      name: '降雨量',
+      type: 'bar',
+      data: [],
+      itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#409EFF' }, { offset: 1, color: '#79bbff' }]), borderRadius: [4, 4, 0, 0] },
+    }],
   })
+}
+
+async function updateRainfallChart(stations: any[]) {
+  const chart = charts[1]
+  if (!chart) return
+  const rainStations = stations.filter((s) => s.type === 'RAIN_GAUGE')
+  if (!rainStations.length) {
+    chart.setOption({ xAxis: { data: [] }, series: [{ data: [] }] })
+    return
+  }
+  const now = new Date()
+  const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const dayLabels: string[] = []
+  const dayKeys: string[] = []
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - i)
+    dayLabels.push(`${d.getMonth() + 1}/${d.getDate()}`)
+    dayKeys.push(d.toISOString().split('T')[0])
+  }
+  const responses = await Promise.all(
+    rainStations.map((s) =>
+      getObservations({
+        stationId: s.id,
+        metricType: 'RAINFALL',
+        start: start.toISOString(),
+        end: now.toISOString(),
+        page: 1,
+        size: 500,
+      }),
+    ),
+  )
+  const sums: Record<string, number> = {}
+  dayKeys.forEach((k) => {
+    sums[k] = 0
+  })
+  responses.forEach((res) => {
+    ;(res.data?.records || []).forEach((r) => {
+      const day = r.observedAt.split('T')[0]
+      if (day in sums) sums[day] += r.value
+    })
+  })
+  chart.setOption({ xAxis: { data: dayLabels }, series: [{ data: dayKeys.map((k) => Number(sums[k].toFixed(1))) }] })
 }
 
 function initStationPieChart() {
   if (!stationPieRef.value) return
   const chart = echarts.init(stationPieRef.value)
   charts.push(chart)
-
   chart.setOption({
     tooltip: { trigger: 'item' },
     legend: { bottom: 0 },
-    series: [
-      {
-        type: 'pie',
-        radius: ['40%', '70%'],
-        avoidLabelOverlap: false,
-        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-        label: { show: true, formatter: '{b}: {c}' },
-        data: [
-          { value: 12, name: '水位站', itemStyle: { color: '#409EFF' } },
-          { value: 8, name: '雨量站', itemStyle: { color: '#67C23A' } },
-          { value: 5, name: '流量站', itemStyle: { color: '#E6A23C' } },
-          { value: 3, name: '水库站', itemStyle: { color: '#F56C6C' } },
-          { value: 2, name: '闸门站', itemStyle: { color: '#909399' } },
-        ],
-      },
-    ],
+    series: [{ type: 'pie', radius: ['40%', '70%'], avoidLabelOverlap: false, itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 }, label: { show: true, formatter: '{b}: {c}' }, data: [] }],
+  })
+}
+
+function updateStationPieChart(stations: any[]) {
+  const chart = charts[2]
+  if (!chart) return
+  const counts: Record<string, number> = {}
+  stations.forEach((s) => {
+    const name = stationTypeMap[s.type] || s.type
+    counts[name] = (counts[name] || 0) + 1
+  })
+  const colorMap: Record<string, string> = {
+    水位站: '#409EFF',
+    雨量站: '#67C23A',
+    流量站: '#E6A23C',
+    水库站: '#F56C6C',
+    闸门站: '#909399',
+    泵站: '#8B5CF6',
+  }
+  chart.setOption({
+    series: [{
+      data: Object.entries(counts).map(([name, value]) => ({
+        value,
+        name,
+        itemStyle: { color: colorMap[name] || '#409EFF' },
+      })),
+    }],
   })
 }
 
@@ -250,10 +272,10 @@ function handleResize() {
 }
 
 onMounted(() => {
-  loadData()
   initWaterLevelChart()
   initRainfallChart()
   initStationPieChart()
+  loadData()
   window.addEventListener('resize', handleResize)
 })
 
@@ -269,19 +291,16 @@ onUnmounted(() => {
   margin-bottom: 16px;
   background: linear-gradient(135deg, rgba(0, 100, 150, 0.05) 0%, rgba(0, 212, 255, 0.05) 100%);
   border: 1px solid rgba(0, 212, 255, 0.2);
-
   .entry-content {
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
-
   .entry-left {
     display: flex;
     align-items: center;
     gap: 16px;
   }
-
   .entry-text {
     .entry-title {
       font-size: 18px;
@@ -289,57 +308,47 @@ onUnmounted(() => {
       color: #303133;
       margin-bottom: 4px;
     }
-
     .entry-desc {
       font-size: 13px;
       color: #909399;
     }
   }
 }
-
 .stats-row {
   margin-bottom: 16px;
 }
-
 .stat-card {
   .stat-content {
     display: flex;
     justify-content: space-between;
     align-items: center;
   }
-
   .stat-title {
     font-size: 14px;
     color: #909399;
     margin-bottom: 8px;
   }
-
   .stat-value {
     font-size: 28px;
     font-weight: 600;
   }
-
   .stat-icon {
     font-size: 48px;
     opacity: 0.6;
   }
 }
-
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-
 .chart-container {
   height: 300px;
 }
-
 .alarm-list {
   max-height: 300px;
   overflow-y: auto;
 }
-
 .alarm-item {
   display: flex;
   align-items: center;
@@ -347,18 +356,15 @@ onUnmounted(() => {
   padding: 8px 0;
   border-bottom: 1px solid #f0f0f0;
   font-size: 13px;
-
   &:last-child {
     border-bottom: none;
   }
-
   .alarm-station {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
   .alarm-time {
     color: #909399;
     font-size: 12px;

@@ -25,7 +25,11 @@ export default defineConfig({
   },
   css: {
     preprocessorOptions: {
+      sass: {
+        api: 'modern',
+      },
       scss: {
+        api: 'modern',
         // additionalData: `@import "@/styles/variables.scss";`,
       },
     },
@@ -50,7 +54,6 @@ export default defineConfig({
         manualChunks: {
           'element-plus': ['element-plus'],
           echarts: ['echarts'],
-          leaflet: ['leaflet'],
         },
       },
     },

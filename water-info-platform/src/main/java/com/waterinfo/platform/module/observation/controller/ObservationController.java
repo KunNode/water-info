@@ -4,6 +4,7 @@ import com.waterinfo.platform.common.api.ApiResponse;
 import com.waterinfo.platform.common.api.PageResponse;
 import com.waterinfo.platform.module.observation.dto.BatchObservationRequest;
 import com.waterinfo.platform.module.observation.dto.BatchObservationResponse;
+import com.waterinfo.platform.module.observation.dto.LatestObservationBatchRequest;
 import com.waterinfo.platform.module.observation.dto.ObservationQueryRequest;
 import com.waterinfo.platform.module.observation.service.ObservationService;
 import com.waterinfo.platform.module.observation.vo.ObservationVO;
@@ -19,6 +20,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * Observation data controller
@@ -106,5 +108,14 @@ public class ObservationController {
             @RequestParam(required = false) String metricType) {
         ObservationVO observation = observationService.getLatestObservation(stationId, metricType);
         return ApiResponse.success(observation);
+    }
+
+    @Operation(summary = "批量获取最新观测数据", description = "按站点和指标类型批量获取最新观测数据")
+    @PostMapping("/latest/batch")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public ApiResponse<List<ObservationVO>> getLatestObservations(
+            @Valid @RequestBody LatestObservationBatchRequest request) {
+        List<ObservationVO> observations = observationService.getLatestObservations(request.getItems());
+        return ApiResponse.success(observations);
     }
 }
