@@ -59,6 +59,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        // Flood AI endpoints return Mono/Flux on Spring MVC. Those requests are
+        // resumed on ASYNC dispatch and need JWT parsing again, otherwise the
+        // resumed dispatch is treated as anonymous and ends with 401.
+        return false;
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {

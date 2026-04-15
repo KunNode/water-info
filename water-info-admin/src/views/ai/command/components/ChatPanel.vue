@@ -47,7 +47,10 @@ import { ref, watch, nextTick } from 'vue'
 import { ChatDotRound, Position } from '@element-plus/icons-vue'
 import ChatMessage from './ChatMessage.vue'
 import QuickCommands from './QuickCommands.vue'
-import type { ChatMessageItem } from './ChatMessage.vue'
+import type { ChatMessageItem } from '@/stores/aiConversation'
+import { useAiConversationStore } from '@/stores/aiConversation'
+
+const store = useAiConversationStore()
 
 const props = defineProps<{
   messages: ChatMessageItem[]
@@ -58,7 +61,8 @@ const emit = defineEmits<{
   send: [query: string]
 }>()
 
-const inputText = ref('')
+// Use store's inputDraft for persistence
+const inputText = ref(store.inputDraft)
 const messagesRef = ref<HTMLElement | null>(null)
 
 function handleSend() {
@@ -66,7 +70,13 @@ function handleSend() {
   if (!text || props.loading) return
   emit('send', text)
   inputText.value = ''
+  store.setInputDraft('')
 }
+
+// Sync inputText with store draft on change
+watch(inputText, (val) => {
+  store.setInputDraft(val)
+})
 
 // Auto-scroll to bottom when messages change or content updates
 watch(
