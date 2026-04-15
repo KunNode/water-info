@@ -1,25 +1,19 @@
 # ---- Build Stage ----
-ARG DOCKER_REGISTRY_PREFIX=docker.m.daocloud.io/library/
-FROM ${DOCKER_REGISTRY_PREFIX}alpine:3.20 AS builder
+FROM eclipse-temurin:17-jdk-alpine AS builder
 WORKDIR /build
 
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
-    apk add --no-cache openjdk17-jdk maven
+COPY pom.xml .
+COPY .mvn .mvn
+COPY mvnw .
+RUN chmod +x mvnw && ./mvnw dependency:go-offline -B
 
-COPY settings-docker.xml /root/.m2/settings.xml
-COPY pom.xml ./
-RUN mvn -s /root/.m2/settings.xml dependency:go-offline -B
-
-COPY src ./src
-RUN mvn -s /root/.m2/settings.xml package -DskipTests -B && \
+COPY src src
+RUN ./mvnw package -DskipTests -B && \
     java -Djarmode=layertools -jar target/*.jar extract --destination extracted
 
 # ---- Runtime Stage ----
-FROM ${DOCKER_REGISTRY_PREFIX}alpine:3.20
+FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
-
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
-    apk add --no-cache openjdk17-jre-headless
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 

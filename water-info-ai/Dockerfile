@@ -1,22 +1,23 @@
-# ── Build ──────────────────────────────────────────────────────────────────────
-ARG DOCKER_REGISTRY_PREFIX=docker.m.daocloud.io/library/
-FROM ${DOCKER_REGISTRY_PREFIX}python:3.11-slim AS builder
+# ---- Build Stage ----
+FROM python:3.11-slim AS builder
 WORKDIR /build
 
 RUN pip install --no-cache-dir uv
 
-COPY pyproject.toml README.md ./
-COPY app ./app
-RUN uv sync --no-dev
+COPY pyproject.toml .
+RUN uv pip install --system --no-cache -r <(uv pip compile pyproject.toml)
 
-# ── Runtime ────────────────────────────────────────────────────────────────────
-FROM ${DOCKER_REGISTRY_PREFIX}python:3.11-slim
+COPY . .
+
+# ---- Runtime Stage ----
+FROM python:3.11-slim
 WORKDIR /app
 
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
-COPY --from=builder /build/.venv /opt/venv
-COPY --from=builder /build/app ./app
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /build/app app/
 
 RUN mkdir -p /app/logs && chown -R appuser:appgroup /app
 USER appuser
@@ -24,7 +25,6 @@ USER appuser
 EXPOSE 8100
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/opt/venv/bin:$PATH"
+    PYTHONDONTWRITEBYTECODE=1
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]

@@ -33,6 +33,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/api/v1/flood': {
+        target: 'http://localhost:8100',
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
@@ -50,6 +54,7 @@ export default defineConfig({
         manualChunks: {
           'element-plus': ['element-plus'],
           echarts: ['echarts'],
+          leaflet: ['leaflet'],
         },
       },
     },

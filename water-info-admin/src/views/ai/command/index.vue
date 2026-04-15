@@ -6,12 +6,12 @@
         <el-icon class="logo-icon"><Platform /></el-icon>
         <span class="title">AI 智能指挥台</span>
       </div>
-      <div class="header-center" v-if="store.currentSessionId">
-        <span class="session-badge">Session: {{ store.currentSessionId.slice(0, 8) }}...</span>
+      <div class="header-center" v-if="sessionId">
+        <span class="session-badge">Session: {{ sessionId.slice(0, 8) }}...</span>
       </div>
       <div class="header-right">
         <el-tag
-          v-if="store.riskLevel !== 'none'"
+          v-if="riskLevel !== 'none'"
           :color="riskColor"
           effect="dark"
           style="border: none; margin-right: 16px;"
@@ -27,38 +27,28 @@
     <!-- Main -->
     <main class="main-content">
       <!-- Left: Chat -->
-      <ChatPanel :messages="store.messages" :loading="loading" @send="sendQuery" />
+      <ChatPanel :messages="messages" :loading="loading" @send="sendQuery" />
 
-      <!-- Right: Sidebar + Session Drawer -->
-      <div class="sidebar-wrapper">
-        <aside class="sidebar">
-          <AgentTimeline :agentStatus="store.agentStatus" />
-          <RiskPanel :riskLevel="store.riskLevel" />
-          <PlanStatus :planInfo="store.planInfo" />
-          <ActiveAlerts />
-          <SessionInfo :sessionId="store.currentSessionId" :startTime="startTime" :queryCount="store.queryCount" />
-        </aside>
-        <SessionDrawer
-          ref="sessionDrawerRef"
-          v-model="store.drawerOpen"
-          :currentSessionId="store.currentSessionId"
-          @select="handleSessionSelect"
-          @new="handleNewSession"
-        />
-      </div>
+      <!-- Right: Sidebar -->
+      <aside class="sidebar">
+        <AgentTimeline :agentStatus="agentStatus" />
+        <RiskPanel :riskLevel="riskLevel" />
+        <PlanStatus :planInfo="planInfo" />
+        <ActiveAlerts />
+        <SessionInfo :sessionId="sessionId" :startTime="startTime" :queryCount="queryCount" />
+      </aside>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { Platform, Back } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useSSE } from '@/composables/useSSE'
 import type { SSEEventType } from '@/composables/useSSE'
 import { getStreamUrl } from '@/api/flood'
-import { useAiConversationStore, type ChatMessageItem } from '@/stores/aiConversation'
 
 // Sub-components
 import ChatPanel from './components/ChatPanel.vue'
@@ -67,50 +57,28 @@ import RiskPanel from './components/RiskPanel.vue'
 import PlanStatus from './components/PlanStatus.vue'
 import ActiveAlerts from './components/ActiveAlerts.vue'
 import SessionInfo from './components/SessionInfo.vue'
-import SessionDrawer from './components/SessionDrawer.vue'
+import type { ChatMessageItem } from './components/ChatMessage.vue'
 
 const router = useRouter()
-const route = useRoute()
-const store = useAiConversationStore()
 const { fullText, loading, error, start, stop, reset, onStructuredEvent } = useSSE()
 
-// True once the current query receives at least one agent_message structured event.
-const hasAgentMessages = ref(false)
+// ── Conversation state ──────────────────────────────────────────
+const messages = ref<ChatMessageItem[]>([])
 
-// ── Session drawer ──────────────────────────────────────────────
-const sessionDrawerRef = ref<InstanceType<typeof SessionDrawer> | null>(null)
+// ── Session state ───────────────────────────────────────────────
+const sessionId = ref('')
 const startTime = ref('')
+const queryCount = ref(0)
 
-async function handleSessionSelect(newSessionId: string) {
-  if (!newSessionId || newSessionId === store.currentSessionId) return
-  
-  // Load session from server
-  await store.loadSession(newSessionId)
-  startTime.value = new Date().toLocaleTimeString()
-  
-  // Reset transient state
-  typewriterQueue.value = []
-  isTyping.value = false
-  currentQueryBubbleIdx.clear()
-  agentLatestContent.clear()
-  reset()
-  
-  // Update URL
-  router.replace({ name: 'AICommandSession', params: { sessionId: newSessionId } })
-}
-
-function handleNewSession(newId?: string) {
-  store.startNewSession()
-  startTime.value = ''
-  typewriterQueue.value = []
-  isTyping.value = false
-  currentQueryBubbleIdx.clear()
-  agentLatestContent.clear()
-  reset()
-  
-  // Update URL to base command route
-  router.replace({ name: 'AICommand' })
-}
+// ── Agent timeline ──────────────────────────────────────────────
+const agentStatus = reactive<Record<string, string>>({
+  supervisor: 'pending',
+  data_analyst: 'pending',
+  risk_assessor: 'pending',
+  plan_generator: 'pending',
+  resource_dispatcher: 'pending',
+  notification: 'pending',
+})
 
 // ── Typewriter queue ─────────────────────────────────────────────
 interface TypewriterTask {
@@ -123,49 +91,8 @@ const isTyping = ref(false)
 const CHARS_PER_TICK = 4
 const TICK_MS = 16
 
-const currentQueryBubbleIdx = new Map<string, number>()
-const agentLatestContent = new Map<string, string>()
-
-// ── Risk state (computed from store) ────────────────────────────
-const riskMap: Record<string, { label: string; color: string }> = {
-  none:     { label: '正常',   color: '#6b7280' },
-  low:      { label: '低风险', color: '#3b82f6' },
-  moderate: { label: '中等风险', color: '#f59e0b' },
-  high:     { label: '高风险', color: '#ef4444' },
-  critical: { label: '极高风险', color: '#7c3aed' },
-}
-const riskLabel = computed(() => riskMap[store.riskLevel]?.label ?? '正常')
-const riskColor = computed(() => riskMap[store.riskLevel]?.color ?? '#6b7280')
-
-// ── Message helpers ─────────────────────────────────────────────
-function removeThinkingBubble() {
-  const idx = store.messages.findIndex(m => m.role === 'thinking')
-  if (idx >= 0) {
-    store.messages.splice(idx, 1)
-    for (const [k, v] of currentQueryBubbleIdx.entries()) {
-      if (v > idx) currentQueryBubbleIdx.set(k, v - 1)
-    }
-  }
-}
-
 function enqueueAgentMessage(agent: string, content: string) {
-  removeThinkingBubble()
-  agentLatestContent.set(agent, content)
-
-  const existingIdx = currentQueryBubbleIdx.get(agent) ?? -1
-
-  if (existingIdx >= 0) {
-    const existing = store.messages[existingIdx]
-    if (existing.agentStatus === 'typing') {
-      return
-    }
-    existing.content = content
-    return
-  }
-
-  const idx = store.messages.length
-  currentQueryBubbleIdx.set(agent, idx)
-  store.addMessage({
+  messages.value.push({
     role: 'agent',
     content: '',
     timestamp: new Date(),
@@ -173,7 +100,9 @@ function enqueueAgentMessage(agent: string, content: string) {
     agentStatus: 'typing',
   })
   typewriterQueue.value.push({ agent, fullContent: content })
-  if (!isTyping.value) processTypewriterQueue()
+  if (!isTyping.value) {
+    processTypewriterQueue()
+  }
 }
 
 async function processTypewriterQueue() {
@@ -184,94 +113,104 @@ async function processTypewriterQueue() {
   isTyping.value = true
   const task = typewriterQueue.value.shift()!
 
-  const actualIdx = currentQueryBubbleIdx.get(task.agent) ?? -1
+  // Find the placeholder bubble: last agent bubble with matching agent name and status 'typing'
+  let actualIdx = -1
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const m = messages.value[i]
+    if (m.role === 'agent' && m.agent === task.agent && m.agentStatus === 'typing') {
+      actualIdx = i
+      break
+    }
+  }
+
   if (actualIdx < 0) {
+    // Bubble not found, skip to next
     processTypewriterQueue()
     return
   }
 
-  let pos = store.messages[actualIdx].content.length
-  while (true) {
-    const full = agentLatestContent.get(task.agent) ?? task.fullContent
-    if (pos >= full.length) break
+  // Type out characters
+  const full = task.fullContent
+  let pos = 0
+  while (pos < full.length) {
     pos = Math.min(pos + CHARS_PER_TICK, full.length)
-    store.messages[actualIdx].content = full.slice(0, pos)
+    messages.value[actualIdx].content = full.slice(0, pos)
     await nextTick()
     await new Promise<void>(r => setTimeout(r, TICK_MS))
   }
 
-  store.messages[actualIdx].agentStatus = 'done'
+  // Mark done
+  messages.value[actualIdx].agentStatus = 'done'
+
+  // Process next task
   processTypewriterQueue()
 }
 
+// ── Risk state ──────────────────────────────────────────────────
+const riskLevel = ref('none')
+const riskMap: Record<string, { label: string; color: string }> = {
+  none:     { label: '正常',   color: '#6b7280' },
+  low:      { label: '低风险', color: '#3b82f6' },
+  moderate: { label: '中等风险', color: '#f59e0b' },
+  high:     { label: '高风险', color: '#ef4444' },
+  critical: { label: '极高风险', color: '#7c3aed' },
+}
+const riskLabel = computed(() => riskMap[riskLevel.value]?.label ?? '正常')
+const riskColor = computed(() => riskMap[riskLevel.value]?.color ?? '#6b7280')
+
+// ── Plan state ──────────────────────────────────────────────────
+interface PlanInfo {
+  name: string
+  status: string
+  total: number
+  completed: number
+  failed: number
+}
+const planInfo = ref<PlanInfo | null>(null)
+
 // ── SSE structured events ────────────────────────────────────────
-onMounted(async () => {
-  // Initialize store from localStorage
-  store.initFromLocalStorage()
-  
-  // Fetch session list
-  await store.fetchSessions()
-  
-  // Check if URL has sessionId param
-  const sessionIdFromRoute = route.params.sessionId as string | undefined
-  
-  if (sessionIdFromRoute) {
-    // Load session from URL
-    await store.loadSession(sessionIdFromRoute)
-    startTime.value = new Date().toLocaleTimeString()
-  } else if (store.currentSessionId) {
-    // Load previously active session from localStorage
-    await store.loadSession(store.currentSessionId)
-    startTime.value = new Date().toLocaleTimeString()
-  }
-  
-  // Set up SSE event handlers
+onMounted(() => {
   onStructuredEvent((event: SSEEventType) => {
     if (event.type === 'session_init') {
-      if (!store.currentSessionId) {
-        store.setSessionId(event.sessionId)
+      if (!sessionId.value) {
+        sessionId.value = event.sessionId
         startTime.value = new Date().toLocaleTimeString()
-        // Update URL with new session ID
-        router.replace({ name: 'AICommandSession', params: { sessionId: event.sessionId } })
       }
     } else if (event.type === 'agent_update') {
-      store.setAgentStatus(event.agent, event.status)
+      agentStatus[event.agent] = event.status
     } else if (event.type === 'risk_update') {
-      store.updateSnapshot({ risk_level: event.level })
+      riskLevel.value = event.level
     } else if (event.type === 'plan_update') {
-      store.updateSnapshot({
-        plan_info: {
-          plan_name: event.name,
-          status: event.status,
-          actions_count: event.total,
-        }
-      })
+      planInfo.value = {
+        name: event.name,
+        status: event.status,
+        total: event.total,
+        completed: event.completed,
+        failed: event.failed,
+      }
     } else if (event.type === 'agent_message') {
-      hasAgentMessages.value = true
       enqueueAgentMessage(event.agent, event.content)
     }
   })
 })
 
-// ── Keep assistant message in sync with streaming plain-text ────
+// ── Keep last assistant message in sync with streaming text ─────
 watch(fullText, (val) => {
-  if (!val || hasAgentMessages.value) return
-  removeThinkingBubble()
-  const last = store.messages[store.messages.length - 1]
+  const last = messages.value[messages.value.length - 1]
   if (last?.role === 'assistant') {
     last.content = val
-  } else {
-    store.addMessage({ role: 'assistant', content: val, timestamp: new Date() })
   }
 })
 
 // ── Auto-activate supervisor when loading starts ──────────────────
 watch(loading, (isLoading) => {
   if (isLoading) {
-    const hasActive = Object.values(store.agentStatus).some(s => s === 'active' || s === 'done')
-    if (!hasActive) store.setAgentStatus('supervisor', 'active')
+    const hasActive = Object.values(agentStatus).some(s => s === 'active' || s === 'done')
+    if (!hasActive) agentStatus.supervisor = 'active'
   } else {
-    store.finalizeAgentStatuses()
+    Object.keys(agentStatus).forEach(key => {
+      if (agentStatus[key] === 'active') agentStatus[key] = 'done'
+    })
   }
 })
 
@@ -279,36 +218,35 @@ watch(loading, (isLoading) => {
 async function sendQuery(queryText: string) {
   if (!queryText.trim() || loading.value) return
 
-  // Reset agent statuses
-  store.resetAgentStatus()
+  queryCount.value++
 
-  // Reset typewriter queue and per-query agent tracking
-  hasAgentMessages.value = false
+  // Reset agent statuses
+  Object.keys(agentStatus).forEach(key => { agentStatus[key] = 'pending' })
+
+  // Reset typewriter queue
   typewriterQueue.value = []
   isTyping.value = false
-  currentQueryBubbleIdx.clear()
-  agentLatestContent.clear()
 
   // Push user message
-  store.addMessage({ role: 'user', content: queryText, timestamp: new Date() })
+  messages.value.push({ role: 'user', content: queryText, timestamp: new Date() })
 
-  // Push thinking placeholder
-  store.addMessage({ role: 'thinking', content: '正在分析，请稍候…', timestamp: new Date() })
+  // Push empty assistant placeholder (will be filled by streaming)
+  messages.value.push({ role: 'assistant', content: '', timestamp: new Date() })
 
   // Reset SSE accumulator
   reset()
 
   try {
     const payload: { query: string; sessionId?: string } = { query: queryText }
-    if (store.currentSessionId) payload.sessionId = store.currentSessionId
+    if (sessionId.value) payload.sessionId = sessionId.value
     await start(getStreamUrl(), payload)
-    // Refresh session list so title/last-message stays current
-    await store.fetchSessions()
-    sessionDrawerRef.value?.refresh()
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     ElMessage.error(error.value || msg || '请求失败')
-    removeThinkingBubble()
+    // Remove empty assistant placeholder on error
+    if (messages.value[messages.value.length - 1]?.content === '') {
+      messages.value.pop()
+    }
   }
 }
 
@@ -387,19 +325,11 @@ function goBack() {
 .main-content {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr 300px;
   gap: 20px;
   padding: 20px;
   min-height: 0;
   overflow: hidden;
-}
-
-.sidebar-wrapper {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  position: relative;
-  min-height: 0;
 }
 
 /* glass-panel is used by ChatPanel and sidebar sub-components */
@@ -411,8 +341,6 @@ function goBack() {
 }
 
 .sidebar {
-  width: 300px;
-  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;

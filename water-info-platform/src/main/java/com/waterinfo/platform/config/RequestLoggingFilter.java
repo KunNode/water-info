@@ -9,6 +9,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.IOException;
 
@@ -30,12 +31,13 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
         }
 
         long start = System.currentTimeMillis();
+        ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(response);
 
         try {
-            filterChain.doFilter(request, response);
+            filterChain.doFilter(request, wrappedResponse);
         } finally {
             long duration = System.currentTimeMillis() - start;
-            int status = response.getStatus();
+            int status = wrappedResponse.getStatus();
 
             if (status >= 500) {
                 log.error("HTTP {} {} {} {}ms", request.getMethod(), request.getRequestURI(), status, duration);
@@ -44,6 +46,8 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
             } else {
                 log.info("HTTP {} {} {} {}ms", request.getMethod(), request.getRequestURI(), status, duration);
             }
+
+            wrappedResponse.copyBodyToResponse();
         }
     }
 

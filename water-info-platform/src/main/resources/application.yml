@@ -8,9 +8,6 @@ spring:
     name: water-info-platform
   profiles:
     active: dev
-  mvc:
-    async:
-      request-timeout: 180000
 
   # Redis Configuration
   data:

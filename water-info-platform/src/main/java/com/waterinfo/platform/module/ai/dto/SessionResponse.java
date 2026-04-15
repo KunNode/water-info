@@ -2,6 +2,7 @@ package com.waterinfo.platform.module.ai.dto;
 
 import lombok.Data;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -10,7 +11,17 @@ import java.util.List;
 @Data
 public class SessionResponse {
 
-    private String sessionId;
-    private List<FloodPlanResponse> plans;
-    private String createdAt;
+    private String id;
+    private String status;
+    private List<SessionMessage> messages;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+
+    @Data
+    public static class SessionMessage {
+        private String role;
+        private String content;
+        private String agent;
+        private LocalDateTime timestamp;
+    }
 }

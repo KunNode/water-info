@@ -2,14 +2,9 @@ package com.waterinfo.platform.module.ai.controller;
 
 import com.waterinfo.platform.common.api.ApiResponse;
 import com.waterinfo.platform.module.ai.client.AiServiceClient;
-import com.waterinfo.platform.module.ai.dto.ConversationDetail;
-import com.waterinfo.platform.module.ai.dto.ConversationItem;
-import com.waterinfo.platform.module.ai.dto.CreateConversationResponse;
-import com.waterinfo.platform.module.ai.dto.FloodPlanPageResponse;
 import com.waterinfo.platform.module.ai.dto.FloodPlanResponse;
 import com.waterinfo.platform.module.ai.dto.FloodQueryRequest;
 import com.waterinfo.platform.module.ai.dto.FloodQueryResponse;
-import com.waterinfo.platform.module.ai.dto.PlanExecuteResponse;
 import com.waterinfo.platform.module.ai.dto.SessionResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,6 +16,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.util.Map;
 
 /**
  * Flood AI emergency response controller
@@ -49,15 +46,20 @@ public class FloodAiController {
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
     public Flux<String> queryFloodStream(@Valid @RequestBody FloodQueryRequest request) {
         log.info("Flood stream query request: {}", request.getQuery());
-        // Spring WebFlux automatically prepends "data:" when serialising Flux<String>
-        // as text/event-stream — do NOT add the prefix here to avoid doubling it.
-        return aiServiceClient.queryFloodStream(request);
+        return aiServiceClient.queryFloodStream(request)
+                .map(data -> {
+                    // Ensure proper SSE format
+                    if (data.startsWith("data: ")) {
+                        return data;
+                    }
+                    return "data: " + data;
+                });
     }
 
     @Operation(summary = "获取应急预案列表", description = "分页获取AI生成的应急预案列表")
     @GetMapping("/plans")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Mono<ApiResponse<FloodPlanPageResponse>> getPlans(
+    public Mono<ApiResponse<Map<String, Object>>> getPlans(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
         log.debug("Get plans request, page: {}, size: {}", page, size);
@@ -77,7 +79,7 @@ public class FloodAiController {
     @Operation(summary = "执行应急预案", description = "执行指定的应急预案")
     @PostMapping("/plans/{id}/execute")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
-    public Mono<ApiResponse<PlanExecuteResponse>> executePlan(@PathVariable String id) {
+    public Mono<ApiResponse<FloodPlanResponse>> executePlan(@PathVariable String id) {
         log.info("Execute plan request: {}", id);
         return aiServiceClient.executePlan(id)
                 .map(ApiResponse::success);
@@ -90,64 +92,5 @@ public class FloodAiController {
         log.debug("Get session request: {}", id);
         return aiServiceClient.getSession(id)
                 .map(ApiResponse::success);
-    }
-
-    // ── Conversation (session with memory) ──────────────────────────────────
-
-    @Operation(summary = "会话列表", description = "获取所有会话列表（含最近消息预览）")
-    @GetMapping("/conversations")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Mono<ApiResponse<java.util.List<ConversationItem>>> listConversations(
-            @RequestParam(defaultValue = "50") int limit,
-            @RequestParam(defaultValue = "0") int offset) {
-        return aiServiceClient.listConversations(limit, offset)
-                .map(ApiResponse::success);
-    }
-
-    @Operation(summary = "获取会话详情", description = "获取会话元数据和业务快照（不含消息）")
-    @GetMapping("/conversations/{sessionId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Mono<ApiResponse<ConversationDetail>> getConversation(@PathVariable String sessionId) {
-        return aiServiceClient.getConversation(sessionId)
-                .map(ApiResponse::success);
-    }
-
-    @Operation(summary = "获取会话消息", description = "根据会话ID获取完整消息历史")
-    @GetMapping("/conversations/{sessionId}/messages")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Mono<ApiResponse<ConversationDetail>> getConversationMessages(
-            @PathVariable String sessionId,
-            @RequestParam(defaultValue = "40") int limit,
-            @RequestParam(required = false) Long beforeId) {
-        return aiServiceClient.getConversationMessages(sessionId)
-                .map(ApiResponse::success);
-    }
-
-    @Operation(summary = "新建会话", description = "创建一个新的会话")
-    @PostMapping("/conversations")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Mono<ApiResponse<CreateConversationResponse>> createConversation(
-            @RequestBody(required = false) java.util.Map<String, String> body) {
-        String title = body != null ? body.getOrDefault("title", null) : null;
-        return aiServiceClient.createConversation(title)
-                .map(ApiResponse::success);
-    }
-
-    @Operation(summary = "重命名会话", description = "修改会话标题")
-    @PatchMapping("/conversations/{sessionId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Mono<ApiResponse<Void>> renameConversation(
-            @PathVariable String sessionId,
-            @RequestBody java.util.Map<String, String> body) {
-        return aiServiceClient.renameConversation(sessionId, body.getOrDefault("title", ""))
-                .then(Mono.just(ApiResponse.<Void>success(null)));
-    }
-
-    @Operation(summary = "删除会话", description = "删除指定会话及其所有消息")
-    @DeleteMapping("/conversations/{sessionId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Mono<ApiResponse<Void>> deleteConversation(@PathVariable String sessionId) {
-        return aiServiceClient.deleteConversation(sessionId)
-                .then(Mono.just(ApiResponse.<Void>success(null)));
     }
 }
