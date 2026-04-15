@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+  <defs>
+    <linearGradient id="lakeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a6fb5;stop-opacity:0.7"/>
+      <stop offset="100%" style="stop-color:#0d3f6e;stop-opacity:0.9"/>
+    </linearGradient>
+    <linearGradient id="riverGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#2196F3;stop-opacity:0.6"/>
+      <stop offset="100%" style="stop-color:#1a6fb5;stop-opacity:0.8"/>
+    </linearGradient>
+    <linearGradient id="mountainGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2d5a27;stop-opacity:0.6"/>
+      <stop offset="100%" style="stop-color:#1a3a15;stop-opacity:0.4"/>
+    </linearGradient>
+    <linearGradient id="cityGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#455a64;stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:#37474f;stop-opacity:0.2"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <pattern id="wavePattern" x="0" y="0" width="60" height="10" patternUnits="userSpaceOnUse">
+      <path d="M0 5 Q15 0, 30 5 Q45 10, 60 5" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+    </pattern>
+    <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="rgba(33,150,243,0.6)"/>
+    </marker>
+  </defs>
+
+  <rect width="800" height="600" fill="#0a1a2e"/>
+
+  <path d="M60,80 L120,30 L180,70 L240,20 L300,65 L340,40 L380,80 L380,160 L60,160 Z"
+        fill="url(#mountainGrad)" stroke="rgba(45,90,39,0.4)" stroke-width="1"/>
+  <text x="210" y="105" fill="rgba(255,255,255,0.35)" font-size="12" text-anchor="middle">上游山区</text>
+
+  <path d="M460,100 L510,50 L560,85 L610,35 L660,75 L700,55 L740,90 L740,180 L460,180 Z"
+        fill="url(#mountainGrad)" stroke="rgba(45,90,39,0.4)" stroke-width="1"/>
+  <text x="600" y="125" fill="rgba(255,255,255,0.35)" font-size="12" text-anchor="middle">南溪山区</text>
+
+  <rect x="500" y="200" width="180" height="120" rx="8" fill="url(#cityGrad)" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+  <text x="590" y="265" fill="rgba(255,255,255,0.3)" font-size="12" text-anchor="middle">翠屏城区</text>
+
+  <path d="M220,150 C230,180 260,200 300,230 C340,260 360,280 380,300"
+        fill="none" stroke="rgba(33,150,243,0.5)" stroke-width="6" stroke-linecap="round"
+        marker-end="url(#arrowBlue)"/>
+  <text x="260" y="200" fill="rgba(100,200,255,0.6)" font-size="11" transform="rotate(-30,260,200)">北溪</text>
+
+  <path d="M600,170 C580,200 540,240 500,280 C470,310 450,320 430,330"
+        fill="none" stroke="rgba(33,150,243,0.5)" stroke-width="6" stroke-linecap="round"
+        marker-end="url(#arrowBlue)"/>
+  <text x="530" y="230" fill="rgba(100,200,255,0.6)" font-size="11" transform="rotate(40,530,230)">南溪</text>
+
+  <path d="M300,280 C320,260 380,250 430,260 C480,270 510,290 520,320
+           C530,350 520,380 500,400 C480,420 440,430 400,430
+           C360,430 320,420 300,400 C280,380 270,350 280,320
+           C285,295 290,285 300,280 Z"
+        fill="url(#lakeGrad)" stroke="rgba(33,150,243,0.4)" stroke-width="2"/>
+  <path d="M300,280 C320,260 380,250 430,260 C480,270 510,290 520,320
+           C530,350 520,380 500,400 C480,420 440,430 400,430
+           C360,430 320,420 300,400 C280,380 270,350 280,320
+           C285,295 290,285 300,280 Z"
+        fill="url(#wavePattern)"/>
+  <text x="400" y="355" fill="rgba(255,255,255,0.5)" font-size="16" text-anchor="middle" font-weight="bold">翠屏湖</text>
+
+  <path d="M420,430 C430,460 440,480 440,510 L440,560"
+        fill="none" stroke="rgba(33,150,243,0.5)" stroke-width="8" stroke-linecap="round"
+        marker-end="url(#arrowBlue)"/>
+  <text x="460" y="545" fill="rgba(100,200,255,0.5)" font-size="11">下游排出</text>
+
+  <rect x="375" y="320" width="50" height="30" rx="4"
+        fill="rgba(33,150,243,0.15)" stroke="rgba(33,150,243,0.3)" stroke-width="1" stroke-dasharray="4,2"/>
+
+  <rect x="425" y="460" width="30" height="12" rx="2"
+        fill="rgba(144,163,174,0.4)" stroke="rgba(144,163,174,0.6)" stroke-width="1"/>
+
+  <g data-station="ST_RAIN_CP_01" transform="translate(220,140)">
+    <circle r="0.5" fill="transparent"/>
+  </g>
+  <g data-station="ST_RAIN_CP_02" transform="translate(600,160)">
+    <circle r="0.5" fill="transparent"/>
+  </g>
+  <g data-station="ST_WL_CP_01" transform="translate(400,330)">
+    <circle r="0.5" fill="transparent"/>
+  </g>
+  <g data-station="ST_WL_CP_02" transform="translate(490,290)">
+    <circle r="0.5" fill="transparent"/>
+  </g>
+  <g data-station="ST_FLOW_CP_01" transform="translate(440,450)">
+    <circle r="0.5" fill="transparent"/>
+  </g>
+  <g data-station="ST_RES_CP_01" transform="translate(400,305)">
+    <circle r="0.5" fill="transparent"/>
+  </g>
+  <g data-station="ST_GATE_CP_01" transform="translate(440,490)">
+    <circle r="0.5" fill="transparent"/>
+  </g>
+  <g data-station="ST_PUMP_CP_01" transform="translate(560,240)">
+    <circle r="0.5" fill="transparent"/>
+  </g>
+
+  <text x="400" y="585" fill="rgba(255,255,255,0.2)" font-size="10" text-anchor="middle">翠屏湖流域监测示意图</text>
+</svg>
