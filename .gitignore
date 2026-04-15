@@ -12,6 +12,7 @@ Thumbs.db
 .claude/
 .qoder/
 .trae/
+.omx/
 
 # Logs and runtime files
 logs/
@@ -43,6 +44,7 @@ logs/
 **/*.tsbuildinfo
 
 /docs/*
+
 
 # Temp files
 *.tmp
