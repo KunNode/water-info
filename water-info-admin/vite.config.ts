@@ -54,6 +54,7 @@ export default defineConfig({
         manualChunks: {
           'element-plus': ['element-plus'],
           echarts: ['echarts'],
+          leaflet: ['leaflet'],
         },
       },
     },
