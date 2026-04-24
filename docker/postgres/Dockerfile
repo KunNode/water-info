@@ -2,7 +2,7 @@ ARG DOCKER_REGISTRY_PREFIX=docker.m.daocloud.io/library/
 FROM ${DOCKER_REGISTRY_PREFIX}alpine:3.20
 
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
-    apk add --no-cache postgresql16 postgresql16-client postgresql16-contrib su-exec bash
+    apk add --no-cache postgresql16 postgresql16-client postgresql16-contrib postgresql-pgvector su-exec bash
 
 ENV PATH="/usr/lib/postgresql16/bin:/usr/libexec/postgresql16:$PATH" \
     PGDATA=/var/lib/postgresql/data

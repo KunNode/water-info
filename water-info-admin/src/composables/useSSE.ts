@@ -7,6 +7,18 @@ export type SSEEventType =
   | { type: 'plan_update'; name: string; status: string; total: number; completed: number; failed: number }
   | { type: 'session_init'; sessionId: string }
   | { type: 'agent_message'; agent: string; content: string }
+  | {
+      type: 'evidence_update'
+      agent: string
+      items: Array<{
+        citation_id: string
+        content: string
+        document_title: string
+        source_uri?: string
+        heading_path?: string[]
+        score?: number
+      }>
+    }
 
 export function useSSE() {
   const MAX_CHUNKS = 100

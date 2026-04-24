@@ -6,6 +6,7 @@ WORKDIR /build
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml README.md ./
+COPY uv.lock ./
 COPY app ./app
 RUN uv sync --no-dev
 

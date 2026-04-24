@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from app.rag.service import format_evidence_markdown
 from app.services.llm import get_llm
 from app.state import to_plain_data
 
@@ -32,6 +33,7 @@ def _build_fallback_response(state: dict) -> str:
     summary = str(state.get("data_summary") or "").strip()
     assessment = state.get("risk_assessment")
     plan = state.get("emergency_plan")
+    evidence = state.get("evidence") or []
     error = state.get("error")
 
     if intent == "general_chat":
@@ -60,7 +62,8 @@ def _build_fallback_response(state: dict) -> str:
             sections.append(summary)
         if assessment:
             sections.append(
-                f"从综合研判看，当前整体风险等级为 **{_risk_level_text(assessment)}**，评分 {assessment.risk_score:.1f}。"
+                f"从综合研判看，当前整体风险等级为 **{_risk_level_text(assessment)}**，"
+                f"评分 {assessment.risk_score:.1f}。"
             )
             if assessment.key_risks:
                 sections.append("最需要盯住的是：" + "；".join(assessment.key_risks[:4]) + "。")
@@ -69,14 +72,16 @@ def _build_fallback_response(state: dict) -> str:
             sections.append(summary)
         if assessment:
             sections.append(
-                f"从风险联动角度看，当前整体风险等级为 **{_risk_level_text(assessment)}**，评分 {assessment.risk_score:.1f}。"
+                f"从风险联动角度看，当前整体风险等级为 **{_risk_level_text(assessment)}**，"
+                f"评分 {assessment.risk_score:.1f}。"
             )
             if assessment.key_risks:
                 sections.append("和告警态势最相关的风险信号有：" + "；".join(assessment.key_risks[:4]) + "。")
     elif intent == "risk_assessment":
         if assessment:
             sections.append(
-                f"我的结论是：当前整体风险等级为 **{_risk_level_text(assessment)}**，综合评分 {assessment.risk_score:.1f}。"
+                f"我的结论是：当前整体风险等级为 **{_risk_level_text(assessment)}**，"
+                f"综合评分 {assessment.risk_score:.1f}。"
             )
             if assessment.key_risks:
                 sections.append("主要依据包括：" + "；".join(assessment.key_risks[:4]) + "。")
@@ -89,7 +94,8 @@ def _build_fallback_response(state: dict) -> str:
                 sections.append(plan.summary)
         if assessment:
             sections.append(
-                f"当前风险等级为 **{_risk_level_text(assessment)}**，评分 {assessment.risk_score:.1f}，可以作为预案执行优先级依据。"
+                f"当前风险等级为 **{_risk_level_text(assessment)}**，评分 {assessment.risk_score:.1f}，"
+                "可以作为预案执行优先级依据。"
             )
         elif _should_include_summary(state) and summary:
             sections.append(summary)
@@ -105,6 +111,8 @@ def _build_fallback_response(state: dict) -> str:
 
     if plan and intent in {"plan_generation", "resource_dispatch", "notification"}:
         sections.append(f"已形成预案《{plan.plan_name}》，可继续展开措施、资源和通知安排。")
+    if evidence:
+        sections.append(format_evidence_markdown(evidence))
     if error:
         sections.append(f"本次处理还捕获到一个异常：{error}")
     return "\n\n".join(sections).strip() or "综合研判已完成。"
@@ -138,7 +146,12 @@ async def final_response_node(state: dict) -> dict:
                     "emergency_plan": to_plain_data(state.get("emergency_plan")),
                     "resource_plan": to_plain_data(state.get("resource_plan", [])),
                     "notifications": to_plain_data(state.get("notifications", [])),
+                    "evidence": to_plain_data(state.get("evidence", [])),
                     "error": state.get("error"),
+                    "llm_context": {
+                        "final_response_generated_by_llm": True,
+                        "grounding_sources": ["structured_monitoring_data", "risk_rules", "rag_evidence_if_available"],
+                    },
                     "fallback_report": final_text,
                 }, ensure_ascii=False, indent=2),
                 system_prompt=(
@@ -147,6 +160,10 @@ async def final_response_node(state: dict) -> dict:
                     "请优先直接回应用户问题，而不是机械罗列字段。"
                     "如果用户问的是某个站点，就围绕该站点回答，不要退回到全局总览。"
                     "如果 should_include_summary 为 false，就不要先铺垫整体总览，只保留与当前问题直接相关的分析与结论。"
+                    "若 evidence 非空，请优先使用 evidence 中的内容，并保留 [1][2] 这类引用。"
+                    "若 evidence 为空，不要编造外部制度来源。"
+                    "如果用户询问是否使用模型研判，请说明当前回答由大模型结合结构化监测数据、规则基线"
+                    "和可用 RAG 证据生成；不要声称未使用模型。"
                     "只有在确实需要时再使用分节标题；不要把内部工作流痕迹暴露给用户。"
                     "若存在异常信息，需要在结尾单独提醒。"
                     "输出 Markdown。"

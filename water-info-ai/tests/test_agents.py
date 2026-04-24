@@ -48,7 +48,7 @@ class TestSupervisorNode:
         result = await supervisor_node(
             {
                 "session_id": "test-session",
-                "user_query": "请继续",
+                "user_query": "当前水情整体情况怎么样",
                 "messages": [],
                 "iteration": 0,
                 "data_summary": "已有水情摘要",
@@ -67,7 +67,13 @@ class TestAgentNodes:
     async def test_data_analyst_node_returns_summary(self):
         with patch(
             "app.agents.data_analyst._build_deterministic_bundle",
-            AsyncMock(return_value={"data_summary": "数据分析完成"}),
+            AsyncMock(
+                return_value={
+                    "data_summary": "数据分析完成",
+                    "overview_data": {"stations": [], "active_alarms": [], "station_count": 0, "alarm_count": 0},
+                    "weather_forecast": {"forecast": {"total_precip_24h_mm": 0}},
+                }
+            ),
         ):
             result = await data_analyst_node(
                 {
@@ -83,8 +89,9 @@ class TestAgentNodes:
 
     @pytest.mark.asyncio
     async def test_data_analyst_node_falls_back_to_llm_when_deterministic_summary_fails(self):
-        mock_agent = SimpleNamespace(
-            ainvoke=AsyncMock(return_value={"messages": [SimpleNamespace(content="LLM 数据分析完成")]})
+        mock_llm = SimpleNamespace(
+            is_enabled=True,
+            ainvoke=AsyncMock(return_value=SimpleNamespace(content="LLM 数据分析完成")),
         )
 
         with (
@@ -92,41 +99,52 @@ class TestAgentNodes:
                 "app.agents.data_analyst._build_deterministic_bundle",
                 AsyncMock(side_effect=RuntimeError("db failed")),
             ),
-            patch("app.agents.data_analyst.create_react_agent", return_value=mock_agent),
+            patch("app.agents.data_analyst.get_llm", return_value=mock_llm),
         ):
-            result = await data_analyst_node(
-                {
-                    "session_id": "test-session",
-                    "user_query": "分析当前水情",
-                    "messages": [],
-                    "iteration": 0,
-                }
-            )
+            with pytest.raises(RuntimeError):
+                await data_analyst_node(
+                    {
+                        "session_id": "test-session",
+                        "user_query": "分析当前水情",
+                        "messages": [],
+                        "iteration": 0,
+                    }
+                )
 
-        assert result["data_summary"] == "LLM 数据分析完成"
+        mock_llm.ainvoke.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_risk_assessor_node_parses_json_payload(self):
-        mock_agent = SimpleNamespace(
+        mock_llm = SimpleNamespace(
+            is_enabled=True,
             ainvoke=AsyncMock(
-                return_value={
-                    "messages": [
-                        SimpleNamespace(
-                            content='{"risk_level":"high","risk_score":76.5,"affected_stations":["S1"],"key_risks":["水位持续上涨"],"trend":"rising","reasoning":"达到高风险阈值"}'
-                        )
-                    ]
-                }
-            )
+                return_value=SimpleNamespace(
+                    content='{"risk_level":"high","risk_score":76.5,"affected_stations":["S1"],"key_risks":["水位持续上涨"],"trend":"rising","reasoning":"达到高风险阈值"}'
+                )
+            ),
         )
 
-        with patch("app.agents.risk_assessor.create_react_agent", return_value=mock_agent):
+        with patch("app.agents.risk_assessor.get_llm", return_value=mock_llm):
             result = await risk_assessor_node(
                 {
                     "session_id": "test-session",
                     "user_query": "评估风险",
                     "messages": [],
                     "iteration": 0,
-                    "data_summary": "站点 S1 水位持续上涨",
+                    "overview_data": {
+                        "stations": [
+                            {
+                                "id": "station-1",
+                                "code": "S1",
+                                "name": "站点一",
+                                "water_level": 3.6,
+                                "warning_level": 3.0,
+                                "danger_level": 3.5,
+                            }
+                        ],
+                        "active_alarms": [],
+                    },
+                    "weather_forecast": {"forecast": {"total_precip_24h_mm": 20.0}},
                 }
             )
 
@@ -167,6 +185,48 @@ class TestAgentNodes:
         assert result["risk_assessment"].risk_score > 0
 
     @pytest.mark.asyncio
+    async def test_risk_assessor_node_guards_model_understatement(self):
+        mock_llm = SimpleNamespace(
+            is_enabled=True,
+            ainvoke=AsyncMock(
+                return_value=SimpleNamespace(
+                    content='{"risk_level":"none","risk_score":1,"affected_stations":[],"key_risks":[],"trend":"stable","reasoning":"模型低估"}'
+                )
+            ),
+        )
+
+        with patch("app.agents.risk_assessor.get_llm", return_value=mock_llm):
+            result = await risk_assessor_node(
+                {
+                    "session_id": "test-session",
+                    "user_query": "评估风险",
+                    "messages": [],
+                    "iteration": 0,
+                    "overview_data": {
+                        "stations": [
+                            {
+                                "id": "station-1",
+                                "code": "S1",
+                                "name": "站点一",
+                                "water_level": 3.8,
+                                "warning_level": 3.0,
+                                "danger_level": 3.5,
+                                "rainfall": 45.0,
+                            }
+                        ],
+                        "active_alarms": [
+                            {"station_id": "station-1", "station_name": "站点一", "message": "水位告警"}
+                        ],
+                    },
+                    "weather_forecast": {"forecast": {"total_precip_24h_mm": 80.0}},
+                }
+            )
+
+        assert result["risk_assessment"].risk_level in {RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.CRITICAL}
+        assert result["risk_assessment"].risk_score >= 40
+        assert "保守上调" in "；".join(result["risk_assessment"].key_risks)
+
+    @pytest.mark.asyncio
     async def test_plan_generator_node_builds_draft_plan(self):
         result = await plan_generator_node(
             {
@@ -185,4 +245,35 @@ class TestAgentNodes:
         )
 
         assert result["emergency_plan"].plan_id.startswith("EP-")
+        assert result["emergency_plan"].actions[0].action_type != ""
+
+    @pytest.mark.asyncio
+    async def test_plan_generator_node_falls_back_when_model_payload_is_incomplete(self):
+        mock_llm = SimpleNamespace(
+            is_enabled=True,
+            ainvoke=AsyncMock(
+                return_value=SimpleNamespace(
+                    content='{"plan_name":"空预案","trigger_conditions":"无","summary":"无","actions":[],"resources":[],"notifications":[],"citations":[]}'
+                )
+            ),
+        )
+
+        with patch("app.agents.plan_generator.get_llm", return_value=mock_llm):
+            result = await plan_generator_node(
+                {
+                    "session_id": "test-session",
+                    "user_query": "生成应急预案",
+                    "messages": [],
+                    "iteration": 0,
+                    "data_summary": "多个站点接近警戒水位",
+                    "risk_assessment": RiskAssessment(
+                        risk_level=RiskLevel.HIGH,
+                        risk_score=80.0,
+                        affected_stations=["S1"],
+                        key_risks=["水位超过警戒线"],
+                    ),
+                }
+            )
+
+        assert result["emergency_plan"].plan_name != "空预案"
         assert result["emergency_plan"].actions[0].action_type != ""

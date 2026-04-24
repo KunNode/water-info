@@ -61,6 +61,7 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
     data_analyst: 'pending',
     risk_assessor: 'pending',
     plan_generator: 'pending',
+    knowledge_retriever: 'pending',
     resource_dispatcher: 'pending',
     notification: 'pending',
   })
@@ -195,6 +196,7 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
       data_analyst: 'pending',
       risk_assessor: 'pending',
       plan_generator: 'pending',
+      knowledge_retriever: 'pending',
       resource_dispatcher: 'pending',
       notification: 'pending',
     }

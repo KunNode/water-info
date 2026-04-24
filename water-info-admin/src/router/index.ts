@@ -85,7 +85,7 @@ export const constantRoutes: RouteRecordRaw[] = [
     path: '/ai',
     component: Layout,
     redirect: '/ai/command',
-    meta: { title: 'AI指挥', icon: 'MagicStick' },
+    meta: { title: 'AI助手', icon: 'MagicStick' },
     children: [
       {
         path: 'command',
@@ -105,6 +105,12 @@ export const constantRoutes: RouteRecordRaw[] = [
         name: 'AIPlan',
         component: () => import('@/views/ai/plan/index.vue'),
         meta: { title: '预案管理', icon: 'Document' },
+      },
+      {
+        path: 'knowledge',
+        name: 'AIKnowledge',
+        component: () => import('@/views/ai/knowledge/index.vue'),
+        meta: { title: '知识库管理', icon: 'Reading', roles: ['ADMIN', 'OPERATOR'] },
       },
     ],
   },

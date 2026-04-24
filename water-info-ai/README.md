@@ -136,6 +136,47 @@ water-info-ai/
 - 风险、预案等关键结果尽量保留结构化对象
 - SSE 和 REST 响应在入口层统一转换
 
+## RAG 知识库
+
+当前 AI 服务已经接入一层可检索、可引用的知识库：
+
+- 支持 `Markdown / TXT / PDF / DOCX` 文档上传
+- 文档会被切块后写入 `kb_document / kb_chunk / kb_embedding / kb_ingest_job`
+- 检索走“向量召回 + 关键词召回 + RRF 融合”
+- LangGraph 新增 `knowledge_retriever` 节点
+- `risk_assessor`、`plan_generator`、`conversation_assistant` 会在合适场景注入证据片段
+- SSE 新增 `evidence_update` 事件，前端可以展示命中的引用片段
+
+### 知识库 API
+
+- `POST /api/v1/kb/documents`
+- `GET /api/v1/kb/documents`
+- `GET /api/v1/kb/documents/{id}`
+- `DELETE /api/v1/kb/documents/{id}`
+- `POST /api/v1/kb/documents/{id}/reindex`
+- `POST /api/v1/kb/search`
+- `GET /api/v1/kb/stats`
+
+### CLI
+
+```bash
+cd water-info-ai
+uv run python -m app.rag.cli ingest /path/to/manual.md
+```
+
+### RAG 相关环境变量
+
+```env
+EMBEDDING_API_KEY=your-siliconflow-api-key
+EMBEDDING_API_BASE=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
+EMBEDDING_DIM=1024
+RAG_TOP_K=5
+RAG_MIN_SCORE=0.25
+RAG_CHUNK_SIZE=500
+RAG_CHUNK_OVERLAP=80
+```
+
 ## 当前工作流
 
 一次查询会按用户意图动态走不同路径，例如：
@@ -281,17 +322,18 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8100
 
 ### 规则与模型的分工
 
-当前实现采用“多 agent 主导，结构化工具做 grounding”的思路：
+当前实现采用“模型决策 + 工具/RAG grounding + 结构化校验”的思路：
 
-- 风险计算：主要在 [app/risk.py](./app/risk.py)
-- 预案模板：主要在 [app/plan.py](./app/plan.py)
-- LLM：用于 Supervisor 意图理解、站点/态势分析、风险结论生成、预案组织和最终回答
+- Supervisor：优先由 LLM 基于用户意图和 workflow_state 决定下一个 agent
+- 数据与知识：监测数据、RAG 证据片段、风险规则分数作为 grounding 输入模型
+- 结构化校验：风险 JSON、预案 JSON 必须通过字段、类型和业务边界检查
+- 规则兜底：[app/risk.py](./app/risk.py) 和 [app/plan.py](./app/plan.py) 只作为安全边界与失败回退
 
 这样做的好处是：
 
-- 保留业务约束，不让模型脱离真实数据胡说
-- 同时避免系统退化成简单的字段拼接器
-- 闲聊、站点追问、预案编排可以走不同 agent 路径
+- 让模型真正参与意图判断、风险结论和预案生成
+- 保留业务约束，不让模型脱离真实数据和制度依据胡说
+- 避免系统退化成关键词路由和模板字段拼接器
 
 ## 测试
 

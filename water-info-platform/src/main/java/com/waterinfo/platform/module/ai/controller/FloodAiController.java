@@ -16,8 +16,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -149,5 +151,71 @@ public class FloodAiController {
     public Mono<ApiResponse<Void>> deleteConversation(@PathVariable String sessionId) {
         return aiServiceClient.deleteConversation(sessionId)
                 .then(Mono.just(ApiResponse.<Void>success(null)));
+    }
+
+    // ── Knowledge base ──────────────────────────────────────────────────────
+
+    @Operation(summary = "上传知识文档", description = "上传文档到 AI 知识库并异步触发切块与索引")
+    @PostMapping(value = "/kb/documents", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<ApiResponse<JsonNode>> uploadKnowledgeDocument(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "source_uri", required = false) String sourceUri) {
+        return aiServiceClient.uploadKnowledgeDocument(file, title, sourceUri)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "知识文档列表", description = "查看知识库中的文档列表")
+    @GetMapping("/kb/documents")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<JsonNode>> listKnowledgeDocuments(
+            @RequestParam(required = false) String status,
+            @RequestParam(value = "source_type", required = false) String sourceType,
+            @RequestParam(required = false) String q,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        return aiServiceClient.listKnowledgeDocuments(status, sourceType, q, limit, offset)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "知识文档详情", description = "查看单个知识文档详情")
+    @GetMapping("/kb/documents/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<JsonNode>> getKnowledgeDocument(@PathVariable String id) {
+        return aiServiceClient.getKnowledgeDocument(id)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "删除知识文档", description = "软删除知识文档并下线其索引")
+    @DeleteMapping("/kb/documents/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<ApiResponse<JsonNode>> deleteKnowledgeDocument(@PathVariable String id) {
+        return aiServiceClient.deleteKnowledgeDocument(id)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "重建知识文档索引", description = "重新切块并重建向量索引")
+    @PostMapping("/kb/documents/{id}/reindex")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<ApiResponse<JsonNode>> reindexKnowledgeDocument(@PathVariable String id) {
+        return aiServiceClient.reindexKnowledgeDocument(id)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "知识库调试检索", description = "在后台调试知识库检索结果")
+    @PostMapping("/kb/search")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<JsonNode>> searchKnowledge(@RequestBody JsonNode body) {
+        return aiServiceClient.searchKnowledge(body)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "知识库统计", description = "查看知识库文档、切块和索引统计")
+    @GetMapping("/kb/stats")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<JsonNode>> getKnowledgeStats() {
+        return aiServiceClient.getKnowledgeStats()
+                .map(ApiResponse::success);
     }
 }

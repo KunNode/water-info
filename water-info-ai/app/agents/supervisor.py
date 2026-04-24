@@ -12,7 +12,12 @@ from app.utils.json_parser import extract_json
 
 
 class SupervisorDecision(BaseModel):
-    next_agent: str = Field(pattern="^(conversation_assistant|data_analyst|risk_assessor|plan_generator|resource_dispatcher|notification|execution_monitor|parallel_dispatch|__end__)$")
+    next_agent: str = Field(
+        pattern=(
+            "^(conversation_assistant|data_analyst|risk_assessor|plan_generator|resource_dispatcher|"
+            "notification|execution_monitor|parallel_dispatch|knowledge_retriever|__end__)$"
+        )
+    )
     reasoning: str
     intent: str | None = None
     focus_station_query: str | None = None
@@ -26,6 +31,21 @@ RISK_KEYWORDS = ["风险", "研判", "评估", "危险吗", "严不严重", "趋
 ALARM_KEYWORDS = ["告警", "预警", "报警", "异常", "超限", "告急"]
 OVERVIEW_KEYWORDS = ["总览", "概况", "整体", "总体", "全局", "态势", "情况怎么样", "现在怎么样", "总体情况"]
 STATION_KEYWORDS = ["站", "站点", "水库", "闸", "泵站", "断面"]
+KNOWLEDGE_KEYWORDS = [
+    "制度",
+    "手册",
+    "规范",
+    "条例",
+    "办法",
+    "流程",
+    "规程",
+    "值班要求",
+    "预案模板",
+    "文档",
+    "资料",
+    "文件",
+    "依据",
+]
 WATER_DOMAIN_KEYWORDS = [
     *STATION_KEYWORDS,
     "水情",
@@ -75,6 +95,10 @@ def _is_water_domain_query(query: str) -> bool:
     return _contains_any(query, WATER_DOMAIN_KEYWORDS)
 
 
+def _is_knowledge_query(query: str) -> bool:
+    return _contains_any(query, KNOWLEDGE_KEYWORDS)
+
+
 def _is_alarm_overview_query(query: str, *, has_station_focus: bool) -> bool:
     has_alarm = _contains_any(query, ALARM_KEYWORDS)
     has_overview = _contains_any(query, OVERVIEW_KEYWORDS + ["分布", "多少", "有哪些", "哪里", "集中在哪"])
@@ -87,6 +111,8 @@ def _infer_intent(query: str) -> str:
     has_station_focus = _infer_focus_station_query(query) is not None or _contains_any(query, STATION_KEYWORDS)
     if _is_general_chat_query(query):
         return "general_chat"
+    if _is_knowledge_query(query):
+        return "knowledge_qa"
     if _contains_any(query, EXECUTION_KEYWORDS):
         return "execution_status"
     if _contains_any(query, RESOURCE_KEYWORDS):
@@ -135,11 +161,15 @@ def _deterministic_route(state: dict) -> str | None:
     mentions_notification = _contains_any(query, NOTIFICATION_KEYWORDS)
 
     if not has_data:
+        if intent == "knowledge_qa":
+            return "knowledge_retriever"
         if intent == "general_chat":
             return "conversation_assistant"
         return "data_analyst"
     if intent == "general_chat":
         return "conversation_assistant"
+    if intent == "knowledge_qa":
+        return "knowledge_retriever"
     if intent == "station_status":
         if not has_risk:
             return "risk_assessor"
@@ -199,6 +229,32 @@ def _deterministic_route(state: dict) -> str | None:
     return None
 
 
+def _guard_model_route(next_agent: str, state: dict, deterministic: str | None) -> tuple[str, str | None]:
+    """Keep LLM routing as the primary path while enforcing workflow preconditions."""
+    has_data = bool(state.get("data_summary"))
+    has_risk = state.get("risk_assessment") is not None
+    has_plan = state.get("emergency_plan") is not None
+
+    if next_agent in {"conversation_assistant", "knowledge_retriever", "execution_monitor"}:
+        return next_agent, None
+
+    if next_agent == "__end__":
+        if deterministic and deterministic != "__end__":
+            return deterministic, "guarded: workflow still has a required next step"
+        return next_agent, None
+
+    if not has_data:
+        return deterministic or "data_analyst", "guarded: data grounding is required first"
+
+    if next_agent in {"plan_generator", "resource_dispatcher", "notification", "parallel_dispatch"} and not has_risk:
+        return deterministic or "risk_assessor", "guarded: risk assessment is required before planning/dispatch"
+
+    if next_agent in {"resource_dispatcher", "notification", "parallel_dispatch"} and not has_plan:
+        return deterministic or "plan_generator", "guarded: emergency plan is required before dispatch/notification"
+
+    return next_agent, None
+
+
 async def supervisor_node(state: dict) -> dict:
     iteration = int(state.get("iteration", 0)) + 1
     if iteration > 8:
@@ -222,8 +278,8 @@ async def supervisor_node(state: dict) -> dict:
             "supervisor_reasoning": "general chat hard route",
         }
 
-    deterministic = _deterministic_route(state)
     llm = get_llm()
+    deterministic = _deterministic_route(state)
     # When LLM is unavailable, fall back to deterministic routing immediately.
     if not llm.is_enabled:
         return {
@@ -238,62 +294,53 @@ async def supervisor_node(state: dict) -> dict:
     prompt = json.dumps({
         "query": state.get("user_query", ""),
         "iteration": iteration,
-        "known_intent": inferred_intent,
-        "focus_station_query": inferred_focus_station,
-        "available_data": {
+        "intent_hint": inferred_intent,
+        "focus_station_hint": inferred_focus_station,
+        "workflow_state": {
             "data_summary": bool(state.get("data_summary")),
             "risk_assessment": bool(state.get("risk_assessment")),
             "emergency_plan": bool(state.get("emergency_plan")),
             "resource_plan": bool(state.get("resource_plan")),
             "notifications": bool(state.get("notifications")),
         },
-        "suggested_route": deterministic,
+        "guardrails": [
+            "防汛业务问题必须先有 data_analyst 提供监测数据 grounding，除非是闲聊或知识库问答。",
+            "预案、资源、通知必须建立在 risk_assessor 的风险评估之后。",
+            "资源调度和通知必须建立在 plan_generator 的预案之后。",
+            "无法判断或当前任务已完整时才选择 __end__。",
+        ],
     }, ensure_ascii=False)
 
     parsed = None
-    if llm.is_enabled:
-        try:
-            response = await llm.ainvoke(
-                prompt,
-                system_prompt=(
-                    "你是防汛应急多智能体系统的调度 Supervisor。"
-                    "你必须根据用户意图和当前状态，选择唯一的 next_agent，并识别 intent 与 focus_station_query。"
-                    "只返回 JSON："
-                    '{"next_agent":"conversation_assistant|data_analyst|risk_assessor|plan_generator|resource_dispatcher|notification|execution_monitor|parallel_dispatch|__end__",'
-                    '"intent":"general_chat|station_status|overview|alarm_overview|risk_assessment|plan_generation|resource_dispatch|notification|execution_status",'
-                    '"focus_station_query":"站点名称或编码，可为空",'
-                    '"reasoning":"简短原因"}'
-                ),
-                temperature=0.0,
-                response_format={"type": "json_object"},
-            )
-            parsed = extract_json(getattr(response, "content", None))
-        except Exception:
-            parsed = None
+    try:
+        response = await llm.ainvoke(
+            prompt,
+            system_prompt=(
+                "你是防汛应急多智能体系统的调度 Supervisor。"
+                "你的主任务是根据用户真实意图和当前 workflow_state 选择唯一 next_agent；"
+                "规则只作为安全边界，不是让你照关键词机械路由。"
+                "如果用户问制度、手册、规范、流程、依据等知识内容，优先选择 knowledge_retriever。"
+                "如果用户问数据/站点状态，选择 data_analyst 或在已有数据后进入 risk_assessor。"
+                "如果用户要风险、预案、资源、通知，按 grounding -> risk -> plan -> dispatch/notification 的依赖推进。"
+                "只返回 JSON："
+                '{"next_agent":"conversation_assistant|data_analyst|risk_assessor|plan_generator|resource_dispatcher|notification|execution_monitor|parallel_dispatch|knowledge_retriever|__end__",'
+                '"intent":"general_chat|knowledge_qa|station_status|overview|alarm_overview|risk_assessment|plan_generation|resource_dispatch|notification|execution_status",'
+                '"focus_station_query":"站点名称或编码，可为空",'
+                '"reasoning":"简短原因"}'
+            ),
+            temperature=0.0,
+            response_format={"type": "json_object"},
+        )
+        parsed = extract_json(getattr(response, "content", None))
+    except Exception:
+        parsed = None
 
     try:
-        decision = SupervisorDecision.model_validate(
-            parsed
-            or (
-                {
-                    "next_agent": deterministic,
-                    "reasoning": "deterministic fallback",
-                    "intent": inferred_intent,
-                    "focus_station_query": inferred_focus_station,
-                }
-                if deterministic
-                else {
-                    "next_agent": "__end__",
-                    "reasoning": "invalid",
-                    "intent": inferred_intent,
-                    "focus_station_query": inferred_focus_station,
-                }
-            )
-        )
-        next_agent = decision.next_agent
+        decision = SupervisorDecision.model_validate(parsed)
+        next_agent, guard_reason = _guard_model_route(decision.next_agent, state, deterministic)
         intent = decision.intent or inferred_intent
         focus_station_query = decision.focus_station_query or inferred_focus_station
-        reasoning = decision.reasoning
+        reasoning = decision.reasoning if not guard_reason else f"{decision.reasoning}; {guard_reason}"
     except Exception:
         next_agent = deterministic or "__end__"
         intent = inferred_intent

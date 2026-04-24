@@ -218,6 +218,53 @@ export interface CreateUserRequest {
   deptId?: string
 }
 
+// ─── Knowledge Base ───
+export interface KnowledgeDocument {
+  id: string
+  title: string
+  source_type: string
+  source_uri: string
+  mime: string
+  lang: string
+  version: number
+  status: string
+  chunk_count: number
+  file_size: number
+  embedding_model?: string | null
+  created_by?: string | null
+  latest_job_status?: string | null
+  latest_error?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  last_indexed_at?: string | null
+}
+
+export interface KnowledgeDocumentUploadResponse {
+  document_id: string
+  job_id: string
+  status: string
+}
+
+export interface KnowledgeSearchHit {
+  chunk_id: string
+  document_id: string
+  document_title: string
+  source_uri: string
+  heading_path: string[]
+  content: string
+  score: number
+  vector_score?: number | null
+  keyword_score?: number | null
+}
+
+export interface KnowledgeStats {
+  document_count: number
+  ready_document_count: number
+  chunk_count: number
+  job_success_rate: number
+  model_distribution: Record<string, number>
+}
+
 export interface UserQuery {
   page?: number
   size?: number

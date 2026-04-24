@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -46,6 +47,34 @@ class DatabaseService:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             return await conn.fetchval(query, *args)
+
+    @staticmethod
+    def _json_or_none(value: Any) -> str | None:
+        if value is None:
+            return None
+        return json.dumps(value, ensure_ascii=False)
+
+    @staticmethod
+    def _decode_json_field(value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except Exception:
+                return value
+        return value
+
+    @staticmethod
+    def _vector_literal(values: list[float]) -> str:
+        return "[" + ",".join(f"{value:.8f}" for value in values) + "]"
+
+    def _normalize_kb_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(row)
+        if "metadata" in normalized:
+            normalized["metadata"] = self._decode_json_field(normalized["metadata"]) or {}
+        if "heading_path" in normalized:
+            heading_path = self._decode_json_field(normalized["heading_path"])
+            normalized["heading_path"] = heading_path if isinstance(heading_path, list) else []
+        return normalized
 
     # ── Stations ──────────────────────────────────────────────────────────────
 
@@ -749,6 +778,515 @@ class DatabaseService:
 
     async def get_session_count(self) -> int:
         return (await self._fetchval("SELECT COUNT(DISTINCT session_id) FROM emergency_plan")) or 0
+
+    # ── Knowledge base tables DDL ────────────────────────────────────────────
+
+    async def ensure_kb_tables(self) -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            embedding_dim = int(self._settings.embedding_dim or 1024)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS kb_document (
+                    id              VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                    title           VARCHAR(255) NOT NULL,
+                    source_type     VARCHAR(32) NOT NULL DEFAULT 'upload',
+                    source_uri      TEXT NOT NULL DEFAULT '',
+                    mime            VARCHAR(128) NOT NULL DEFAULT 'text/plain',
+                    lang            VARCHAR(32) NOT NULL DEFAULT 'zh-CN',
+                    version         INT NOT NULL DEFAULT 1,
+                    status          VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    content_hash    VARCHAR(64) NOT NULL DEFAULT '',
+                    raw_text        TEXT NOT NULL DEFAULT '',
+                    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    chunk_count     INT NOT NULL DEFAULT 0,
+                    file_size       BIGINT NOT NULL DEFAULT 0,
+                    embedding_model VARCHAR(128) NOT NULL DEFAULT '',
+                    created_by      VARCHAR(64) NOT NULL DEFAULT '',
+                    last_indexed_at TIMESTAMPTZ,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    deleted         BOOLEAN NOT NULL DEFAULT FALSE
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS kb_chunk (
+                    id          VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                    document_id VARCHAR(64) NOT NULL REFERENCES kb_document(id) ON DELETE CASCADE,
+                    chunk_index INT NOT NULL,
+                    content     TEXT NOT NULL,
+                    token_count INT NOT NULL DEFAULT 0,
+                    heading_path JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    search_text TEXT NOT NULL DEFAULT '',
+                    metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (document_id, chunk_index)
+                )
+            """)
+            await conn.execute(f"""
+                CREATE TABLE IF NOT EXISTS kb_embedding (
+                    chunk_id     VARCHAR(64) PRIMARY KEY REFERENCES kb_chunk(id) ON DELETE CASCADE,
+                    model        VARCHAR(128) NOT NULL DEFAULT '',
+                    dimensions   INT NOT NULL DEFAULT 0,
+                    embedding    vector({embedding_dim}) NOT NULL,
+                    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS kb_ingest_job (
+                    id          VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                    document_id VARCHAR(64) NOT NULL REFERENCES kb_document(id) ON DELETE CASCADE,
+                    status      VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    error       TEXT,
+                    started_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    finished_at TIMESTAMPTZ
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_document_status_deleted
+                    ON kb_document(status, deleted, updated_at DESC)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_document_hash
+                    ON kb_document(content_hash)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_chunk_document
+                    ON kb_chunk(document_id, chunk_index)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_chunk_search
+                    ON kb_chunk USING gin (to_tsvector('simple', search_text))
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_embedding_model_dims
+                    ON kb_embedding(model, dimensions)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kb_embedding_hnsw
+                    ON kb_embedding USING hnsw (embedding vector_cosine_ops)
+            """)
+
+    async def upsert_kb_document_shell(
+        self,
+        *,
+        title: str,
+        source_type: str,
+        source_uri: str,
+        mime: str,
+        content_hash: str,
+        file_size: int,
+        created_by: str,
+    ) -> dict[str, Any]:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                """
+                SELECT id, version
+                FROM kb_document
+                WHERE content_hash = $1 AND deleted = FALSE
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                content_hash,
+            )
+            if existing:
+                row = await conn.fetchrow(
+                    """
+                    UPDATE kb_document
+                    SET title = $2,
+                        source_type = $3,
+                        source_uri = $4,
+                        mime = $5,
+                        file_size = $6,
+                        created_by = $7,
+                        status = 'pending',
+                        version = version + 1,
+                        deleted = FALSE,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    RETURNING id, version
+                    """,
+                    existing["id"],
+                    title,
+                    source_type,
+                    source_uri,
+                    mime,
+                    file_size,
+                    created_by,
+                )
+                return dict(row) if row else {"id": existing["id"], "version": existing["version"]}
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO kb_document (
+                    title, source_type, source_uri, mime, content_hash, file_size, created_by, status
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+                RETURNING id, version
+                """,
+                title,
+                source_type,
+                source_uri,
+                mime,
+                content_hash,
+                file_size,
+                created_by,
+            )
+            return dict(row) if row else {}
+
+    async def create_kb_ingest_job(self, document_id: str) -> str:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            return str(
+                await conn.fetchval(
+                    """
+                    INSERT INTO kb_ingest_job (document_id, status)
+                    VALUES ($1, 'pending')
+                    RETURNING id
+                    """,
+                    document_id,
+                )
+            )
+
+    async def finish_kb_ingest_job(self, job_id: str, status: str, *, error: str | None = None) -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE kb_ingest_job
+                SET status = $2, error = $3, finished_at = NOW()
+                WHERE id = $1
+                """,
+                job_id,
+                status,
+                error,
+            )
+
+    async def update_kb_document_status(
+        self,
+        document_id: str,
+        status: str,
+        *,
+        raw_text: str | None = None,
+        metadata: dict | None = None,
+        embedding_model: str | None = None,
+        chunk_count: int | None = None,
+        mark_indexed: bool = False,
+    ) -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE kb_document
+                SET status = $2,
+                    raw_text = COALESCE($3, raw_text),
+                    metadata = COALESCE($4::jsonb, metadata),
+                    embedding_model = COALESCE($5, embedding_model),
+                    chunk_count = COALESCE($6, chunk_count),
+                    last_indexed_at = CASE WHEN $7 THEN NOW() ELSE last_indexed_at END,
+                    updated_at = NOW()
+                WHERE id = $1
+                """,
+                document_id,
+                status,
+                raw_text,
+                self._json_or_none(metadata),
+                embedding_model,
+                chunk_count,
+                mark_indexed,
+            )
+
+    async def replace_kb_document_chunks(
+        self,
+        *,
+        document_id: str,
+        title: str,
+        source_uri: str,
+        mime: str,
+        raw_text: str,
+        metadata: dict,
+        chunk_candidates: list[Any],
+        embedding_model: str,
+        embeddings: list[list[float]] | None,
+    ) -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM kb_chunk WHERE document_id = $1", document_id)
+                await conn.execute(
+                    """
+                    UPDATE kb_document
+                    SET title = $2,
+                        source_uri = $3,
+                        mime = $4,
+                        raw_text = $5,
+                        metadata = $6::jsonb,
+                        chunk_count = $7,
+                        embedding_model = $8,
+                        status = 'ready',
+                        last_indexed_at = NOW(),
+                        updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    document_id,
+                    title,
+                    source_uri,
+                    mime,
+                    raw_text,
+                    self._json_or_none(metadata) or "{}",
+                    len(chunk_candidates),
+                    embedding_model,
+                )
+                for candidate in chunk_candidates:
+                    chunk_id = await conn.fetchval(
+                        """
+                        INSERT INTO kb_chunk (
+                            document_id, chunk_index, content, token_count, heading_path, search_text, metadata
+                        )
+                        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb)
+                        RETURNING id
+                        """,
+                        document_id,
+                        candidate.chunk_index,
+                        candidate.content,
+                        candidate.token_count,
+                        self._json_or_none(candidate.heading_path) or "[]",
+                        candidate.search_text,
+                        self._json_or_none(candidate.metadata) or "{}",
+                    )
+                    if embeddings and candidate.chunk_index < len(embeddings) and embeddings[candidate.chunk_index]:
+                        vector = self._vector_literal(embeddings[candidate.chunk_index])
+                        await conn.execute(
+                            """
+                            INSERT INTO kb_embedding (chunk_id, model, dimensions, embedding)
+                            VALUES ($1, $2, $3, $4::vector)
+                            """,
+                            chunk_id,
+                            embedding_model,
+                            len(embeddings[candidate.chunk_index]),
+                            vector,
+                        )
+
+    async def list_kb_documents(
+        self,
+        *,
+        status: str | None = None,
+        source_type: str | None = None,
+        q: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        rows = await self._fetch(
+            """
+            SELECT
+                d.id, d.title, d.source_type, d.source_uri, d.mime, d.lang, d.version, d.status,
+                d.chunk_count, d.file_size, d.embedding_model, d.created_by, d.created_at, d.updated_at, d.last_indexed_at,
+                d.metadata,
+                (
+                    SELECT j.status
+                    FROM kb_ingest_job j
+                    WHERE j.document_id = d.id
+                    ORDER BY j.started_at DESC
+                    LIMIT 1
+                ) AS latest_job_status,
+                (
+                    SELECT COALESCE(j.error, '')
+                    FROM kb_ingest_job j
+                    WHERE j.document_id = d.id
+                    ORDER BY j.started_at DESC
+                    LIMIT 1
+                ) AS latest_error
+            FROM kb_document d
+            WHERE d.deleted = FALSE
+              AND ($1::text IS NULL OR d.status = $1)
+              AND ($2::text IS NULL OR d.source_type = $2)
+              AND ($3::text IS NULL OR d.title ILIKE '%' || $3 || '%' OR d.source_uri ILIKE '%' || $3 || '%')
+            ORDER BY d.updated_at DESC
+            LIMIT $4 OFFSET $5
+            """,
+            status,
+            source_type,
+            q,
+            limit,
+            offset,
+        )
+        return [self._normalize_kb_row(row) for row in rows]
+
+    async def get_kb_document(self, document_id: str) -> dict[str, Any] | None:
+        row = await self._fetchrow(
+            """
+            SELECT
+                d.id, d.title, d.source_type, d.source_uri, d.mime, d.lang, d.version, d.status,
+                d.chunk_count, d.file_size, d.embedding_model, d.created_by, d.created_at, d.updated_at,
+                d.last_indexed_at, d.raw_text, d.metadata,
+                (
+                    SELECT j.status
+                    FROM kb_ingest_job j
+                    WHERE j.document_id = d.id
+                    ORDER BY j.started_at DESC
+                    LIMIT 1
+                ) AS latest_job_status,
+                (
+                    SELECT COALESCE(j.error, '')
+                    FROM kb_ingest_job j
+                    WHERE j.document_id = d.id
+                    ORDER BY j.started_at DESC
+                    LIMIT 1
+                ) AS latest_error
+            FROM kb_document d
+            WHERE d.id = $1 AND d.deleted = FALSE
+            """,
+            document_id,
+        )
+        return self._normalize_kb_row(row) if row else None
+
+    async def soft_delete_kb_document(self, document_id: str) -> bool:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow("SELECT id FROM kb_document WHERE id = $1 AND deleted = FALSE", document_id)
+                if not row:
+                    return False
+                await conn.execute("DELETE FROM kb_chunk WHERE document_id = $1", document_id)
+                await conn.execute(
+                    """
+                    UPDATE kb_document
+                    SET deleted = TRUE, status = 'deleted', chunk_count = 0, updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    document_id,
+                )
+                return True
+
+    async def vector_search_kb(
+        self,
+        embedding: list[float],
+        *,
+        top_n: int,
+        source_types: list[str] | None,
+        model: str,
+    ) -> list[dict[str, Any]]:
+        vector = self._vector_literal(embedding)
+        rows = await self._fetch(
+            """
+            SELECT
+                c.id AS chunk_id,
+                c.document_id,
+                d.title AS document_title,
+                d.source_uri,
+                c.content,
+                c.heading_path,
+                c.metadata,
+                (1 - (e.embedding <=> $1::vector)) AS vector_score
+            FROM kb_embedding e
+            JOIN kb_chunk c ON c.id = e.chunk_id
+            JOIN kb_document d ON d.id = c.document_id
+            WHERE d.deleted = FALSE
+              AND d.status = 'ready'
+              AND e.model = $2
+              AND ($3::text[] IS NULL OR d.source_type = ANY($3))
+            ORDER BY e.embedding <=> $1::vector
+            LIMIT $4
+            """,
+            vector,
+            model,
+            source_types,
+            top_n,
+        )
+        normalized = []
+        for row in rows:
+            item = self._normalize_kb_row(row)
+            item["score"] = item.get("vector_score")
+            normalized.append(item)
+        return normalized
+
+    async def keyword_search_kb(
+        self,
+        tokenized_query: str,
+        *,
+        top_n: int,
+        source_types: list[str] | None,
+    ) -> list[dict[str, Any]]:
+        rows = await self._fetch(
+            """
+            SELECT
+                c.id AS chunk_id,
+                c.document_id,
+                d.title AS document_title,
+                d.source_uri,
+                c.content,
+                c.heading_path,
+                c.metadata,
+                ts_rank_cd(to_tsvector('simple', c.search_text), plainto_tsquery('simple', $1)) AS keyword_score
+            FROM kb_chunk c
+            JOIN kb_document d ON d.id = c.document_id
+            WHERE d.deleted = FALSE
+              AND d.status = 'ready'
+              AND ($2::text[] IS NULL OR d.source_type = ANY($2))
+              AND to_tsvector('simple', c.search_text) @@ plainto_tsquery('simple', $1)
+            ORDER BY keyword_score DESC
+            LIMIT $3
+            """,
+            tokenized_query,
+            source_types,
+            top_n,
+        )
+        normalized = []
+        for row in rows:
+            item = self._normalize_kb_row(row)
+            item["score"] = item.get("keyword_score")
+            normalized.append(item)
+        return normalized
+
+    async def get_kb_stats(self) -> dict[str, Any]:
+        document_count = int(
+            (await self._fetchval("SELECT COUNT(*) FROM kb_document WHERE deleted = FALSE")) or 0
+        )
+        ready_document_count = int(
+            (await self._fetchval("SELECT COUNT(*) FROM kb_document WHERE deleted = FALSE AND status = 'ready'")) or 0
+        )
+        chunk_count = int((await self._fetchval("SELECT COUNT(*) FROM kb_chunk")) or 0)
+        job_success_rate = float(
+            (
+                await self._fetchval(
+                    """
+                    SELECT COALESCE(
+                        AVG(CASE WHEN status = 'completed' THEN 1.0 ELSE 0.0 END),
+                        0
+                    )
+                    FROM (
+                        SELECT status
+                        FROM kb_ingest_job
+                        ORDER BY started_at DESC
+                        LIMIT 20
+                    ) recent
+                    """
+                )
+            )
+            or 0.0
+        )
+        rows = await self._fetch(
+            """
+            SELECT embedding_model, COUNT(*) AS count
+            FROM kb_document
+            WHERE deleted = FALSE AND status = 'ready' AND embedding_model <> ''
+            GROUP BY embedding_model
+            """
+        )
+        model_distribution = {
+            str(row["embedding_model"]): int(row["count"])
+            for row in rows
+            if row.get("embedding_model")
+        }
+        return {
+            "document_count": document_count,
+            "ready_document_count": ready_document_count,
+            "chunk_count": chunk_count,
+            "job_success_rate": round(job_success_rate, 4),
+            "model_distribution": model_distribution,
+        }
 
     async def close(self) -> None:
         if self._pool:

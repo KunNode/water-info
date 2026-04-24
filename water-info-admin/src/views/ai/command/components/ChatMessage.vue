@@ -81,6 +81,7 @@ const AGENT_META: Record<string, { label: string; color: string }> = {
   data_analyst:        { label: '数据分析',  color: '#00d4ff' },
   risk_assessor:       { label: '风险评估',  color: '#f59e0b' },
   plan_generator:      { label: '预案生成',  color: '#10b981' },
+  knowledge_retriever: { label: '知识检索',  color: '#22c55e' },
   resource_dispatcher: { label: '资源调度',  color: '#8b5cf6' },
   notification:        { label: '通知预警',  color: '#ef4444' },
   execution_monitor:   { label: '执行监控',  color: '#6b7280' },

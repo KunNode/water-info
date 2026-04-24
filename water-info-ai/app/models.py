@@ -145,3 +145,65 @@ class CreateConversationResponse(BaseModel):
     session_id: str
     title: str
     created_at: str
+
+
+class KBDocumentUploadResponse(BaseModel):
+    document_id: str
+    job_id: str
+    status: str = "pending"
+
+
+class KBDocumentSummary(BaseModel):
+    id: str
+    title: str
+    source_type: str
+    source_uri: str
+    mime: str
+    lang: str
+    version: int
+    status: str
+    chunk_count: int = 0
+    file_size: int = 0
+    embedding_model: str | None = None
+    created_by: str | None = None
+    latest_job_status: str | None = None
+    latest_error: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    last_indexed_at: str | None = None
+
+
+class KBDocumentDetail(KBDocumentSummary):
+    metadata: dict | None = None
+
+
+class KBSearchHit(BaseModel):
+    chunk_id: str
+    document_id: str
+    document_title: str
+    source_uri: str = ""
+    heading_path: list[str] = Field(default_factory=list)
+    content: str
+    score: float
+    vector_score: float | None = None
+    keyword_score: float | None = None
+
+
+class KBSearchRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    query: str
+    top_k: int = Field(default=5, ge=1, le=20)
+    source_types: list[str] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("source_types", "sourceTypes"),
+        serialization_alias="source_types",
+    )
+
+
+class KBStatsResponse(BaseModel):
+    document_count: int
+    ready_document_count: int
+    chunk_count: int
+    job_success_rate: float
+    model_distribution: dict[str, int] = Field(default_factory=dict)

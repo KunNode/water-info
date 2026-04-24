@@ -16,9 +16,13 @@ import com.waterinfo.platform.module.ai.dto.SessionResponse;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.stereotype.Component;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -266,6 +270,111 @@ public class AiServiceClient {
                         .bodyToMono(Void.class)
                         .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
                         .doOnError(e -> log.error("Error deleting conversation {}: {}", sessionId, e.getMessage())));
+    }
+
+    // ── Knowledge base ──────────────────────────────────────────────────────
+
+    public Mono<JsonNode> uploadKnowledgeDocument(MultipartFile file, String title, String sourceUri) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> {
+                    MultipartBodyBuilder builder = new MultipartBodyBuilder();
+                    var filePart = builder.part("file", file.getResource())
+                            .filename(file.getOriginalFilename());
+                    if (file.getContentType() != null && !file.getContentType().isBlank()) {
+                        filePart.header(HttpHeaders.CONTENT_TYPE, file.getContentType());
+                    }
+                    if (title != null && !title.isBlank()) {
+                        builder.part("title", title);
+                    }
+                    if (sourceUri != null && !sourceUri.isBlank()) {
+                        builder.part("source_uri", sourceUri);
+                    }
+
+                    return webClient.post()
+                            .uri("/api/v1/kb/documents")
+                            .contentType(MediaType.MULTIPART_FORM_DATA)
+                            .headers(headers -> {
+                                headers.remove(HttpHeaders.CONTENT_TYPE);
+                                addUserHeaders(headers, user);
+                            })
+                            .body(BodyInserters.fromMultipartData(builder.build()))
+                            .retrieve()
+                            .bodyToMono(JsonNode.class)
+                            .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                            .doOnError(e -> log.error("Error uploading knowledge document {}: {}", file.getOriginalFilename(), e.getMessage()));
+                });
+    }
+
+    public Mono<JsonNode> listKnowledgeDocuments(
+            String status,
+            String sourceType,
+            String q,
+            int limit,
+            int offset
+    ) {
+        return webClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v1/kb/documents")
+                        .queryParamIfPresent("status", java.util.Optional.ofNullable(status))
+                        .queryParamIfPresent("source_type", java.util.Optional.ofNullable(sourceType))
+                        .queryParamIfPresent("q", java.util.Optional.ofNullable(q))
+                        .queryParam("limit", limit)
+                        .queryParam("offset", offset)
+                        .build())
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(e -> log.error("Error listing knowledge documents: {}", e.getMessage()));
+    }
+
+    public Mono<JsonNode> getKnowledgeDocument(String documentId) {
+        return webClient.get()
+                .uri("/api/v1/kb/documents/{id}", documentId)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(e -> log.error("Error getting knowledge document {}: {}", documentId, e.getMessage()));
+    }
+
+    public Mono<JsonNode> deleteKnowledgeDocument(String documentId) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.delete()
+                        .uri("/api/v1/kb/documents/{id}", documentId)
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error deleting knowledge document {}: {}", documentId, e.getMessage())));
+    }
+
+    public Mono<JsonNode> reindexKnowledgeDocument(String documentId) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.post()
+                        .uri("/api/v1/kb/documents/{id}/reindex", documentId)
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error reindexing knowledge document {}: {}", documentId, e.getMessage())));
+    }
+
+    public Mono<JsonNode> searchKnowledge(JsonNode body) {
+        return webClient.post()
+                .uri("/api/v1/kb/search")
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(e -> log.error("Error searching knowledge base: {}", e.getMessage()));
+    }
+
+    public Mono<JsonNode> getKnowledgeStats() {
+        return webClient.get()
+                .uri("/api/v1/kb/stats")
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(e -> log.error("Error getting knowledge stats: {}", e.getMessage()));
     }
 
     /**

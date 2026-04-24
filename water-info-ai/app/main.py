@@ -8,7 +8,7 @@ import uuid
 from dataclasses import asdict
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -25,12 +25,19 @@ from app.models import (
     FloodQueryRequest,
     FloodQueryResponse,
     HealthResponse,
+    KBDocumentDetail,
+    KBDocumentSummary,
+    KBDocumentUploadResponse,
+    KBSearchHit,
+    KBSearchRequest,
+    KBStatsResponse,
     PlanDetailResponse,
     PlanExecuteRequest,
     PlanExecuteResponse,
     SessionResponse,
 )
 from app.graph import flood_response_graph
+from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
 from app.services.platform_client import get_platform_client
@@ -174,8 +181,38 @@ def _build_stream_events(agent: str, update: dict) -> list[dict]:
             "response": update["final_response"],
         })
 
+    if update.get("evidence"):
+        events.append({
+            "type": "evidence_update",
+            "agent": agent,
+            "items": to_plain_data(update["evidence"]),
+        })
+
     events.append({"type": "agent_update", "agent": agent, "status": "done"})
     return events
+
+
+def _serialize_kb_document(row: dict) -> dict:
+    return {
+        "id": str(row["id"]),
+        "title": str(row["title"]),
+        "source_type": str(row.get("source_type") or ""),
+        "source_uri": str(row.get("source_uri") or ""),
+        "mime": str(row.get("mime") or ""),
+        "lang": str(row.get("lang") or "zh-CN"),
+        "version": int(row.get("version") or 1),
+        "status": str(row.get("status") or "pending"),
+        "chunk_count": int(row.get("chunk_count") or 0),
+        "file_size": int(row.get("file_size") or 0),
+        "embedding_model": str(row.get("embedding_model") or "") or None,
+        "created_by": str(row.get("created_by") or "") or None,
+        "latest_job_status": str(row.get("latest_job_status") or "") or None,
+        "latest_error": str(row.get("latest_error") or "") or None,
+        "metadata": row.get("metadata") or {},
+        "created_at": str(row["created_at"]) if row.get("created_at") else None,
+        "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
+        "last_indexed_at": str(row["last_indexed_at"]) if row.get("last_indexed_at") else None,
+    }
 
 
 async def _do_execute_plan(plan_id: str, actions: list[dict]) -> None:
@@ -214,6 +251,7 @@ async def lifespan(app: FastAPI):
     try:
         await db._get_pool()
         await db.ensure_plan_tables()
+        await db.ensure_kb_tables()
         logger.info("数据库连接池就绪")
     except Exception as exc:
         logger.warning("数据库预热失败（服务仍可启动）: %s", exc)
@@ -221,7 +259,10 @@ async def lifespan(app: FastAPI):
     await db.close()
     await sessions.close()
     await get_platform_client().close()
-    await get_llm().aclose()
+    try:
+        await get_llm().aclose()
+    except RuntimeError:
+        logger.debug("LLM client already closed with event loop shutdown")
     logger.info("水务AI多 Agent 应急服务已关闭")
 
 
@@ -365,6 +406,108 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
             yield _event_line({"type": "agent_update", "agent": "__error__", "status": "failed", "error": str(exc)})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ── knowledge base endpoints ──────────────────────────────────────────────────
+
+
+@app.post("/api/v1/kb/documents", response_model=KBDocumentUploadResponse)
+async def upload_kb_document(
+    background_tasks: BackgroundTasks,
+    http_request: Request,
+    file: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    source_uri: str | None = Form(default=None),
+):
+    user_id, username = _get_user_from_request(http_request)
+
+    filename = file.filename or "upload"
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="上传文件为空")
+
+    actor = username or user_id or "system"
+
+    service = get_knowledge_base_service()
+    document_id, job_id = await service.create_upload_job(
+        filename=filename,
+        content=content,
+        title=title,
+        source_uri=source_uri or filename,
+        mime=file.content_type,
+        created_by=actor,
+    )
+    background_tasks.add_task(
+        service.ingest_document_bytes,
+        document_id=document_id,
+        job_id=job_id,
+        filename=filename,
+        content=content,
+        title=title,
+        source_uri=source_uri or filename,
+        mime=file.content_type,
+        created_by=actor,
+    )
+    return KBDocumentUploadResponse(document_id=document_id, job_id=job_id, status="pending")
+
+
+@app.get("/api/v1/kb/documents", response_model=list[KBDocumentSummary])
+async def list_kb_documents(
+    status: str | None = None,
+    source_type: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    rows = await get_db_service().list_kb_documents(
+        status=status,
+        source_type=source_type,
+        q=q,
+        limit=limit,
+        offset=offset,
+    )
+    return [KBDocumentSummary.model_validate(_serialize_kb_document(row)) for row in rows]
+
+
+@app.get("/api/v1/kb/documents/{document_id}", response_model=KBDocumentDetail)
+async def get_kb_document(document_id: str):
+    row = await get_db_service().get_kb_document(document_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="知识文档不存在")
+    return KBDocumentDetail.model_validate(_serialize_kb_document(row))
+
+
+@app.delete("/api/v1/kb/documents/{document_id}")
+async def delete_kb_document(document_id: str, http_request: Request):
+    deleted = await get_db_service().soft_delete_kb_document(document_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="知识文档不存在")
+    return {"message": "文档已删除"}
+
+
+@app.post("/api/v1/kb/documents/{document_id}/reindex", response_model=KBDocumentUploadResponse)
+async def reindex_kb_document(document_id: str, background_tasks: BackgroundTasks, http_request: Request):
+    row = await get_db_service().get_kb_document(document_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="知识文档不存在")
+    job_id = await get_db_service().create_kb_ingest_job(document_id)
+    background_tasks.add_task(get_knowledge_base_service().reindex_document, document_id, job_id=job_id)
+    return KBDocumentUploadResponse(document_id=document_id, job_id=job_id, status="pending")
+
+
+@app.post("/api/v1/kb/search", response_model=list[KBSearchHit])
+async def search_kb_documents(request: KBSearchRequest):
+    rows = await get_knowledge_base_service().search(
+        request.query,
+        top_k=request.top_k,
+        source_types=request.source_types,
+    )
+    return [KBSearchHit.model_validate(to_plain_data(row)) for row in rows]
+
+
+@app.get("/api/v1/kb/stats", response_model=KBStatsResponse)
+async def get_kb_stats():
+    return KBStatsResponse.model_validate(await get_db_service().get_kb_stats())
 
 
 # ── plan endpoints ────────────────────────────────────────────────────────────

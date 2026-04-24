@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
+from app.rag.service import build_evidence, format_evidence_markdown, search_knowledge_base
 from app.services.llm import get_llm
+
+KNOWLEDGE_HINT_KEYWORDS = ["制度", "手册", "规范", "流程", "资料", "文件", "依据", "规程", "预案模板"]
 
 
 def _fallback_reply(query: str) -> str:
@@ -31,6 +34,10 @@ def _fallback_reply(query: str) -> str:
 
 async def conversation_assistant_node(state: dict) -> dict:
     query = str(state.get("user_query", ""))
+    knowledge_results = []
+    if any(keyword in query for keyword in KNOWLEDGE_HINT_KEYWORDS):
+        knowledge_results = await search_knowledge_base(query, top_k=4)
+    evidence = build_evidence(knowledge_results)
     llm = get_llm()
     reply = _fallback_reply(query)
 
@@ -48,6 +55,7 @@ async def conversation_assistant_node(state: dict) -> dict:
                             "has_plan": bool(state.get("emergency_plan")),
                             "focus_station_query": state.get("focus_station_query"),
                         },
+                        "evidence": [item.__dict__ for item in evidence],
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -57,6 +65,8 @@ async def conversation_assistant_node(state: dict) -> dict:
                     "当用户在打招呼、闲聊、询问你能做什么，或者表达模糊需求时，"
                     "请自然、友好、简洁地回应，并主动引导用户下一步可以怎么问。"
                     "只有在用户明确要求时才进入数据分析语气。"
+                    "如果 evidence 非空，请优先根据 evidence 回答，并保留 [1][2] 这类引用。"
+                    "如果 evidence 为空且用户问的是制度/资料类问题，要明确说明未命中知识库，不要编造。"
                     "输出 Markdown。"
                 ),
                 temperature=0.5,
@@ -67,8 +77,12 @@ async def conversation_assistant_node(state: dict) -> dict:
         except Exception:
             pass
 
+    if evidence and "[1]" not in reply:
+        reply = f"{reply}\n\n{format_evidence_markdown(evidence)}"
+
     return {
         "current_agent": "conversation_assistant",
+        "evidence": evidence,
         "final_response": reply,
         "messages": [{"role": "conversation_assistant", "content": reply}],
     }

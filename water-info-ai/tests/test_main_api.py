@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.rag.models import SearchResult
 from app.state import EmergencyAction, EmergencyPlan, NotificationRecord, ResourceAllocation, RiskAssessment, RiskLevel
 
 
@@ -26,10 +27,26 @@ def _build_db_mock():
     return SimpleNamespace(
         _get_pool=AsyncMock(return_value=object()),
         ensure_plan_tables=AsyncMock(),
+        ensure_kb_tables=AsyncMock(),
         close=AsyncMock(),
+        ensure_or_create_session=AsyncMock(),
+        save_conversation_message=AsyncMock(side_effect=[101, 102, 103]),
+        update_message_content=AsyncMock(),
+        save_conversation_snapshot=AsyncMock(),
         save_emergency_plan=AsyncMock(),
         save_resource_allocations=AsyncMock(),
         save_notifications=AsyncMock(),
+        list_kb_documents=AsyncMock(return_value=[]),
+        get_kb_document=AsyncMock(return_value=None),
+        soft_delete_kb_document=AsyncMock(return_value=True),
+        get_kb_stats=AsyncMock(return_value={
+            "document_count": 0,
+            "ready_document_count": 0,
+            "chunk_count": 0,
+            "job_success_rate": 0.0,
+            "model_distribution": {},
+        }),
+        create_kb_ingest_job=AsyncMock(return_value="job-001"),
     )
 
 
@@ -67,6 +84,7 @@ def test_health_endpoint_returns_service_metadata():
     }
     db_mock._get_pool.assert_awaited_once()
     db_mock.ensure_plan_tables.assert_awaited_once()
+    db_mock.ensure_kb_tables.assert_awaited_once()
     db_mock.close.assert_awaited_once()
     session_mock.close.assert_awaited_once()
 
@@ -149,7 +167,7 @@ def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():
     db_mock.save_resource_allocations.assert_awaited_once()
     db_mock.save_notifications.assert_awaited_once()
     session_mock.get_history.assert_awaited_once_with("session-001")
-    assert session_mock.save_turn.await_count == 2
+    assert db_mock.save_conversation_message.await_count == 2
 
 
 def test_flood_query_stream_emits_expected_sse_events():
@@ -168,6 +186,16 @@ def test_flood_query_stream_emits_expected_sse_events():
                         risk_score=65.0,
                         key_risks=["未来3小时仍有降雨"],
                     ),
+                    "evidence": [
+                        {
+                            "citation_id": "[1]",
+                            "content": "III 级响应要求提前巡查重点堤段。",
+                            "document_title": "防汛值班手册",
+                            "source_uri": "manual://duty",
+                            "heading_path": ["III 级响应"],
+                            "score": 0.93,
+                        }
+                    ],
                     "messages": [{"role": "risk_assessor", "content": "风险等级为中等"}],
                 }
             },
@@ -192,6 +220,7 @@ def test_flood_query_stream_emits_expected_sse_events():
     assert '"type": "session_init"' in body
     assert '"agent": "data_analyst", "status": "active"' in body
     assert '"type": "risk_update"' in body
+    assert '"type": "evidence_update"' in body
     assert '"level": "moderate"' in body
     assert '"response": "综合研判已完成。"' in body
     assert '"agent": "__done__", "status": "done"' in body
@@ -206,5 +235,61 @@ def test_health_endpoint_still_works_when_database_warmup_fails():
 
     assert response.status_code == 200
     db_mock.ensure_plan_tables.assert_not_awaited()
+    db_mock.ensure_kb_tables.assert_not_awaited()
     db_mock.close.assert_awaited_once()
     session_mock.close.assert_awaited_once()
+
+
+def test_kb_upload_endpoint_creates_job_and_schedules_ingest():
+    service = SimpleNamespace(
+        create_upload_job=AsyncMock(return_value=("doc-001", "job-001")),
+        ingest_document_bytes=AsyncMock(),
+    )
+
+    with ExitStack() as stack:
+        db_mock = _build_db_mock()
+        session_mock = _build_session_mock()
+        stack.enter_context(patch("app.main.get_db_service", return_value=db_mock))
+        stack.enter_context(patch("app.main.get_knowledge_base_service", return_value=service))
+        stack.enter_context(patch("app.services.session.get_session_service", return_value=session_mock))
+        client = stack.enter_context(TestClient(app))
+        response = client.post(
+            "/api/v1/kb/documents",
+            headers={"X-User-Id": "u-1", "X-Username": "admin"},
+            files={"file": ("guide.md", b"# guide\ncontent", "text/markdown")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["document_id"] == "doc-001"
+    service.create_upload_job.assert_awaited_once()
+    service.ingest_document_bytes.assert_awaited_once()
+
+
+def test_kb_search_endpoint_returns_serialized_hits():
+    service = SimpleNamespace(
+        search=AsyncMock(return_value=[
+            SearchResult(
+                chunk_id="chunk-001",
+                document_id="doc-001",
+                document_title="防汛值班手册",
+                source_uri="manual://duty",
+                content="III 级响应下要先完成重点巡查。",
+                heading_path=["III 级响应"],
+                score=0.91,
+                vector_score=0.91,
+            )
+        ])
+    )
+
+    with ExitStack() as stack:
+        db_mock = _build_db_mock()
+        session_mock = _build_session_mock()
+        stack.enter_context(patch("app.main.get_db_service", return_value=db_mock))
+        stack.enter_context(patch("app.main.get_knowledge_base_service", return_value=service))
+        stack.enter_context(patch("app.services.session.get_session_service", return_value=session_mock))
+        client = stack.enter_context(TestClient(app))
+        response = client.post("/api/v1/kb/search", json={"query": "III级响应是什么", "top_k": 3})
+
+    assert response.status_code == 200
+    assert response.json()[0]["document_title"] == "防汛值班手册"
+    service.search.assert_awaited_once()

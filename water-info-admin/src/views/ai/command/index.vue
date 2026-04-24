@@ -204,6 +204,24 @@ async function processTypewriterQueue() {
   processTypewriterQueue()
 }
 
+function formatEvidenceUpdate(items: Array<{
+  citation_id: string
+  content: string
+  document_title: string
+  source_uri?: string
+  heading_path?: string[]
+}>) {
+  if (!items.length) return ''
+  return [
+    '## 命中证据',
+    ...items.map((item) => {
+      const heading = item.heading_path?.length ? item.heading_path.join(' / ') : '正文'
+      const source = item.source_uri ? ` - ${item.source_uri}` : ''
+      return `- ${item.citation_id} **${item.document_title}** / ${heading}${source}\n  ${item.content.slice(0, 180)}`
+    }),
+  ].join('\n')
+}
+
 // ── SSE structured events ────────────────────────────────────────
 onMounted(async () => {
   // Initialize store from localStorage
@@ -245,6 +263,14 @@ onMounted(async () => {
           status: event.status,
           actions_count: event.total,
         }
+      })
+    } else if (event.type === 'evidence_update' && event.items?.length) {
+      store.addMessage({
+        role: 'agent',
+        agent: event.agent,
+        content: formatEvidenceUpdate(event.items),
+        timestamp: new Date(),
+        agentStatus: 'done',
       })
     } else if (event.type === 'agent_message') {
       hasAgentMessages.value = true

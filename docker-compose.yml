@@ -82,21 +82,21 @@ services:
         condition: service_healthy
       platform:
         condition: service_started
+    env_file:
+      - ./water-info-ai/.env
     environment:
       PG_HOST: postgres
       PG_PORT: 5432
       PG_DATABASE: water_info
       PG_USER: root
       PG_PASSWORD: ${PG_PASSWORD:-123456}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_API_BASE: ${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
-      OPENAI_MODEL: ${OPENAI_MODEL:-qwen/qwen3.6-plus:free}
-      WEATHER_API_KEY: ${WEATHER_API_KEY:-}
       WATER_PLATFORM_BASE_URL: http://platform:8080
       WATER_PLATFORM_USERNAME: admin
       WATER_PLATFORM_PASSWORD: ${ADMIN_PASSWORD:-Admin@123456}
       AI_SERVICE_HOST: "0.0.0.0"
       AI_SERVICE_PORT: "8100"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8100:8100"
     volumes:

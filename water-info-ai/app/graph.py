@@ -8,6 +8,7 @@ from app.agents.conversation_assistant import conversation_assistant_node
 from app.agents.data_analyst import data_analyst_node
 from app.agents.execution_monitor import execution_monitor_node
 from app.agents.final_response import final_response_node
+from app.agents.knowledge_retriever import knowledge_retriever_node
 from app.agents.notification import notification_node
 from app.agents.parallel_dispatch import parallel_dispatch_node
 from app.agents.plan_generator import plan_generator_node
@@ -35,6 +36,7 @@ def build_flood_response_graph():
     graph.add_node("notification", notification_node)
     graph.add_node("execution_monitor", execution_monitor_node)
     graph.add_node("parallel_dispatch", parallel_dispatch_node)
+    graph.add_node("knowledge_retriever", knowledge_retriever_node)
     graph.add_node("final_response", final_response_node)
 
     graph.add_edge(START, "supervisor")
@@ -50,6 +52,7 @@ def build_flood_response_graph():
             "notification": "notification",
             "execution_monitor": "execution_monitor",
             "parallel_dispatch": "parallel_dispatch",
+            "knowledge_retriever": "knowledge_retriever",
             "final_response": "final_response",
         },
     )
@@ -61,6 +64,7 @@ def build_flood_response_graph():
     graph.add_edge("notification", "supervisor")
     graph.add_edge("execution_monitor", "supervisor")
     graph.add_edge("parallel_dispatch", "supervisor")
+    graph.add_edge("knowledge_retriever", END)
     graph.add_edge("final_response", END)
     return graph.compile()
 

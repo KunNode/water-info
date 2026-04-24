@@ -59,6 +59,16 @@ class NotificationRecord:
 
 
 @dataclass
+class Evidence:
+    citation_id: str
+    content: str
+    document_title: str
+    source_uri: str = ""
+    heading_path: list[str] = field(default_factory=list)
+    score: float = 0.0
+
+
+@dataclass
 class EmergencyPlan:
     plan_id: str
     plan_name: str
@@ -70,6 +80,7 @@ class EmergencyPlan:
     actions: list[EmergencyAction] = field(default_factory=list)
     resources: list[ResourceAllocation] = field(default_factory=list)
     notifications: list[NotificationRecord] = field(default_factory=list)
+    citations: list[dict] = field(default_factory=list)
 
 
 class FloodGraphState(TypedDict, total=False):
@@ -90,6 +101,7 @@ class FloodGraphState(TypedDict, total=False):
     emergency_plan: EmergencyPlan
     resource_plan: list[ResourceAllocation]
     notifications: list[NotificationRecord]
+    evidence: list[Evidence]
     final_response: str
     error: str
 

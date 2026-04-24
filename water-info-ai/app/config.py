@@ -20,6 +20,10 @@ class Settings:
     openai_api_base: str = "https://api.deepseek.com/v1"
     openai_model: str = "deepseek-chat"
     llm_timeout: float = 120.0
+    embedding_api_key: str = ""
+    embedding_api_base: str = ""
+    embedding_model: str = ""
+    embedding_dim: int = 1024
 
     # PostgreSQL
     pg_host: str = "localhost"
@@ -42,15 +46,25 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 8100
     log_level: str = "INFO"
+    rag_top_k: int = 5
+    rag_min_score: float = 0.25
+    rag_chunk_size: int = 500
+    rag_chunk_overlap: int = 80
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+    openai_api_base = os.environ.get("OPENAI_API_BASE", "https://api.deepseek.com/v1")
     return Settings(
-        openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
-        openai_api_base=os.environ.get("OPENAI_API_BASE", "https://api.deepseek.com/v1"),
+        openai_api_key=openai_api_key,
+        openai_api_base=openai_api_base,
         openai_model=os.environ.get("OPENAI_MODEL", "deepseek-chat"),
         llm_timeout=float(os.environ.get("LLM_TIMEOUT", "120")),
+        embedding_api_key=os.environ.get("EMBEDDING_API_KEY", openai_api_key),
+        embedding_api_base=os.environ.get("EMBEDDING_API_BASE", openai_api_base),
+        embedding_model=os.environ.get("EMBEDDING_MODEL", ""),
+        embedding_dim=int(os.environ.get("EMBEDDING_DIM", "1024")),
         pg_host=os.environ.get("PG_HOST", "localhost"),
         pg_port=int(os.environ.get("PG_PORT", "5432")),
         pg_database=os.environ.get("PG_DATABASE", "water_info"),
@@ -65,4 +79,8 @@ def get_settings() -> Settings:
         host=os.environ.get("AI_SERVICE_HOST", "0.0.0.0"),
         port=int(os.environ.get("AI_SERVICE_PORT", "8100")),
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        rag_top_k=int(os.environ.get("RAG_TOP_K", "5")),
+        rag_min_score=float(os.environ.get("RAG_MIN_SCORE", "0.25")),
+        rag_chunk_size=int(os.environ.get("RAG_CHUNK_SIZE", "500")),
+        rag_chunk_overlap=int(os.environ.get("RAG_CHUNK_OVERLAP", "80")),
     )

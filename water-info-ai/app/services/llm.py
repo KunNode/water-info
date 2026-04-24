@@ -62,7 +62,17 @@ class OpenAICompatibleLLM:
         }
 
         response = await self._client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            logger.warning(
+                "LLM request failed: status=%s model=%s base=%s body=%s",
+                response.status_code,
+                self._settings.openai_model,
+                self._settings.openai_api_base,
+                response.text[:500],
+            )
+            raise
         data = response.json()
 
         content = (
