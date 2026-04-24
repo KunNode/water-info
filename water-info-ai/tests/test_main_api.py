@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import _build_stream_events, app
 from app.rag.models import SearchResult
 from app.state import EmergencyAction, EmergencyPlan, NotificationRecord, ResourceAllocation, RiskAssessment, RiskLevel
 
@@ -87,6 +87,26 @@ def test_health_endpoint_returns_service_metadata():
     db_mock.ensure_kb_tables.assert_awaited_once()
     db_mock.close.assert_awaited_once()
     session_mock.close.assert_awaited_once()
+
+
+def test_stream_events_do_not_duplicate_final_response_content():
+    events = _build_stream_events(
+        "conversation_assistant",
+        {
+            "final_response": "你好，我是防汛智能助手。",
+            "messages": [{"role": "conversation_assistant", "content": "你好，我是防汛智能助手。"}],
+        },
+    )
+
+    message_events = [event for event in events if event["type"] == "agent_message"]
+    assert message_events == [
+        {
+            "type": "agent_message",
+            "agent": "final_response",
+            "content": "你好，我是防汛智能助手。",
+            "response": "你好，我是防汛智能助手。",
+        }
+    ]
 
 
 def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():

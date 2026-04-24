@@ -151,7 +151,8 @@ def _build_stream_events(agent: str, update: dict) -> list[dict]:
     events: list[dict] = [{"type": "agent_update", "agent": agent, "status": "active"}]
 
     content = _message_content(update)
-    if content:
+    final_response = update.get("final_response")
+    if content and not final_response:
         events.append({"type": "agent_message", "agent": agent, "content": content})
 
     if update.get("risk_assessment"):
@@ -173,12 +174,12 @@ def _build_stream_events(agent: str, update: dict) -> list[dict]:
             "failed": sum(1 for action in plan.actions if action.status == "failed"),
         })
 
-    if update.get("final_response"):
+    if final_response:
         events.append({
             "type": "agent_message",
             "agent": "final_response",
-            "content": update["final_response"],
-            "response": update["final_response"],
+            "content": final_response,
+            "response": final_response,
         })
 
     if update.get("evidence"):

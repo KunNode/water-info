@@ -61,6 +61,32 @@ class TestSupervisorNode:
 
         assert result["next_agent"] == "__end__"
 
+    @pytest.mark.asyncio
+    async def test_does_not_repeat_risk_assessor_after_risk_is_ready(self):
+        mock_llm = SimpleNamespace(
+            is_enabled=True,
+            ainvoke=AsyncMock(
+                return_value=SimpleNamespace(
+                    content='{"next_agent":"risk_assessor","intent":"risk_assessment","focus_station_query":null,"reasoning":"继续评估风险"}'
+                )
+            ),
+        )
+
+        with patch("app.agents.supervisor.get_llm", return_value=mock_llm):
+            result = await supervisor_node(
+                {
+                    "session_id": "test-session",
+                    "user_query": "评估当前洪水风险",
+                    "messages": [],
+                    "iteration": 2,
+                    "data_summary": "已有水情摘要",
+                    "risk_assessment": RiskAssessment(risk_level=RiskLevel.HIGH, risk_score=76.4),
+                }
+            )
+
+        assert result["next_agent"] == "__end__"
+        mock_llm.ainvoke.assert_not_awaited()
+
 
 class TestAgentNodes:
     @pytest.mark.asyncio

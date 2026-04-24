@@ -1,32 +1,36 @@
 <template>
-  <div class="knowledge-page">
-    <div class="page-header">
-      <div>
-        <h2 class="page-title">知识库管理</h2>
-        <p class="page-subtitle">上传制度、手册、预案模板和资料文档，供 AI 检索引用。</p>
+  <div class="fm-admin-page knowledge-page">
+    <div class="fm-page-head">
+      <h1>知识库管理</h1>
+      <span class="sub">// RAG corpus · policy manuals · plan templates</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--ok">{{ stats.ready_document_count }} ready</span>
+    </div>
+
+    <div class="fm-summary-strip">
+      <div class="fm-card fm-mini-stat">
+        <div class="label">DOCUMENTS</div>
+        <div class="value">{{ stats.document_count }}</div>
+        <div class="hint">文档总数</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">READY</div>
+        <div class="value">{{ stats.ready_document_count }}</div>
+        <div class="hint">已完成索引</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">CHUNKS</div>
+        <div class="value">{{ stats.chunk_count }}</div>
+        <div class="hint">可检索片段</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">SUCCESS</div>
+        <div class="value">{{ formatRate(stats.job_success_rate) }}</div>
+        <div class="hint">近期索引成功率</div>
       </div>
     </div>
 
-    <div class="stats-grid">
-      <el-card shadow="never">
-        <div class="stat-label">文档数</div>
-        <div class="stat-value">{{ stats.document_count }}</div>
-      </el-card>
-      <el-card shadow="never">
-        <div class="stat-label">已就绪文档</div>
-        <div class="stat-value">{{ stats.ready_document_count }}</div>
-      </el-card>
-      <el-card shadow="never">
-        <div class="stat-label">Chunk 数</div>
-        <div class="stat-value">{{ stats.chunk_count }}</div>
-      </el-card>
-      <el-card shadow="never">
-        <div class="stat-label">近期成功率</div>
-        <div class="stat-value">{{ formatRate(stats.job_success_rate) }}</div>
-      </el-card>
-    </div>
-
-    <el-card shadow="never" class="toolbar-card">
+    <div class="fm-admin-search">
       <div class="toolbar-row">
         <el-input
           v-model="filters.q"
@@ -52,10 +56,15 @@
           <el-button type="success">上传文档</el-button>
         </el-upload>
       </div>
-    </el-card>
+    </div>
 
-    <el-card shadow="never" class="table-card">
-      <el-table :data="documents" v-loading="loading" border stripe>
+    <div class="fm-admin-table">
+      <div class="fm-admin-table__head">
+        <span class="title">知识文档</span>
+        <span class="mono">embedding corpus</span>
+      </div>
+      <div class="fm-admin-table__body">
+      <el-table :data="documents" v-loading="loading" stripe>
         <el-table-column prop="title" label="标题" min-width="220" />
         <el-table-column prop="mime" label="类型" width="180" />
         <el-table-column prop="status" label="状态" width="120" align="center">
@@ -75,15 +84,17 @@
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+      </div>
+    </div>
 
-    <el-card shadow="never" class="search-card">
-      <template #header>
-        <div class="card-header">
-          <span>检索调试</span>
-          <el-tag type="info">ADMIN / OPERATOR</el-tag>
-        </div>
-      </template>
+    <div class="fm-card search-card">
+      <div class="fm-card__head">
+        <span class="title">检索调试</span>
+        <span class="mono">topK · semantic</span>
+        <span class="sp" />
+        <span class="fm-tag fm-tag--info">ADMIN / OPERATOR</span>
+      </div>
+      <div class="fm-card__body">
       <div class="search-row">
         <el-input
           v-model="debugQuery"
@@ -110,7 +121,8 @@
         </div>
       </div>
       <el-empty v-else description="暂无检索结果" />
-    </el-card>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -263,46 +275,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.knowledge-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-}
-
-.page-subtitle {
-  margin: 8px 0 0;
-  color: var(--el-text-color-secondary);
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.stat-label {
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-
-.stat-value {
-  margin-top: 8px;
-  font-size: 28px;
-  font-weight: 700;
-}
-
 .toolbar-row,
 .search-row {
   display: flex;
@@ -335,10 +307,10 @@ onMounted(async () => {
 }
 
 .result-card {
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 12px;
+  border: 1px solid var(--fm-line);
+  border-radius: var(--fm-radius-sm);
   padding: 14px;
-  background: var(--el-fill-color-blank);
+  background: var(--fm-bg-2);
 }
 
 .result-header {
@@ -354,7 +326,7 @@ onMounted(async () => {
 
 .result-meta {
   margin-top: 8px;
-  color: var(--el-text-color-secondary);
+  color: var(--fm-fg-mute);
   font-size: 13px;
 }
 
@@ -365,13 +337,13 @@ onMounted(async () => {
 }
 
 @media (max-width: 960px) {
-  .stats-grid {
+  .fm-summary-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
-  .stats-grid {
+  .fm-summary-strip {
     grid-template-columns: 1fr;
   }
 }

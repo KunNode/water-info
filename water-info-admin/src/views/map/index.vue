@@ -1,17 +1,51 @@
 <template>
-  <div class="map-page">
-    <div class="map-toolbar">
-      <el-select v-model="filterType" placeholder="站点类型" clearable size="small" style="width: 140px">
-        <el-option v-for="(label, key) in stationTypeMap" :key="key" :label="label" :value="key" />
-      </el-select>
-      <el-tag size="small" effect="plain" style="margin-left: 12px">共 {{ filteredStations.length }} 个站点</el-tag>
-      <div class="legend">
-        <span class="legend-item"><i class="dot" style="background: #67c23a"></i>正常</span>
-        <span class="legend-item"><i class="dot" style="background: #f56c6c"></i>告警</span>
-        <span class="legend-item"><i class="dot" style="background: #909399"></i>离线/维护</span>
+  <div class="fm-map-page">
+    <div class="fm-page-head">
+      <h1>流域地图</h1>
+      <span class="sub">// realtime map · station markers · alarm layer</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--brand">{{ filteredStations.length }} stations</span>
+    </div>
+
+    <div class="fm-map-shell">
+      <div class="fm-map-side fm-card">
+        <div class="fm-card__head">
+          <span class="title">图层控制</span>
+          <span class="mono">layers</span>
+        </div>
+        <div class="fm-card__body">
+          <span class="fm-label-sm">站点类型</span>
+          <el-select v-model="filterType" placeholder="全部站点" clearable style="width: 100%">
+            <el-option v-for="(label, key) in stationTypeMap" :key="key" :label="label" :value="key" />
+          </el-select>
+
+          <div class="fm-divider" />
+
+          <div class="fm-map-layer on"><span class="fm-switch on" />水系基础</div>
+          <div class="fm-map-layer on"><span class="fm-switch on" />站点标记</div>
+          <div class="fm-map-layer on"><span class="fm-switch on" />实时告警</div>
+          <div class="fm-map-layer"><span class="fm-switch" />雨量热力</div>
+
+          <div class="fm-divider" />
+
+          <span class="fm-label-sm">状态图例</span>
+          <div class="legend">
+            <span class="legend-item"><i class="fm-dot ok" />正常</span>
+            <span class="legend-item"><i class="fm-dot danger" />告警</span>
+            <span class="legend-item"><i class="fm-dot off" />离线/维护</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="fm-map-main fm-card">
+        <div class="fm-map-floating">
+          <span class="fm-chip">30.88N 114.34E</span>
+          <span class="fm-chip">zoom 11</span>
+          <span class="fm-chip"><span class="ind" />live</span>
+        </div>
+        <div ref="mapRef" class="map-container"></div>
       </div>
     </div>
-    <div ref="mapRef" class="map-container"></div>
   </div>
 </template>
 
@@ -127,38 +161,71 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
-.map-page {
-  height: calc(100vh - 84px);
-  display: flex;
-  flex-direction: column;
+.fm-map-page {
+  min-height: calc(100vh - var(--fm-topbar-h) - var(--fm-tags-h) - 44px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
 }
-.map-toolbar {
+.fm-map-shell {
+  min-height: 640px;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+}
+.fm-map-side {
+  overflow: hidden;
+}
+.fm-map-layer {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  background: #fff;
-  border-bottom: 1px solid #ebeef5;
-  z-index: 5;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--fm-radius-sm);
+  color: var(--fm-fg-soft);
+  font-size: 12.5px;
+}
+.fm-map-layer.on {
+  background: rgba(73, 225, 255, 0.08);
+  color: var(--fm-fg);
 }
 .legend {
-  display: flex;
-  gap: 16px;
-  margin-left: auto;
-  font-size: 13px;
+  display: grid;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--fm-fg-soft);
 }
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
-.dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+.fm-map-main {
+  position: relative;
+  overflow: hidden;
+  min-height: 640px;
+}
+.fm-map-floating {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  gap: 8px;
+  z-index: 5;
 }
 .map-container {
-  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 640px;
   z-index: 0;
+}
+@media (max-width: 1100px) {
+  .fm-map-shell {
+    grid-template-columns: 1fr;
+  }
+  .fm-map-main,
+  .map-container {
+    min-height: 520px;
+  }
 }
 </style>

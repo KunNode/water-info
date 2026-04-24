@@ -67,6 +67,12 @@ services:
       - "8080:8080"
     volumes:
       - platform-logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # ─── AI Service (轻量版) ───
   ai:
@@ -129,7 +135,7 @@ services:
     restart: unless-stopped
     depends_on:
       platform:
-        condition: service_started
+        condition: service_healthy
       ai:
         condition: service_healthy
       admin:

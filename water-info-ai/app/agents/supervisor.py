@@ -234,6 +234,11 @@ def _guard_model_route(next_agent: str, state: dict, deterministic: str | None) 
     has_data = bool(state.get("data_summary"))
     has_risk = state.get("risk_assessment") is not None
     has_plan = state.get("emergency_plan") is not None
+    has_resources = bool(state.get("resource_plan"))
+    has_notifications = bool(state.get("notifications"))
+
+    if deterministic == "__end__":
+        return "__end__", "guarded: workflow already has the required result"
 
     if next_agent in {"conversation_assistant", "knowledge_retriever", "execution_monitor"}:
         return next_agent, None
@@ -245,6 +250,21 @@ def _guard_model_route(next_agent: str, state: dict, deterministic: str | None) 
 
     if not has_data:
         return deterministic or "data_analyst", "guarded: data grounding is required first"
+
+    if next_agent == "data_analyst" and has_data:
+        return deterministic or "__end__", "guarded: data analysis is already complete"
+
+    if next_agent == "risk_assessor" and has_risk:
+        return deterministic or "__end__", "guarded: risk assessment is already complete"
+
+    if next_agent == "plan_generator" and has_plan:
+        return deterministic or "__end__", "guarded: emergency plan is already complete"
+
+    if next_agent == "resource_dispatcher" and has_resources:
+        return deterministic or "__end__", "guarded: resource dispatch is already complete"
+
+    if next_agent == "notification" and has_notifications:
+        return deterministic or "__end__", "guarded: notifications are already complete"
 
     if next_agent in {"plan_generator", "resource_dispatcher", "notification", "parallel_dispatch"} and not has_risk:
         return deterministic or "risk_assessor", "guarded: risk assessment is required before planning/dispatch"
@@ -280,6 +300,16 @@ async def supervisor_node(state: dict) -> dict:
 
     llm = get_llm()
     deterministic = _deterministic_route(state)
+    if deterministic == "__end__":
+        return {
+            "next_agent": "__end__",
+            "iteration": iteration,
+            "current_agent": "supervisor",
+            "intent": inferred_intent,
+            "focus_station_query": inferred_focus_station,
+            "supervisor_reasoning": "deterministic complete",
+        }
+
     # When LLM is unavailable, fall back to deterministic routing immediately.
     if not llm.is_enabled:
         return {

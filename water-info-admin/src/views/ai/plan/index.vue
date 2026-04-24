@@ -1,11 +1,37 @@
 <template>
-  <div class="plan-management">
-    <div class="page-header">
-      <h2 class="page-title">应急预案管理</h2>
+  <div class="fm-admin-page plan-management">
+    <div class="fm-page-head">
+      <h1>应急预案</h1>
+      <span class="sub">// AI generated plans · execution lifecycle</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--warn">{{ executingCount }} executing</span>
+      <span class="fm-tag fm-tag--brand">{{ total }} plans</span>
     </div>
 
-    <!-- Filter Form -->
-    <el-card shadow="never" class="filter-card">
+    <div class="fm-summary-strip">
+      <div class="fm-card fm-mini-stat">
+        <div class="label">PLANS</div>
+        <div class="value">{{ total }}</div>
+        <div class="hint">预案库总数</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">EXECUTING</div>
+        <div class="value">{{ executingCount }}</div>
+        <div class="hint">执行中</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">APPROVED</div>
+        <div class="value">{{ approvedCount }}</div>
+        <div class="hint">已批准</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">ACTIONS</div>
+        <div class="value">{{ actionCount }}</div>
+        <div class="hint">当前页行动项</div>
+      </div>
+    </div>
+
+    <div class="fm-admin-search">
       <el-form :inline="true" :model="queryParams" class="filter-form" @submit.prevent="handleSearch">
         <el-form-item label="关键字">
           <el-input v-model="queryParams.keyword" placeholder="搜索摘要" clearable />
@@ -34,11 +60,15 @@
           <el-button @click="resetQuery">重置</el-button>
         </el-form-item>
       </el-form>
-    </el-card>
+    </div>
 
-    <!-- Table -->
-    <el-card shadow="never" class="table-card">
-      <el-table :data="tableData" v-loading="loading" border stripe style="width: 100%">
+    <div class="fm-admin-table">
+      <div class="fm-admin-table__head">
+        <span class="title">预案列表</span>
+        <span class="mono">ranked · reviewed · executable</span>
+      </div>
+      <div class="fm-admin-table__body">
+      <el-table :data="tableData" v-loading="loading" stripe style="width: 100%">
         <el-table-column type="index" label="序号" width="60" align="center" />
         <el-table-column prop="summary" label="摘要" min-width="280">
           <template #default="{ row }">
@@ -109,7 +139,8 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+      </div>
+    </div>
 
     <!-- Detail Drawer -->
     <el-drawer v-model="drawerVisible" title="应急预案详情" size="50%" destroy-on-close>
@@ -197,7 +228,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { Search, Document, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
@@ -220,6 +251,12 @@ const drawerVisible = ref(false)
 const detailLoading = ref(false)
 const currentPlan = ref<FloodPlan | null>(null)
 const executing = ref(false)
+
+const executingCount = computed(() => tableData.value.filter((item) => item.status === 'executing').length)
+const approvedCount = computed(() => tableData.value.filter((item) => item.status === 'approved').length)
+const actionCount = computed(() => {
+  return tableData.value.reduce((sum, item) => sum + (item.actions?.length || 0), 0)
+})
 
 const fetchData = async () => {
   loading.value = true
@@ -438,32 +475,6 @@ const getRiskTagType = (level: string): any => {
 </script>
 
 <style scoped>
-.plan-management {
-  padding: 24px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.filter-card {
-  margin-bottom: 16px;
-}
-
-.table-card {
-  margin-bottom: 16px;
-}
-
 .pagination-container {
   display: flex;
   justify-content: flex-end;
@@ -480,7 +491,7 @@ const getRiskTagType = (level: string): any => {
 .summary-preview-title {
   font-size: 14px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--fm-fg);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -489,7 +500,7 @@ const getRiskTagType = (level: string): any => {
 .summary-preview-text {
   font-size: 12px;
   line-height: 1.6;
-  color: #6b7280;
+  color: var(--fm-fg-soft);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -502,12 +513,12 @@ const getRiskTagType = (level: string): any => {
 
 .summary-panel {
   padding: 18px 20px;
-  border-radius: 16px;
+  border-radius: var(--fm-radius);
   background:
-    radial-gradient(circle at top right, rgba(64, 158, 255, 0.12), transparent 38%),
-    linear-gradient(135deg, #f8fbff 0%, #f3f7fd 52%, #eef5ff 100%);
-  border: 1px solid rgba(64, 158, 255, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    radial-gradient(circle at top right, rgba(73, 225, 255, 0.12), transparent 38%),
+    var(--fm-grad-raised);
+  border: 1px solid var(--fm-line);
+  box-shadow: var(--fm-shadow-card);
 }
 
 .summary-panel-header {
@@ -522,7 +533,7 @@ const getRiskTagType = (level: string): any => {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #409eff;
+  color: var(--fm-brand-2);
   margin-bottom: 6px;
 }
 
@@ -530,19 +541,19 @@ const getRiskTagType = (level: string): any => {
   font-size: 22px;
   line-height: 1.35;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--fm-fg);
 }
 
 .summary-panel-divider {
   height: 1px;
   margin: 14px 0 18px;
-  background: linear-gradient(90deg, rgba(64, 158, 255, 0.28), rgba(64, 158, 255, 0.04));
+  background: var(--fm-grad-line);
 }
 
 .summary-markdown {
   font-size: 14px;
   line-height: 1.85;
-  color: #374151;
+  color: var(--fm-fg-soft);
 }
 
 .mb-4 {
@@ -553,7 +564,7 @@ const getRiskTagType = (level: string): any => {
   font-size: 16px;
   font-weight: 600;
   margin: 24px 0 12px 0;
-  color: #303133;
+  color: var(--fm-fg);
   padding-left: 10px;
   position: relative;
 }
@@ -565,7 +576,7 @@ const getRiskTagType = (level: string): any => {
   top: 4px;
   bottom: 4px;
   width: 4px;
-  background-color: #409EFF;
+  background: var(--fm-grad-brand);
   border-radius: 2px;
 }
 
@@ -576,7 +587,7 @@ const getRiskTagType = (level: string): any => {
   margin: 18px 0 10px;
   line-height: 1.4;
   font-weight: 700;
-  color: #1d4ed8;
+  color: var(--fm-brand-2);
 }
 
 .markdown-body :deep(h1) {
@@ -612,20 +623,20 @@ const getRiskTagType = (level: string): any => {
 }
 
 .markdown-body :deep(strong) {
-  color: #111827;
+  color: var(--fm-fg);
   font-weight: 700;
 }
 
 .markdown-body :deep(em) {
-  color: #2563eb;
+  color: var(--fm-brand-2);
   font-style: normal;
 }
 
 .markdown-body :deep(code) {
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(37, 99, 235, 0.08);
-  color: #1d4ed8;
+  background: rgba(47, 123, 255, 0.14);
+  color: var(--fm-brand-2);
   font-size: 12px;
 }
 
@@ -634,8 +645,8 @@ const getRiskTagType = (level: string): any => {
   padding: 14px 16px;
   overflow-x: auto;
   border-radius: 12px;
-  background: #0f172a;
-  color: #e5eefc;
+  background: var(--fm-bg-1);
+  color: var(--fm-fg);
 }
 
 .markdown-body :deep(pre code) {
@@ -647,10 +658,10 @@ const getRiskTagType = (level: string): any => {
 .markdown-body :deep(blockquote) {
   margin: 14px 0;
   padding: 12px 14px;
-  border-left: 4px solid #f59e0b;
+  border-left: 4px solid var(--fm-warn);
   border-radius: 0 12px 12px 0;
-  background: rgba(245, 158, 11, 0.08);
-  color: #7c5a10;
+  background: rgba(255, 181, 71, 0.08);
+  color: var(--fm-fg-soft);
 }
 
 .markdown-body :deep(hr) {
@@ -670,13 +681,13 @@ const getRiskTagType = (level: string): any => {
 .markdown-body :deep(th),
 .markdown-body :deep(td) {
   padding: 10px 12px;
-  border: 1px solid #dbe7f5;
+  border: 1px solid var(--fm-line);
   text-align: left;
 }
 
 .markdown-body :deep(th) {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--fm-bg-2);
+  color: var(--fm-brand-2);
   font-weight: 700;
 }
 
