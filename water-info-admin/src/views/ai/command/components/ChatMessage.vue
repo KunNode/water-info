@@ -1,42 +1,38 @@
 <template>
-  <div class="chat-message" :class="message.role">
-    <!-- Thinking / analyzing placeholder -->
+  <div class="fm-msg" :class="message.role">
+    <!-- Thinking placeholder -->
     <template v-if="message.role === 'thinking'">
-      <div class="thinking-bubble">
-        <span class="thinking-dot" /><span class="thinking-dot" /><span class="thinking-dot" />
-        <span class="thinking-label">{{ message.content }}</span>
+      <div class="fm-msg__thinking">
+        <span class="dot" /><span class="dot" /><span class="dot" />
+        <span class="label">{{ message.content }}</span>
       </div>
     </template>
 
-    <!-- Agent 分体气泡 -->
+    <!-- Agent bubble -->
     <template v-else-if="message.role === 'agent'">
-      <div class="agent-bubble" :style="{ '--agent-color': agentColor }">
-        <div class="agent-bubble-header">
+      <div class="fm-msg__agent" :style="{ '--agent-color': agentColor }">
+        <div class="agent-head">
           <span class="agent-dot" />
           <span class="agent-label">{{ agentLabel }}</span>
-          <span v-if="message.agentStatus === 'done'" class="agent-done-badge">已完成</span>
-          <span v-else class="agent-typing-badge">
-            <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
+          <span v-if="message.agentStatus === 'done'" class="agent-badge">已完成</span>
+          <span v-else class="agent-typing">
+            <span class="td" /><span class="td" /><span class="td" />
           </span>
         </div>
-        <div class="markdown-body agent-content" v-html="renderedContent" />
-        <span v-if="message.agentStatus !== 'done'" class="cursor-blink">|</span>
+        <div class="markdown" v-html="renderedContent" />
+        <span v-if="message.agentStatus !== 'done'" class="caret">|</span>
       </div>
-      <div class="timestamp">{{ formattedTime }}</div>
+      <div class="time">{{ formattedTime }}</div>
     </template>
 
-    <!-- User / assistant 气泡（原有逻辑） -->
+    <!-- User / assistant bubble -->
     <template v-else-if="message.role === 'user' || message.role === 'assistant'">
-      <div class="bubble">
-        <div
-          v-if="message.role === 'assistant'"
-          class="markdown-body"
-          v-html="renderedContent"
-        />
+      <div class="fm-msg__bubble">
+        <div v-if="message.role === 'assistant'" class="markdown" v-html="renderedContent" />
         <div v-else class="user-text">{{ message.content }}</div>
-        <span v-if="streaming && message.role === 'assistant'" class="cursor-blink">|</span>
+        <span v-if="streaming && message.role === 'assistant'" class="caret">|</span>
       </div>
-      <div class="timestamp">{{ formattedTime }}</div>
+      <div class="time">{{ formattedTime }}</div>
     </template>
   </div>
 </template>
@@ -54,7 +50,6 @@ const props = defineProps<{
 
 const renderedContent = computed(() => {
   if (!props.message.content) return ''
-  // marked v5+ synchronous API; cast needed because overloads include Promise variant
   const raw = marked.parse(props.message.content, { async: false }) as string
   return DOMPurify.sanitize(raw, {
     ALLOWED_TAGS: [
@@ -76,50 +71,78 @@ const formattedTime = computed(() => {
   return `${hh}:${mm}:${ss}`
 })
 
-// 智能体颜色与显示名映射
 const AGENT_META: Record<string, { label: string; color: string }> = {
-  data_analyst:        { label: '数据分析',  color: '#00d4ff' },
-  risk_assessor:       { label: '风险评估',  color: '#f59e0b' },
-  plan_generator:      { label: '预案生成',  color: '#10b981' },
-  knowledge_retriever: { label: '知识检索',  color: '#22c55e' },
-  resource_dispatcher: { label: '资源调度',  color: '#8b5cf6' },
-  notification:        { label: '通知预警',  color: '#ef4444' },
-  execution_monitor:   { label: '执行监控',  color: '#6b7280' },
-  final_response:      { label: '综合报告',  color: '#00d4ff' },
+  data_analyst:        { label: 'DATA',     color: '#49e1ff' },
+  risk_assessor:       { label: 'RISK',     color: '#ffb547' },
+  plan_generator:      { label: 'PLAN',     color: '#2bd99f' },
+  knowledge_retriever: { label: 'KNOW',     color: '#7aa2ff' },
+  resource_dispatcher: { label: 'DISPATCH', color: '#8b5cf6' },
+  notification:        { label: 'NOTIFY',   color: '#ff5a6a' },
+  execution_monitor:   { label: 'MONITOR',  color: '#a9b3c6' },
+  final_response:      { label: 'SUMMARY',  color: '#49e1ff' },
 }
 
-const agentMeta = computed(() => AGENT_META[props.message.agent ?? ''] ?? { label: props.message.agent ?? 'AI', color: '#00d4ff' })
+const agentMeta = computed(
+  () => AGENT_META[props.message.agent ?? ''] ?? { label: (props.message.agent ?? 'AI').toUpperCase(), color: '#49e1ff' },
+)
 const agentLabel = computed(() => agentMeta.value.label)
 const agentColor = computed(() => agentMeta.value.color)
 </script>
 
-<style scoped>
-.chat-message {
+<style scoped lang="scss">
+.fm-msg {
   display: flex;
   flex-direction: column;
   margin-bottom: 16px;
+
+  &.user { align-items: flex-end; }
+  &.assistant,
+  &.agent { align-items: flex-start; }
 }
 
-.chat-message.user {
-  align-items: flex-end;
+/* ── User bubble (brand gradient) ── */
+.fm-msg.user .fm-msg__bubble {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 14px 14px 2px 14px;
+  background: var(--fm-grad-brand);
+  color: #fff;
+  font-size: 13.5px;
+  line-height: 1.6;
+  box-shadow: 0 8px 20px -8px rgba(47, 123, 255, 0.5);
 }
 
-.chat-message.assistant,
-.chat-message.agent {
-  align-items: flex-start;
+/* ── Assistant bubble ── */
+.fm-msg.assistant .fm-msg__bubble {
+  max-width: 88%;
+  padding: 10px 14px;
+  border-radius: 14px 14px 14px 2px;
+  background: var(--fm-bg-2);
+  border: 1px solid var(--fm-line);
+  color: var(--fm-fg);
+  font-size: 13.5px;
+  line-height: 1.7;
 }
 
-/* ── Agent 分体气泡 ── */
-.agent-bubble {
+.user-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Agent bubble (color-coded left border) ── */
+.fm-msg__agent {
   max-width: 90%;
-  border-left: 3px solid var(--agent-color, #00d4ff);
-  background: rgba(255, 255, 255, 0.04);
+  padding: 10px 14px;
   border-radius: 0 10px 10px 0;
-  padding: 10px 14px 10px 14px;
+  border-left: 3px solid var(--agent-color);
+  background: var(--fm-bg-2);
+  border-top: 1px solid var(--fm-line);
+  border-right: 1px solid var(--fm-line);
+  border-bottom: 1px solid var(--fm-line);
   position: relative;
 }
 
-.agent-bubble-header {
+.agent-head {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -130,183 +153,151 @@ const agentColor = computed(() => agentMeta.value.color)
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--agent-color, #00d4ff);
+  background: var(--agent-color);
+  box-shadow: 0 0 6px var(--agent-color);
   flex-shrink: 0;
 }
 
 .agent-label {
-  font-size: 11px;
+  font-size: 10.5px;
+  font-family: var(--fm-font-mono);
   font-weight: 600;
-  color: var(--agent-color, #00d4ff);
-  letter-spacing: 0.5px;
+  color: var(--agent-color);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
-.agent-done-badge {
+.agent-badge {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.06);
+  font-family: var(--fm-font-mono);
+  color: var(--fm-fg-mute);
+  background: var(--fm-bg-3);
   padding: 1px 6px;
   border-radius: 8px;
   margin-left: auto;
+  letter-spacing: 0.04em;
 }
 
-.agent-typing-badge {
+.agent-typing {
   display: flex;
   align-items: center;
   gap: 3px;
   margin-left: auto;
 }
 
-.typing-dot {
+.td {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--fm-fg-soft);
   animation: typing-pulse 1.2s ease-in-out infinite;
 }
-.typing-dot:nth-child(2) { animation-delay: 0.2s; }
-.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+.td:nth-child(2) { animation-delay: 0.2s; }
+.td:nth-child(3) { animation-delay: 0.4s; }
 
 @keyframes typing-pulse {
   0%, 80%, 100% { opacity: 0.3; transform: scale(1); }
-  40% { opacity: 1; transform: scale(1.2); }
+  40% { opacity: 1; transform: scale(1.3); }
 }
 
-.agent-content {
+/* ── Markdown styling ── */
+.markdown {
   font-size: 13.5px;
   line-height: 1.75;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--fm-fg);
 }
 
-/* ── User / assistant 气泡（原有样式） ── */
-.bubble {
-  max-width: 85%;
-  padding: 12px 16px;
-  border-radius: 12px;
-  font-size: 14px;
-  line-height: 1.7;
-  position: relative;
-}
-
-.chat-message.user .bubble {
-  background: rgba(59, 130, 246, 0.2);
-  border: 1px solid rgba(59, 130, 246, 0.4);
-  border-bottom-right-radius: 4px;
-  color: rgba(255, 255, 255, 0.95);
-}
-
-.chat-message.assistant .bubble {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-bottom-left-radius: 4px;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.user-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* ── Markdown 样式（共用） ── */
-.markdown-body :deep(h1),
-.markdown-body :deep(h2),
-.markdown-body :deep(h3),
-.markdown-body :deep(h4) {
-  color: #00d4ff;
+.markdown :deep(h1),
+.markdown :deep(h2),
+.markdown :deep(h3),
+.markdown :deep(h4) {
+  color: var(--fm-brand-2);
   margin: 12px 0 6px;
   font-weight: 600;
   line-height: 1.4;
 }
-.markdown-body :deep(h1) { font-size: 18px; }
-.markdown-body :deep(h2) { font-size: 16px; }
-.markdown-body :deep(h3) { font-size: 15px; }
-.markdown-body :deep(h4) { font-size: 14px; }
+.markdown :deep(h1) { font-size: 17px; }
+.markdown :deep(h2) { font-size: 15.5px; }
+.markdown :deep(h3) { font-size: 14.5px; }
+.markdown :deep(h4) { font-size: 13.5px; }
 
-.markdown-body :deep(p) {
+.markdown :deep(p) {
   margin: 6px 0;
   word-break: break-word;
 }
 
-.markdown-body :deep(ul),
-.markdown-body :deep(ol) {
+.markdown :deep(ul),
+.markdown :deep(ol) {
   padding-left: 20px;
   margin: 6px 0;
 }
+.markdown :deep(li) { margin: 3px 0; }
 
-.markdown-body :deep(li) {
-  margin: 3px 0;
-}
+.markdown :deep(strong) { color: var(--fm-fg); font-weight: 600; }
+.markdown :deep(em) { color: var(--fm-brand-2); }
 
-.markdown-body :deep(strong) {
-  color: #fff;
-  font-weight: 600;
-}
-
-.markdown-body :deep(em) {
-  color: rgba(0, 212, 255, 0.8);
-}
-
-.markdown-body :deep(code) {
-  background: rgba(0, 0, 0, 0.4);
+.markdown :deep(code) {
+  background: var(--fm-bg-3);
   padding: 1px 6px;
   border-radius: 4px;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-  color: #00d4ff;
+  font-family: var(--fm-font-mono);
+  font-size: 12.5px;
+  color: var(--fm-brand-2);
 }
 
-.markdown-body :deep(pre) {
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+.markdown :deep(pre) {
+  background: var(--fm-bg-1);
+  border: 1px solid var(--fm-line);
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
   margin: 8px 0;
 }
-
-.markdown-body :deep(pre code) {
+.markdown :deep(pre code) {
   background: transparent;
   padding: 0;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--fm-fg-soft);
 }
 
-.markdown-body :deep(blockquote) {
-  border-left: 3px solid rgba(0, 212, 255, 0.4);
+.markdown :deep(blockquote) {
+  border-left: 3px solid var(--fm-brand);
   padding-left: 12px;
   margin: 6px 0;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--fm-fg-mute);
 }
 
-.markdown-body :deep(hr) {
+.markdown :deep(hr) {
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--fm-line);
   margin: 10px 0;
 }
 
-.markdown-body :deep(table) {
+.markdown :deep(table) {
   width: 100%;
   border-collapse: collapse;
   margin: 8px 0;
-  font-size: 13px;
+  font-size: 12.5px;
 }
-
-.markdown-body :deep(th),
-.markdown-body :deep(td) {
-  border: 1px solid rgba(255, 255, 255, 0.15);
+.markdown :deep(th),
+.markdown :deep(td) {
+  border: 1px solid var(--fm-line);
   padding: 6px 10px;
   text-align: left;
 }
-
-.markdown-body :deep(th) {
-  background: rgba(0, 212, 255, 0.1);
-  color: #00d4ff;
+.markdown :deep(th) {
+  background: var(--fm-bg-3);
+  color: var(--fm-brand-2);
+  font-family: var(--fm-font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.cursor-blink {
+/* ── Caret ── */
+.caret {
   display: inline-block;
   width: 2px;
-  color: #00d4ff;
+  color: var(--fm-brand-2);
   animation: blink 1s step-end infinite;
   margin-left: 2px;
 }
@@ -316,41 +307,44 @@ const agentColor = computed(() => agentMeta.value.color)
   50% { opacity: 0; }
 }
 
-.timestamp {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+/* ── Time ── */
+.time {
+  font-size: 10.5px;
+  color: var(--fm-fg-dim);
   margin-top: 4px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--fm-font-mono);
+  letter-spacing: 0.04em;
 }
 
-/* ── Thinking / analyzing placeholder ── */
-.thinking-bubble {
+/* ── Thinking ── */
+.fm-msg__thinking {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px dashed rgba(0, 212, 255, 0.25);
+  background: var(--fm-bg-2);
+  border: 1px dashed rgba(73, 225, 255, 0.3);
   border-radius: 8px;
-  max-width: 220px;
+  max-width: 240px;
 }
 
-.thinking-label {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.45);
+.fm-msg__thinking .label {
+  font-size: 12.5px;
+  color: var(--fm-fg-mute);
   font-style: italic;
 }
 
-.thinking-dot {
+.fm-msg__thinking .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: rgba(0, 212, 255, 0.5);
+  background: var(--fm-brand-2);
   animation: thinking-pulse 1.4s ease-in-out infinite;
   flex-shrink: 0;
+  box-shadow: 0 0 6px var(--fm-brand-2);
 }
-.thinking-dot:nth-child(2) { animation-delay: 0.2s; }
-.thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+.fm-msg__thinking .dot:nth-child(2) { animation-delay: 0.2s; }
+.fm-msg__thinking .dot:nth-child(3) { animation-delay: 0.4s; }
 
 @keyframes thinking-pulse {
   0%, 80%, 100% { opacity: 0.3; transform: scale(0.9); }

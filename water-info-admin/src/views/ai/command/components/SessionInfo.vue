@@ -1,18 +1,20 @@
 <template>
-  <div class="glass-panel sidebar-panel">
-    <div class="panel-header">会话信息</div>
-    <div class="session-info">
-      <div class="info-row">
-        <span class="label">Session ID</span>
-        <span class="value">{{ sessionId ? sessionId.slice(0, 12) + '…' : '---' }}</span>
+  <div class="fm-card fm-session-info">
+    <div class="fm-card__head">
+      <span class="title">会话信息</span>
+    </div>
+    <div class="fm-card__body">
+      <div class="row">
+        <span class="k">Session ID</span>
+        <span class="v mono">{{ sessionId ? sessionId.slice(0, 12) + '…' : '---' }}</span>
       </div>
-      <div class="info-row">
-        <span class="label">开始时间</span>
-        <span class="value">{{ startTime || '---' }}</span>
+      <div class="row">
+        <span class="k">开始时间</span>
+        <span class="v mono">{{ startTime || '---' }}</span>
       </div>
-      <div class="info-row">
-        <span class="label">交互次数</span>
-        <span class="value accent">{{ queryCount }}</span>
+      <div class="row">
+        <span class="k">交互次数</span>
+        <span class="v v--accent mono">{{ queryCount }}</span>
       </div>
     </div>
   </div>
@@ -20,68 +22,44 @@
 
 <script setup lang="ts">
 defineProps<{
-  sessionId: string
+  sessionId: string | null
   startTime: string
   queryCount: number
 }>()
 </script>
 
-<style scoped>
-.glass-panel {
-  background: linear-gradient(135deg, rgba(0, 100, 150, 0.1) 0%, rgba(0, 50, 100, 0.05) 100%);
-  border: 1px solid rgba(0, 212, 255, 0.15);
-  border-radius: 8px;
-  backdrop-filter: blur(4px);
-}
-
-.sidebar-panel {
-  padding: 16px;
-}
-
-.panel-header {
-  font-size: 14px;
-  font-weight: 600;
-  color: #00d4ff;
-  margin-bottom: 14px;
-  padding-left: 10px;
-  position: relative;
-}
-
-.panel-header::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 2px;
-  bottom: 2px;
-  width: 3px;
-  background: linear-gradient(180deg, #00d4ff, #0066cc);
-  border-radius: 2px;
-}
-
-.session-info {
+<style scoped lang="scss">
+.fm-session-info .fm-card__body {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.info-row {
+.row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
 }
 
-.label {
-  color: rgba(255, 255, 255, 0.4);
+.k {
+  font-family: var(--fm-font-mono);
+  color: var(--fm-fg-mute);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
-.value {
-  color: rgba(255, 255, 255, 0.75);
-  font-family: 'Courier New', monospace;
+.v {
+  color: var(--fm-fg-soft);
 }
 
-.value.accent {
-  color: #00d4ff;
+.v--accent {
+  color: var(--fm-brand-2);
   font-weight: 600;
+}
+
+.mono {
+  font-family: var(--fm-font-mono);
 }
 </style>

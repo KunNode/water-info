@@ -1,64 +1,75 @@
 <template>
-  <div class="ai-command-page">
-    <!-- Header -->
-    <header class="header">
-      <div class="header-left">
-        <el-icon class="logo-icon"><Platform /></el-icon>
-        <span class="title">AI 智能指挥台</span>
-      </div>
-      <div class="header-center" v-if="store.currentSessionId">
-        <span class="session-badge">Session: {{ store.currentSessionId.slice(0, 8) }}...</span>
-      </div>
-      <div class="header-right">
-        <el-tag
-          v-if="store.riskLevel !== 'none'"
-          :color="riskColor"
-          effect="dark"
-          style="border: none; margin-right: 16px;"
-        >
-          {{ riskLabel }}
-        </el-tag>
-        <el-button type="primary" plain @click="goBack" class="back-btn">
-          <el-icon><Back /></el-icon> 返回
-        </el-button>
-      </div>
-    </header>
+  <div class="fm-ai-page">
+    <div class="fm-page-head">
+      <h1>AI 命令中心</h1>
+      <span class="sub">
+        //
+        <template v-if="store.currentSessionId">session · {{ store.currentSessionId.slice(0, 8) }}</template>
+        <template v-else>session · draft</template>
+        · {{ store.queryCount }} 次交互
+      </span>
+      <span class="sp" />
 
-    <!-- Main -->
-    <main class="main-content">
-      <!-- Left: Chat -->
-      <ChatPanel :messages="store.messages" :loading="loading" @send="sendQuery" />
+      <span v-if="store.riskLevel !== 'none'" class="fm-tag" :class="riskTagClass">
+        <span class="fm-dot" :class="riskDotClass" />{{ riskLabel }}
+      </span>
 
-      <!-- Right: Sidebar + Session Drawer -->
-      <div class="sidebar-wrapper">
-        <aside class="sidebar">
-          <AgentTimeline :agentStatus="store.agentStatus" />
-          <RiskPanel :riskLevel="store.riskLevel" />
-          <PlanStatus :planInfo="store.planInfo" />
-          <ActiveAlerts />
-          <SessionInfo :sessionId="store.currentSessionId" :startTime="startTime" :queryCount="store.queryCount" />
-        </aside>
-        <SessionDrawer
-          ref="sessionDrawerRef"
-          v-model="store.drawerOpen"
-          :currentSessionId="store.currentSessionId"
-          @select="handleSessionSelect"
-          @new="handleNewSession"
+      <span class="fm-tag" :class="{ 'fm-tag--warn': loading, 'fm-tag--ok': !loading }">
+        <span class="fm-dot" :class="loading ? 'warn' : 'ok'" />
+        {{ loading ? '分析中' : '待命' }}
+      </span>
+
+      <el-button class="fm-ai-head-btn" @click="handleNewSession">
+        <el-icon><Plus /></el-icon>新会话
+      </el-button>
+      <el-button class="fm-ai-head-btn" @click="toggleDrawer">
+        <el-icon><ChatLineRound /></el-icon>会话记录
+      </el-button>
+      <el-button type="primary" plain @click="goBack">
+        <el-icon><Back /></el-icon>返回
+      </el-button>
+    </div>
+
+    <div class="fm-ai-grid">
+      <ChatPanel
+        :messages="store.messages"
+        :loading="loading"
+        class="fm-ai-grid__chat"
+        @send="sendQuery"
+      />
+
+      <div class="fm-ai-grid__side">
+        <AgentTimeline :agentStatus="store.agentStatus" />
+        <RiskPanel :riskLevel="store.riskLevel" />
+        <PlanStatus :planInfo="store.planInfo" />
+        <ActiveAlerts />
+        <SessionInfo
+          :sessionId="store.currentSessionId"
+          :startTime="startTime"
+          :queryCount="store.queryCount"
         />
       </div>
-    </main>
+    </div>
+
+    <SessionDrawer
+      ref="sessionDrawerRef"
+      v-model="store.drawerOpen"
+      :currentSessionId="store.currentSessionId"
+      @select="handleSessionSelect"
+      @new="handleNewSession"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Platform, Back } from '@element-plus/icons-vue'
+import { Back, Plus, ChatLineRound } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useSSE } from '@/composables/useSSE'
 import type { SSEEventType } from '@/composables/useSSE'
 import { getStreamUrl } from '@/api/flood'
-import { useAiConversationStore, type ChatMessageItem } from '@/stores/aiConversation'
+import { useAiConversationStore } from '@/stores/aiConversation'
 
 // Sub-components
 import ChatPanel from './components/ChatPanel.vue'
@@ -83,23 +94,20 @@ const startTime = ref('')
 
 async function handleSessionSelect(newSessionId: string) {
   if (!newSessionId || newSessionId === store.currentSessionId) return
-  
-  // Load session from server
+
   await store.loadSession(newSessionId)
   startTime.value = new Date().toLocaleTimeString()
-  
-  // Reset transient state
+
   typewriterQueue.value = []
   isTyping.value = false
   currentQueryBubbleIdx.clear()
   agentLatestContent.clear()
   reset()
-  
-  // Update URL
+
   router.replace({ name: 'AICommandSession', params: { sessionId: newSessionId } })
 }
 
-function handleNewSession(newId?: string) {
+function handleNewSession() {
   store.startNewSession()
   startTime.value = ''
   typewriterQueue.value = []
@@ -107,9 +115,12 @@ function handleNewSession(newId?: string) {
   currentQueryBubbleIdx.clear()
   agentLatestContent.clear()
   reset()
-  
-  // Update URL to base command route
+
   router.replace({ name: 'AICommand' })
+}
+
+function toggleDrawer() {
+  store.drawerOpen = !store.drawerOpen
 }
 
 // ── Typewriter queue ─────────────────────────────────────────────
@@ -126,20 +137,21 @@ const TICK_MS = 16
 const currentQueryBubbleIdx = new Map<string, number>()
 const agentLatestContent = new Map<string, string>()
 
-// ── Risk state (computed from store) ────────────────────────────
-const riskMap: Record<string, { label: string; color: string }> = {
-  none:     { label: '正常',   color: '#6b7280' },
-  low:      { label: '低风险', color: '#3b82f6' },
-  moderate: { label: '中等风险', color: '#f59e0b' },
-  high:     { label: '高风险', color: '#ef4444' },
-  critical: { label: '极高风险', color: '#7c3aed' },
+// ── Risk state ────────────────────────────────────────
+const riskMap: Record<string, { label: string; tag: string; dot: string }> = {
+  none:     { label: '正常',     tag: '',              dot: 'off' },
+  low:      { label: '低风险',   tag: 'fm-tag--info',  dot: 'ok' },
+  moderate: { label: '中等风险', tag: 'fm-tag--warn',  dot: 'warn' },
+  high:     { label: '高风险',   tag: 'fm-tag--danger', dot: 'danger' },
+  critical: { label: '极高风险', tag: 'fm-tag--danger', dot: 'danger' },
 }
 const riskLabel = computed(() => riskMap[store.riskLevel]?.label ?? '正常')
-const riskColor = computed(() => riskMap[store.riskLevel]?.color ?? '#6b7280')
+const riskTagClass = computed(() => riskMap[store.riskLevel]?.tag ?? '')
+const riskDotClass = computed(() => riskMap[store.riskLevel]?.dot ?? 'off')
 
 // ── Message helpers ─────────────────────────────────────────────
 function removeThinkingBubble() {
-  const idx = store.messages.findIndex(m => m.role === 'thinking')
+  const idx = store.messages.findIndex((m) => m.role === 'thinking')
   if (idx >= 0) {
     store.messages.splice(idx, 1)
     for (const [k, v] of currentQueryBubbleIdx.entries()) {
@@ -153,12 +165,9 @@ function enqueueAgentMessage(agent: string, content: string) {
   agentLatestContent.set(agent, content)
 
   const existingIdx = currentQueryBubbleIdx.get(agent) ?? -1
-
   if (existingIdx >= 0) {
     const existing = store.messages[existingIdx]
-    if (existing.agentStatus === 'typing') {
-      return
-    }
+    if (existing.agentStatus === 'typing') return
     existing.content = content
     return
   }
@@ -197,7 +206,7 @@ async function processTypewriterQueue() {
     pos = Math.min(pos + CHARS_PER_TICK, full.length)
     store.messages[actualIdx].content = full.slice(0, pos)
     await nextTick()
-    await new Promise<void>(r => setTimeout(r, TICK_MS))
+    await new Promise<void>((r) => setTimeout(r, TICK_MS))
   }
 
   store.messages[actualIdx].agentStatus = 'done'
@@ -224,32 +233,23 @@ function formatEvidenceUpdate(items: Array<{
 
 // ── SSE structured events ────────────────────────────────────────
 onMounted(async () => {
-  // Initialize store from localStorage
   store.initFromLocalStorage()
-  
-  // Fetch session list
   await store.fetchSessions()
-  
-  // Check if URL has sessionId param
+
   const sessionIdFromRoute = route.params.sessionId as string | undefined
-  
   if (sessionIdFromRoute) {
-    // Load session from URL
     await store.loadSession(sessionIdFromRoute)
     startTime.value = new Date().toLocaleTimeString()
   } else if (store.currentSessionId) {
-    // Load previously active session from localStorage
     await store.loadSession(store.currentSessionId)
     startTime.value = new Date().toLocaleTimeString()
   }
-  
-  // Set up SSE event handlers
+
   onStructuredEvent((event: SSEEventType) => {
     if (event.type === 'session_init') {
       if (!store.currentSessionId) {
         store.setSessionId(event.sessionId)
         startTime.value = new Date().toLocaleTimeString()
-        // Update URL with new session ID
         router.replace({ name: 'AICommandSession', params: { sessionId: event.sessionId } })
       }
     } else if (event.type === 'agent_update') {
@@ -262,7 +262,7 @@ onMounted(async () => {
           plan_name: event.name,
           status: event.status,
           actions_count: event.total,
-        }
+        },
       })
     } else if (event.type === 'evidence_update' && event.items?.length) {
       store.addMessage({
@@ -279,7 +279,6 @@ onMounted(async () => {
   })
 })
 
-// ── Keep assistant message in sync with streaming plain-text ────
 watch(fullText, (val) => {
   if (!val || hasAgentMessages.value) return
   removeThinkingBubble()
@@ -291,44 +290,34 @@ watch(fullText, (val) => {
   }
 })
 
-// ── Auto-activate supervisor when loading starts ──────────────────
 watch(loading, (isLoading) => {
   if (isLoading) {
-    const hasActive = Object.values(store.agentStatus).some(s => s === 'active' || s === 'done')
+    const hasActive = Object.values(store.agentStatus).some((s) => s === 'active' || s === 'done')
     if (!hasActive) store.setAgentStatus('supervisor', 'active')
   } else {
     store.finalizeAgentStatuses()
   }
 })
 
-// ── Send query ────────────────────────────────────────────────────
 async function sendQuery(queryText: string) {
   if (!queryText.trim() || loading.value) return
 
-  // Reset agent statuses
   store.resetAgentStatus()
 
-  // Reset typewriter queue and per-query agent tracking
   hasAgentMessages.value = false
   typewriterQueue.value = []
   isTyping.value = false
   currentQueryBubbleIdx.clear()
   agentLatestContent.clear()
 
-  // Push user message
   store.addMessage({ role: 'user', content: queryText, timestamp: new Date() })
-
-  // Push thinking placeholder
   store.addMessage({ role: 'thinking', content: '正在分析，请稍候…', timestamp: new Date() })
-
-  // Reset SSE accumulator
   reset()
 
   try {
     const payload: { query: string; sessionId?: string } = { query: queryText }
     if (store.currentSessionId) payload.sessionId = store.currentSessionId
     await start(getStreamUrl(), payload)
-    // Refresh session list so title/last-message stays current
     await store.fetchSessions()
     sessionDrawerRef.value?.refresh()
   } catch (e: unknown) {
@@ -344,113 +333,51 @@ function goBack() {
 }
 </script>
 
-<style scoped>
-.ai-command-page {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: linear-gradient(135deg, #0a1a2e 0%, #162b45 50%, #0d1f33 100%);
-  color: rgba(255, 255, 255, 0.9);
+<style scoped lang="scss">
+.fm-ai-page {
   display: flex;
   flex-direction: column;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  height: 60px;
-  background: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(0, 212, 255, 0.2);
-  flex-shrink: 0;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.logo-icon {
-  font-size: 24px;
-  color: #00d4ff;
-}
-
-.title {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 1px;
-}
-
-.session-badge {
-  font-family: 'Courier New', Courier, monospace;
-  background: rgba(0, 212, 255, 0.1);
-  padding: 4px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 212, 255, 0.3);
-  font-size: 14px;
-  color: #00d4ff;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-}
-
-.back-btn {
-  background: transparent;
-  border-color: rgba(0, 212, 255, 0.3);
-  color: #00d4ff;
-}
-.back-btn:hover {
-  background: rgba(0, 212, 255, 0.1);
-  color: #fff;
-}
-
-.main-content {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 20px;
-  padding: 20px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.sidebar-wrapper {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
+  min-height: 100%;
   position: relative;
-  min-height: 0;
 }
 
-/* glass-panel is used by ChatPanel and sidebar sub-components */
-:deep(.glass-panel) {
-  background: linear-gradient(135deg, rgba(0, 100, 150, 0.1) 0%, rgba(0, 50, 100, 0.05) 100%);
-  border: 1px solid rgba(0, 212, 255, 0.15);
-  border-radius: 8px;
-  backdrop-filter: blur(4px);
-}
-
-.sidebar {
-  width: 300px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
+.fm-ai-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 16px;
-  overflow-y: auto;
-  padding-right: 4px;
+  flex: 1;
+  min-height: 0;
+
+  &__chat {
+    grid-column: 1;
+    min-height: 620px;
+  }
+
+  &__side {
+    grid-column: 2;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
 }
 
-.sidebar::-webkit-scrollbar {
-  width: 4px;
+@media (max-width: 1100px) {
+  .fm-ai-grid {
+    grid-template-columns: 1fr;
+
+    &__chat {
+      grid-column: 1;
+    }
+    &__side {
+      grid-column: 1;
+    }
+  }
 }
-.sidebar::-webkit-scrollbar-thumb {
-  background: rgba(0, 212, 255, 0.3);
-  border-radius: 4px;
+
+.fm-ai-head-btn {
+  :deep(.el-icon) {
+    margin-right: 4px;
+  }
 }
 </style>
