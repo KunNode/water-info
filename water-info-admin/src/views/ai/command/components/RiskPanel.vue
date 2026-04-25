@@ -1,10 +1,12 @@
 <template>
   <div class="fm-card fm-risk">
     <div class="fm-card__head">
-      <span class="title">风险等级</span>
-      <span class="mono">live</span>
+      <button class="tab" :class="{ active: activeTab === 'risk' }" @click="activeTab = 'risk'">风险等级</button>
+      <button class="tab" :class="{ active: activeTab === 'scan' }" @click="activeTab = 'scan'">AI 巡检</button>
+      <span class="sp" />
+      <span class="mono">{{ scanConnected ? 'live' : 'offline' }}</span>
     </div>
-    <div class="fm-card__body">
+    <div v-if="activeTab === 'risk'" class="fm-card__body">
       <div class="risk-summary" :style="{ '--risk-color': riskColor }">
         <div>
           <div class="risk-summary__label">{{ riskLabel }}</div>
@@ -25,11 +27,31 @@
         <span>I 级</span>
       </div>
     </div>
+    <div v-else class="fm-card__body">
+      <div v-if="latestAssessment" class="scan-summary" :style="{ '--risk-color': assessmentColor }">
+        <div class="scan-summary__head">
+          <span class="level">{{ assessmentLabel }}</span>
+          <span class="fm-tag" :class="latestAssessment.source === 'EVENT' ? 'fm-tag--danger' : 'fm-tag--info'">
+            {{ latestAssessment.source }}
+          </span>
+        </div>
+        <div class="summary">{{ latestAssessment.summary }}</div>
+        <div v-if="latestAssessment.planExcerpt" class="plan">{{ latestAssessment.planExcerpt }}</div>
+        <div class="time">{{ assessmentTime }}</div>
+      </div>
+      <div v-else class="scan-empty">
+        <span class="fm-dot ok" />
+        <span>等待 AI 巡检结果</span>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { getAiAssessments } from '@/api/aiAssessment'
+import { useWebSocket } from '@/composables/useWebSocket'
+import type { AiAssessment } from '@/types'
 
 const props = defineProps<{
   riskLevel: string
@@ -43,17 +65,49 @@ const riskMap: Record<string, { label: string; sublabel: string; color: string }
   critical: { label: '极高危', sublabel: 'I 级响应',   color: '#ff8a96' },
 }
 const riskOrder = ['none', 'low', 'moderate', 'high', 'critical']
+const activeTab = ref<'risk' | 'scan'>('risk')
+const latestAssessment = ref<AiAssessment | null>(null)
+const { messages: scanMessages, connected: scanConnected, connect: connectScan } = useWebSocket('/ws/ai-assessments')
 
 const riskInfo = computed(() => riskMap[props.riskLevel] ?? riskMap['none'])
 const riskColor = computed(() => riskInfo.value.color)
 const riskLabel = computed(() => riskInfo.value.label)
 const riskSublabel = computed(() => riskInfo.value.sublabel)
+const assessmentLevel = computed(() => (latestAssessment.value?.level || 'none').toLowerCase())
+const assessmentColor = computed(() => riskMap[assessmentLevel.value]?.color ?? riskMap.none.color)
+const assessmentLabel = computed(() => riskMap[assessmentLevel.value]?.label ?? latestAssessment.value?.level ?? '研判')
+const assessmentTime = computed(() => {
+  if (!latestAssessment.value?.assessedAt) return ''
+  const d = new Date(latestAssessment.value.assessedAt)
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${mm}-${dd} ${hh}:${min}`
+})
 
 function levelActive(level: string) {
   const current = riskOrder.indexOf(props.riskLevel)
   const target = riskOrder.indexOf(level)
   return target <= Math.max(current, 0)
 }
+
+watch(scanMessages, (items) => {
+  const last = items[items.length - 1]
+  if (last?.type === 'AI_ASSESSMENT' && last.data) {
+    latestAssessment.value = last.data as AiAssessment
+  }
+}, { deep: true })
+
+onMounted(async () => {
+  connectScan()
+  try {
+    const res = await getAiAssessments({ limit: 1 })
+    latestAssessment.value = res.data?.[0] ?? null
+  } catch {
+    // non-critical panel
+  }
+})
 </script>
 
 <style scoped lang="scss">
@@ -62,6 +116,21 @@ function levelActive(level: string) {
   flex-direction: column;
   gap: 12px;
   padding: 15px 16px 16px;
+}
+
+.tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fm-fg-mute);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+
+  &.active {
+    color: var(--fm-fg);
+  }
 }
 
 .risk-summary {
@@ -136,5 +205,59 @@ function levelActive(level: string) {
   font-family: var(--fm-font-mono);
   font-size: 10px;
   letter-spacing: 0.06em;
+}
+
+.scan-summary {
+  min-height: 142px;
+  padding: 13px 14px;
+  border-radius: 8px;
+  background: var(--fm-bg-2);
+  border: 1px solid color-mix(in srgb, var(--risk-color) 34%, var(--fm-line));
+}
+
+.scan-summary__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+
+  .level {
+    color: var(--risk-color);
+    font-size: 16px;
+    font-weight: 700;
+  }
+}
+
+.summary,
+.plan {
+  color: var(--fm-fg);
+  font-size: 12px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.plan {
+  margin-top: 8px;
+  color: var(--fm-fg-soft);
+  -webkit-line-clamp: 2;
+}
+
+.time {
+  margin-top: 10px;
+  color: var(--fm-fg-mute);
+  font-family: var(--fm-font-mono);
+  font-size: 10px;
+}
+
+.scan-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 142px;
+  color: var(--fm-fg-mute);
+  font-size: 12px;
 }
 </style>

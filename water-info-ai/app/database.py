@@ -111,6 +111,16 @@ class DatabaseService:
             LIMIT $1
         """, limit)
 
+    async def list_active_stations(self, limit: int = 100) -> list[dict]:
+        """Return active stations for background risk scans."""
+        return await self._fetch("""
+            SELECT id, code, name
+            FROM station
+            WHERE UPPER(status) = 'ACTIVE'
+            ORDER BY code
+            LIMIT $1
+        """, limit)
+
     # ── Observations ──────────────────────────────────────────────────────────
 
     async def get_rainfall_stats(self, station_id: str) -> dict | None:

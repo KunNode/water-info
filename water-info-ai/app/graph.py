@@ -70,3 +70,33 @@ def build_flood_response_graph():
 
 
 flood_response_graph = build_flood_response_graph()
+
+
+def build_risk_only_graph():
+    graph = StateGraph(FloodGraphState)
+    graph.add_node("data_analyst", data_analyst_node)
+    graph.add_node("risk_assessor", risk_assessor_node)
+    graph.add_node("final_response", final_response_node)
+    graph.add_edge(START, "data_analyst")
+    graph.add_edge("data_analyst", "risk_assessor")
+    graph.add_edge("risk_assessor", "final_response")
+    graph.add_edge("final_response", END)
+    return graph.compile()
+
+
+def build_risk_event_graph():
+    graph = StateGraph(FloodGraphState)
+    graph.add_node("data_analyst", data_analyst_node)
+    graph.add_node("risk_assessor", risk_assessor_node)
+    graph.add_node("plan_generator", plan_generator_node)
+    graph.add_node("final_response", final_response_node)
+    graph.add_edge(START, "data_analyst")
+    graph.add_edge("data_analyst", "risk_assessor")
+    graph.add_edge("risk_assessor", "plan_generator")
+    graph.add_edge("plan_generator", "final_response")
+    graph.add_edge("final_response", END)
+    return graph.compile()
+
+
+risk_only_graph = build_risk_only_graph()
+risk_event_graph = build_risk_event_graph()

@@ -42,6 +42,15 @@ class WaterPlatformClient:
         response.raise_for_status()
         return response.json()
 
+    async def upsert_ai_assessment(self, payload: dict) -> dict:
+        response = await self._client.post(
+            self._build_url("/ai-assessments"),
+            headers=await self._headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def close(self) -> None:
         await self._client.aclose()
 

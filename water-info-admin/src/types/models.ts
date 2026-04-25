@@ -138,6 +138,7 @@ export interface Alarm {
   endAt: string | null
   status: AlarmStatus
   message: string
+  sourceTag?: string
   acknowledgedBy: string | null
   acknowledgedByName: string | null
   acknowledgedAt: string | null
@@ -145,6 +146,19 @@ export interface Alarm {
   closedByName: string | null
   closedAt: string | null
   createdAt: string
+}
+
+export interface AiAssessment {
+  id: string
+  stationId: string
+  stationName?: string
+  metricType?: string
+  level: string
+  summary: string
+  planExcerpt?: string
+  source: 'PERIODIC' | 'EVENT'
+  assessedAt: string
+  createdAt?: string
 }
 
 export interface AlarmQuery {

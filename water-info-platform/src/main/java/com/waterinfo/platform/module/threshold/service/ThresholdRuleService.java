@@ -188,10 +188,15 @@ public class ThresholdRuleService extends ServiceImpl<ThresholdRuleMapper, Thres
      * Find enabled rules by station and metric type
      */
     public List<ThresholdRule> findEnabledRules(String stationId, String metricType) {
-        return list(new LambdaQueryWrapper<ThresholdRule>()
-                .eq(ThresholdRule::getStationId, stationId)
-                .eq(ThresholdRule::getMetricType, metricType)
-                .eq(ThresholdRule::getEnabled, true));
+        LambdaQueryWrapper<ThresholdRule> wrapper = new LambdaQueryWrapper<ThresholdRule>()
+                .eq(ThresholdRule::getEnabled, true);
+        if (StringUtils.hasText(stationId)) {
+            wrapper.eq(ThresholdRule::getStationId, stationId);
+        }
+        if (StringUtils.hasText(metricType)) {
+            wrapper.eq(ThresholdRule::getMetricType, metricType);
+        }
+        return list(wrapper);
     }
 
     /**

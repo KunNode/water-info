@@ -50,6 +50,9 @@ class Settings:
     rag_min_score: float = 0.25
     rag_chunk_size: int = 500
     rag_chunk_overlap: int = 80
+    risk_scan_periodic_minutes: int = 15
+    risk_scan_periodic_enabled: bool = True
+    risk_scan_event_debounce_seconds: int = 60
 
 
 @lru_cache(maxsize=1)
@@ -83,4 +86,7 @@ def get_settings() -> Settings:
         rag_min_score=float(os.environ.get("RAG_MIN_SCORE", "0.25")),
         rag_chunk_size=int(os.environ.get("RAG_CHUNK_SIZE", "500")),
         rag_chunk_overlap=int(os.environ.get("RAG_CHUNK_OVERLAP", "80")),
+        risk_scan_periodic_minutes=int(os.environ.get("RISK_SCAN_PERIODIC_MINUTES", "15")),
+        risk_scan_periodic_enabled=os.environ.get("RISK_SCAN_PERIODIC_ENABLED", "true").lower() == "true",
+        risk_scan_event_debounce_seconds=int(os.environ.get("RISK_SCAN_EVENT_DEBOUNCE_SECONDS", "60")),
     )

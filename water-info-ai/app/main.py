@@ -12,6 +12,7 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from app.api.risk_scan import router as risk_scan_router
 from app.config import get_settings
 from app.database import get_db_service
 from app.models import (
@@ -41,6 +42,7 @@ from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
 from app.services.platform_client import get_platform_client
+from app.services.risk_scan_scheduler import get_risk_scan_scheduler
 from app.state import RiskAssessment, to_plain_data
 
 settings = get_settings()
@@ -256,7 +258,9 @@ async def lifespan(app: FastAPI):
         logger.info("数据库连接池就绪")
     except Exception as exc:
         logger.warning("数据库预热失败（服务仍可启动）: %s", exc)
+    await get_risk_scan_scheduler().start()
     yield
+    await get_risk_scan_scheduler().stop()
     await db.close()
     await sessions.close()
     await get_platform_client().close()
@@ -284,6 +288,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(risk_scan_router)
 
 
 # ── endpoints ─────────────────────────────────────────────────────────────────

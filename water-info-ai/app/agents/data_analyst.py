@@ -25,13 +25,17 @@ def _pick_focus_station(overview: dict, state: dict) -> dict | None:
     for station in stations:
         name = station.get("name", "")
         code = station.get("code", "")
+        station_id = str(station.get("id", ""))
         normalized_name = _normalize(name)
         normalized_code = _normalize(code)
+        normalized_id = _normalize(station_id)
         score = 0.0
         if normalized_name and normalized_name in normalized_query:
             score = max(score, 1.0)
         if normalized_code and normalized_code in normalized_query:
             score = max(score, 0.98)
+        if normalized_id and normalized_id in normalized_query:
+            score = max(score, 0.99)
         if normalized_name:
             score = max(score, SequenceMatcher(None, normalized_query, normalized_name).ratio())
         if normalized_code:

@@ -27,6 +27,7 @@ public class AlarmVO {
     private LocalDateTime endAt;
     private String status;
     private String message;
+    private String sourceTag;
     private String acknowledgedBy;
     private String acknowledgedByName;
     private LocalDateTime acknowledgedAt;

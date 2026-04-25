@@ -237,9 +237,6 @@ def _guard_model_route(next_agent: str, state: dict, deterministic: str | None) 
     has_resources = bool(state.get("resource_plan"))
     has_notifications = bool(state.get("notifications"))
 
-    if deterministic == "__end__":
-        return "__end__", "guarded: workflow already has the required result"
-
     if next_agent in {"conversation_assistant", "knowledge_retriever", "execution_monitor"}:
         return next_agent, None
 
@@ -300,7 +297,12 @@ async def supervisor_node(state: dict) -> dict:
 
     llm = get_llm()
     deterministic = _deterministic_route(state)
-    if deterministic == "__end__":
+    if deterministic == "__end__" and (
+        state.get("risk_assessment") is not None
+        or state.get("emergency_plan") is not None
+        or bool(state.get("resource_plan"))
+        or bool(state.get("notifications"))
+    ):
         return {
             "next_agent": "__end__",
             "iteration": iteration,

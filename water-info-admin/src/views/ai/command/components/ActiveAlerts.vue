@@ -19,7 +19,13 @@
           <span class="fm-dot" :class="levelDot(alarm.level)" />
           <div class="body">
             <div class="station">{{ alarm.stationName }}</div>
-            <div class="meta">{{ alarm.metricType }} · {{ formatTime(alarm.startAt) }}</div>
+            <div class="meta">
+              <span>{{ alarm.metricType }}</span>
+              <span>·</span>
+              <span>{{ formatTime(alarm.startAt) }}</span>
+              <span v-if="alarm.sourceTag">·</span>
+              <span v-if="alarm.sourceTag" class="source">{{ alarm.sourceTag }}</span>
+            </div>
           </div>
           <span class="level" :class="levelTag(alarm.level)">{{ alarm.level }}</span>
         </div>
@@ -149,10 +155,17 @@ onUnmounted(() => {
   }
 
   .meta {
+    display: flex;
+    align-items: center;
+    gap: 5px;
     font-size: 10.5px;
     font-family: var(--fm-font-mono);
     color: var(--fm-fg-mute);
     margin-top: 2px;
+  }
+
+  .source {
+    color: var(--fm-accent);
   }
 
   .level {
