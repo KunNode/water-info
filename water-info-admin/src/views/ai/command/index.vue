@@ -1,33 +1,59 @@
 <template>
   <div class="fm-ai-page">
-    <div class="fm-page-head">
-      <h1>AI 命令中心</h1>
-      <span class="sub">
-        //
-        <template v-if="store.currentSessionId">session · {{ store.currentSessionId.slice(0, 8) }}</template>
-        <template v-else>session · draft</template>
-        · {{ store.queryCount }} 次交互
-      </span>
-      <span class="sp" />
+    <div class="fm-ai-topbar">
+      <div class="fm-ai-topbar__brand">
+        <span class="tb-dot" />
+        <span class="tb-title">AI 指挥台</span>
+        <span class="fm-ai-live" :class="{ active: loading }">
+          <span class="fm-dot" :class="loading ? 'warn' : 'ok'" />
+          {{ loading ? '分析中' : '待命' }}
+        </span>
+        <span class="tb-sub">翠屏湖 · 研判席</span>
+      </div>
 
-      <span v-if="store.riskLevel !== 'none'" class="fm-tag" :class="riskTagClass">
-        <span class="fm-dot" :class="riskDotClass" />{{ riskLabel }}
-      </span>
+      <span class="fm-ai-topbar__sep" />
 
-      <span class="fm-tag" :class="{ 'fm-tag--warn': loading, 'fm-tag--ok': !loading }">
-        <span class="fm-dot" :class="loading ? 'warn' : 'ok'" />
-        {{ loading ? '分析中' : '待命' }}
-      </span>
+      <div class="fm-ai-topbar__session">
+        <span class="ses-label">SESSION</span>
+        <strong class="ses-id">{{ sessionShort }}</strong>
+      </div>
 
-      <el-button class="fm-ai-head-btn" @click="handleNewSession">
-        <el-icon><Plus /></el-icon>新会话
-      </el-button>
-      <el-button class="fm-ai-head-btn" @click="toggleDrawer">
-        <el-icon><ChatLineRound /></el-icon>会话记录
-      </el-button>
-      <el-button type="primary" plain @click="goBack">
-        <el-icon><Back /></el-icon>返回
-      </el-button>
+      <span class="fm-ai-topbar__sep" />
+
+      <div class="fm-ai-topbar__metrics">
+        <div class="tb-metric">
+          <span>交互轮次</span>
+          <strong>{{ store.queryCount }}</strong>
+        </div>
+        <div class="tb-metric">
+          <span>智能体</span>
+          <strong>{{ doneAgentCount }}/{{ totalAgentCount }}{{ activeAgentCount ? ` · ${activeAgentCount}↑` : '' }}</strong>
+        </div>
+        <div class="tb-metric">
+          <span>风险态势</span>
+          <strong :class="riskToneClass">{{ riskLabel }}</strong>
+        </div>
+        <div class="tb-metric">
+          <span>预案进度</span>
+          <strong>{{ planProgressLabel }}</strong>
+        </div>
+        <div class="tb-metric">
+          <span>会话时间</span>
+          <strong>{{ startTime || '--:--:--' }}</strong>
+        </div>
+      </div>
+
+      <div class="fm-ai-topbar__actions">
+        <el-button size="small" class="fm-ai-head-btn" @click="handleNewSession">
+          <el-icon><Plus /></el-icon>新会话
+        </el-button>
+        <el-button size="small" class="fm-ai-head-btn" @click="toggleDrawer">
+          <el-icon><ChatLineRound /></el-icon>会话记录
+        </el-button>
+        <el-button size="small" type="primary" plain @click="goBack">
+          <el-icon><Back /></el-icon>返回
+        </el-button>
+      </div>
     </div>
 
     <div class="fm-ai-grid">
@@ -138,16 +164,31 @@ const currentQueryBubbleIdx = new Map<string, number>()
 const agentLatestContent = new Map<string, string>()
 
 // ── Risk state ────────────────────────────────────────
-const riskMap: Record<string, { label: string; tag: string; dot: string }> = {
-  none:     { label: '正常',     tag: '',              dot: 'off' },
-  low:      { label: '低风险',   tag: 'fm-tag--info',  dot: 'ok' },
-  moderate: { label: '中等风险', tag: 'fm-tag--warn',  dot: 'warn' },
-  high:     { label: '高风险',   tag: 'fm-tag--danger', dot: 'danger' },
-  critical: { label: '极高风险', tag: 'fm-tag--danger', dot: 'danger' },
+const riskMap: Record<string, { label: string; tag: string }> = {
+  none:     { label: '正常',     tag: '' },
+  low:      { label: '低风险',   tag: 'fm-tag--info' },
+  moderate: { label: '中等风险', tag: 'fm-tag--warn' },
+  high:     { label: '高风险',   tag: 'fm-tag--danger' },
+  critical: { label: '极高风险', tag: 'fm-tag--danger' },
 }
 const riskLabel = computed(() => riskMap[store.riskLevel]?.label ?? '正常')
 const riskTagClass = computed(() => riskMap[store.riskLevel]?.tag ?? '')
-const riskDotClass = computed(() => riskMap[store.riskLevel]?.dot ?? 'off')
+const riskToneClass = computed(() => (store.riskLevel === 'none' ? 'tone-ok' : riskTagClass.value.replace('fm-tag--', 'tone-')))
+const sessionShort = computed(() => store.currentSessionId ? store.currentSessionId.slice(0, 8).toUpperCase() : 'DRAFT')
+const sessionModeLabel = computed(() => store.currentSessionId ? '已接管历史会话' : '草稿会话')
+const totalAgentCount = computed(() => Object.keys(store.agentStatus).length)
+const doneAgentCount = computed(() =>
+  Object.values(store.agentStatus).filter((status) => status === 'done').length,
+)
+const activeAgentCount = computed(() =>
+  Object.values(store.agentStatus).filter((status) => status === 'active').length,
+)
+const planProgressLabel = computed(() => {
+  const plan = store.planInfo
+  if (!plan) return '待生成'
+  if (!plan.total) return plan.status || '运行中'
+  return `${Math.round((plan.completed / plan.total) * 100)}%`
+})
 
 // ── Message helpers ─────────────────────────────────────────────
 function removeThinkingBubble() {
@@ -333,51 +374,270 @@ function goBack() {
 }
 </script>
 
+<style lang="scss">
+/* Only when AI command page is active, reduce layout bottom padding */
+.fm-main__body:has(.fm-ai-page) {
+  padding-bottom: 16px;
+}
+</style>
+
 <style scoped lang="scss">
 .fm-ai-page {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  gap: 10px;
+  height: calc(100vh - var(--fm-topbar-h) - var(--fm-tags-h) - 38px);
+  overflow: hidden;
   position: relative;
+}
+
+// ── Single-row command topbar ─────────────────────────────────────────
+.fm-ai-topbar {
+  display: flex;
+  align-items: stretch;
+  height: 48px;
+  flex-shrink: 0;
+  border: 1px solid var(--fm-line);
+  border-radius: var(--fm-radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 44%),
+    var(--fm-grad-panel);
+  box-shadow: var(--fm-shadow-card);
+  overflow: hidden;
+
+  &__sep {
+    width: 1px;
+    background: var(--fm-line);
+    flex-shrink: 0;
+    align-self: stretch;
+  }
+
+  &__brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    flex-shrink: 0;
+
+    .tb-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--fm-brand-2);
+      box-shadow: 0 0 8px var(--fm-brand-2);
+      flex-shrink: 0;
+    }
+
+    .tb-title {
+      font-size: 16px;
+      font-weight: 650;
+      color: var(--fm-fg);
+      white-space: nowrap;
+      letter-spacing: 0;
+    }
+
+    .tb-sub {
+      font-size: 10px;
+      color: var(--fm-fg-mute);
+      white-space: nowrap;
+      font-family: var(--fm-font-mono);
+      letter-spacing: 0.04em;
+    }
+  }
+
+  &__session {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 14px;
+    gap: 2px;
+    flex-shrink: 0;
+
+    .ses-label {
+      font-family: var(--fm-font-mono);
+      font-size: 9px;
+      color: var(--fm-fg-mute);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .ses-id {
+      font-family: var(--fm-font-mono);
+      font-size: 13px;
+      color: var(--fm-fg);
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+  }
+
+  &__metrics {
+    display: flex;
+    flex: 1;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-left: 1px solid var(--fm-line);
+    flex-shrink: 0;
+  }
+}
+
+.tb-metric {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1;
+  padding: 0 12px;
+  border-left: 1px solid var(--fm-line);
+  gap: 2px;
+  min-width: 0;
+
+  span {
+    font-family: var(--fm-font-mono);
+    font-size: 9px;
+    color: var(--fm-fg-mute);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  strong {
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--fm-fg);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.fm-ai-live {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgba(43, 217, 159, 0.32);
+  border-radius: 999px;
+  color: #4de2b3;
+  background: rgba(43, 217, 159, 0.1);
+  font-family: var(--fm-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+
+  &.active {
+    color: #ffc96e;
+    border-color: rgba(255, 181, 71, 0.34);
+    background: rgba(255, 181, 71, 0.1);
+  }
+}
+
+.tone-ok,
+.tone-info {
+  color: var(--fm-ok) !important;
+}
+
+.tone-warn {
+  color: var(--fm-warn) !important;
+}
+
+.tone-danger {
+  color: var(--fm-danger) !important;
 }
 
 .fm-ai-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) minmax(256px, 296px);
+  grid-template-rows: 1fr;
   gap: 16px;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 
   &__chat {
     grid-column: 1;
-    min-height: 620px;
+    min-height: 0;
   }
 
   &__side {
     grid-column: 2;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 8px;
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
+
+    &::-webkit-scrollbar {
+      width: 4px;
+    }
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    &::-webkit-scrollbar-thumb {
+      background: var(--fm-line-2);
+      border-radius: 2px;
+    }
+
+    :deep(.fm-card__head) {
+      padding: 8px 14px;
+    }
+
+    :deep(.fm-card__body) {
+      padding: 10px 14px;
+    }
   }
 }
 
 @media (max-width: 1100px) {
   .fm-ai-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: 560px auto;
 
     &__chat {
       grid-column: 1;
     }
     &__side {
       grid-column: 1;
+      overflow-y: visible;
+      max-height: none;
     }
   }
 }
 
 .fm-ai-head-btn {
   :deep(.el-icon) {
-    margin-right: 4px;
+    margin-right: 3px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .fm-ai-topbar__session,
+  .fm-ai-topbar__sep:first-of-type {
+    display: none;
+  }
+
+  .tb-metric:nth-child(n + 4) {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .fm-ai-page {
+    height: auto;
+    overflow: visible;
+  }
+
+  .fm-ai-topbar {
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 }
 </style>

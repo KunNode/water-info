@@ -33,6 +33,7 @@ defineProps<{
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 12px;
 }
 
 .row {
@@ -40,6 +41,11 @@ defineProps<{
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+  border: 1px solid var(--fm-line);
 }
 
 .k {

@@ -93,7 +93,7 @@ const agentColor = computed(() => agentMeta.value.color)
 .fm-msg {
   display: flex;
   flex-direction: column;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 
   &.user { align-items: flex-end; }
   &.assistant,
@@ -102,22 +102,24 @@ const agentColor = computed(() => agentMeta.value.color)
 
 /* ── User bubble (brand gradient) ── */
 .fm-msg.user .fm-msg__bubble {
-  max-width: 85%;
-  padding: 10px 14px;
-  border-radius: 14px 14px 2px 14px;
-  background: var(--fm-grad-brand);
+  max-width: 76%;
+  padding: 11px 14px;
+  border-radius: 12px 12px 3px 12px;
+  background: linear-gradient(135deg, #2563d6 0%, #2f7bff 58%, #49e1ff 100%);
   color: #fff;
   font-size: 13.5px;
   line-height: 1.6;
-  box-shadow: 0 8px 20px -8px rgba(47, 123, 255, 0.5);
+  box-shadow: 0 14px 26px -16px rgba(47, 123, 255, 0.75);
 }
 
 /* ── Assistant bubble ── */
 .fm-msg.assistant .fm-msg__bubble {
-  max-width: 88%;
-  padding: 10px 14px;
-  border-radius: 14px 14px 14px 2px;
-  background: var(--fm-bg-2);
+  max-width: 82%;
+  padding: 12px 15px;
+  border-radius: 12px 12px 12px 3px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+    var(--fm-bg-2);
   border: 1px solid var(--fm-line);
   color: var(--fm-fg);
   font-size: 13.5px;
@@ -129,17 +131,28 @@ const agentColor = computed(() => agentMeta.value.color)
   word-break: break-word;
 }
 
-/* ── Agent bubble (color-coded left border) ── */
+/* ── Agent bubble ── */
 .fm-msg__agent {
-  max-width: 90%;
-  padding: 10px 14px;
-  border-radius: 0 10px 10px 0;
-  border-left: 3px solid var(--agent-color);
-  background: var(--fm-bg-2);
-  border-top: 1px solid var(--fm-line);
-  border-right: 1px solid var(--fm-line);
-  border-bottom: 1px solid var(--fm-line);
+  max-width: 84%;
+  padding: 12px 14px;
+  border-radius: 12px 12px 12px 3px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+    var(--fm-bg-2);
+  border: 1px solid var(--fm-line);
   position: relative;
+  overflow: hidden;
+}
+
+.fm-msg__agent::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 40%;
+  height: 1px;
+  background: linear-gradient(90deg, var(--agent-color), transparent);
+  opacity: 0.9;
 }
 
 .agent-head {
@@ -150,11 +163,11 @@ const agentColor = computed(() => agentMeta.value.color)
 }
 
 .agent-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--agent-color);
-  box-shadow: 0 0 6px var(--agent-color);
+  box-shadow: 0 0 12px var(--agent-color);
   flex-shrink: 0;
 }
 
@@ -205,6 +218,7 @@ const agentColor = computed(() => agentMeta.value.color)
   font-size: 13.5px;
   line-height: 1.75;
   color: var(--fm-fg);
+  min-width: 0;
 }
 
 .markdown :deep(h1),
@@ -311,7 +325,7 @@ const agentColor = computed(() => agentMeta.value.color)
 .time {
   font-size: 10.5px;
   color: var(--fm-fg-dim);
-  margin-top: 4px;
+  margin-top: 5px;
   font-family: var(--fm-font-mono);
   letter-spacing: 0.04em;
 }
@@ -321,10 +335,12 @@ const agentColor = computed(() => agentMeta.value.color)
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  background: var(--fm-bg-2);
+  padding: 11px 14px;
+  background:
+    linear-gradient(180deg, rgba(73, 225, 255, 0.04), transparent),
+    var(--fm-bg-2);
   border: 1px dashed rgba(73, 225, 255, 0.3);
-  border-radius: 8px;
+  border-radius: 10px;
   max-width: 240px;
 }
 
@@ -349,5 +365,13 @@ const agentColor = computed(() => agentMeta.value.color)
 @keyframes thinking-pulse {
   0%, 80%, 100% { opacity: 0.3; transform: scale(0.9); }
   40% { opacity: 1; transform: scale(1.1); }
+}
+
+@media (max-width: 760px) {
+  .fm-msg.user .fm-msg__bubble,
+  .fm-msg.assistant .fm-msg__bubble,
+  .fm-msg__agent {
+    max-width: 94%;
+  }
 }
 </style>

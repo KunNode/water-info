@@ -250,4 +250,17 @@ html:not(.dark) .fm-topbar {
     display: none;
   }
 }
+
+@media (max-width: 760px) {
+  .fm-topbar {
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .fm-topbar__brand .name,
+  .fm-topbar__crumbs,
+  .fm-chip {
+    display: none;
+  }
+}
 </style>

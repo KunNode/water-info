@@ -81,6 +81,10 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
+.fm-alerts .fm-card__body {
+  padding: 12px;
+}
+
 .state {
   display: flex;
   align-items: center;
@@ -108,13 +112,28 @@ onUnmounted(() => {
 }
 
 .alarm-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
-  background: var(--fm-bg-2);
-  border-radius: var(--fm-radius-sm);
+  padding: 10px 10px 10px 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+    var(--fm-bg-2);
+  border-radius: 8px;
   border: 1px solid var(--fm-line);
+  overflow: hidden;
+
+  &::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 2px;
+    border-radius: 999px;
+    background: var(--fm-line-2);
+  }
 
   .body {
     flex: 1;

@@ -31,7 +31,8 @@ const appStore = useAppStore()
   display: grid;
   grid-template-columns: var(--fm-sidebar-w) 1fr;
   grid-template-rows: var(--fm-topbar-h) 1fr;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   transition: grid-template-columns 0.2s ease;
 
   &.collapsed {
@@ -48,6 +49,7 @@ const appStore = useAppStore()
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  height: 100%;
 
   &::before {
     content: "";
@@ -82,5 +84,16 @@ const appStore = useAppStore()
 .fade-transform-leave-to {
   opacity: 0;
   transform: translateX(10px);
+}
+
+@media (max-width: 760px) {
+  .fm-shell,
+  .fm-shell.collapsed {
+    grid-template-columns: var(--fm-sidebar-w-collapsed) 1fr;
+  }
+
+  .fm-main__body {
+    padding: 16px 12px 42px;
+  }
 }
 </style>

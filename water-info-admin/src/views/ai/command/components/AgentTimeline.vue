@@ -5,17 +5,18 @@
       <span class="mono">agents · {{ activeCount }}/{{ agentList.length }}</span>
     </div>
     <div class="fm-card__body">
-      <div v-for="agent in agentList" :key="agent.key" class="agent-row">
+      <div v-for="agent in agentList" :key="agent.key" class="agent-row" :class="statusClass(agent.key)">
         <div class="status" :class="statusClass(agent.key)">
           <el-icon v-if="agentStatus[agent.key] === 'done'"><Select /></el-icon>
           <el-icon v-else-if="agentStatus[agent.key] === 'failed'"><Close /></el-icon>
           <el-icon v-else-if="agentStatus[agent.key] === 'active'" class="spin"><Loading /></el-icon>
-          <span v-else class="pending" />
+          <span v-else class="pending-dot" />
         </div>
         <div class="meta">
           <div class="code">{{ agent.code }}</div>
           <div class="name" :class="{ active: agentStatus[agent.key] === 'active' }">{{ agent.name }}</div>
         </div>
+        <span class="state">{{ statusLabel(agent.key) }}</span>
       </div>
     </div>
   </div>
@@ -48,19 +49,59 @@ const activeCount = computed(() =>
 function statusClass(key: string): string {
   return props.agentStatus[key] || 'pending'
 }
+
+function statusLabel(key: string): string {
+  const map: Record<string, string> = {
+    active: 'RUN',
+    done: 'DONE',
+    failed: 'FAIL',
+    pending: 'WAIT',
+  }
+  return map[props.agentStatus[key] || 'pending'] ?? 'WAIT'
+}
 </script>
 
 <style scoped lang="scss">
 .fm-agent-timeline .fm-card__body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
+  padding: 10px 12px 12px;
 }
 
 .agent-row {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 38px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-height: 44px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  transition: background 0.18s ease, border-color 0.18s ease;
+
+  &::before {
+    content: "";
+    position: absolute;
+    left: 21px;
+    top: 33px;
+    bottom: -11px;
+    width: 1px;
+    background: var(--fm-line-2);
+    opacity: 0.75;
+  }
+
+  &:last-child::before {
+    display: none;
+  }
+
+  &.active {
+    background: rgba(255, 181, 71, 0.07);
+  }
+
+  &.done {
+    background: rgba(43, 217, 159, 0.045);
+  }
 }
 
 .status {
@@ -93,7 +134,7 @@ function statusClass(key: string): string {
   }
 }
 
-.pending {
+.pending-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -120,16 +161,44 @@ function statusClass(key: string): string {
     font-size: 10px;
     letter-spacing: 0.12em;
     color: var(--fm-fg-mute);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .name {
     font-size: 13px;
     color: var(--fm-fg-soft);
     transition: color 0.2s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 
     &.active {
       color: var(--fm-fg);
       font-weight: 500;
     }
   }
+}
+
+.state {
+  flex-shrink: 0;
+  justify-self: end;
+  color: var(--fm-fg-mute);
+  font-family: var(--fm-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.agent-row.active .state {
+  color: var(--fm-warn);
+}
+
+.agent-row.done .state {
+  color: var(--fm-ok);
+}
+
+.agent-row.failed .state {
+  color: var(--fm-danger);
 }
 </style>

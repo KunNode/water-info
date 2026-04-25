@@ -276,4 +276,22 @@ html:not(.dark) .fm-side {
   color: var(--fm-fg-mute);
   font-family: var(--fm-font-mono);
 }
+
+@media (max-width: 760px) {
+  .fm-side {
+    padding: 10px 6px 14px;
+  }
+
+  .fm-side__group-label,
+  .fm-side__footer,
+  .fm-side__item .label,
+  .fm-side__badge {
+    display: none !important;
+  }
+
+  .fm-side__item {
+    justify-content: center;
+    padding: 8px 0;
+  }
+}
 </style>

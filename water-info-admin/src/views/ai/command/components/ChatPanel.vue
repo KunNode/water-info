@@ -1,9 +1,12 @@
 <template>
   <section class="fm-card fm-chat">
     <div class="fm-card__head">
-      <span class="title">指挥对话</span>
-      <span class="mono">realtime · sse</span>
+      <div class="fm-chat__heading">
+        <span class="title">指挥对话</span>
+        <span class="mono">realtime · sse</span>
+      </div>
       <span class="sp" />
+      <span class="fm-chat__count">{{ messages.length }} 条</span>
       <span v-if="loading" class="fm-tag fm-tag--warn">
         <span class="fm-dot warn" /> 流式生成中
       </span>
@@ -14,8 +17,11 @@
 
     <div ref="messagesRef" class="fm-chat__messages">
       <div v-if="messages.length === 0" class="fm-chat__empty">
-        <el-icon class="icon"><ChatDotRound /></el-icon>
-        <p>向指挥中心 AI 下达指令，调度多 Agent 协同分析水情并生成预案。</p>
+        <div class="empty-mark">
+          <el-icon><ChatDotRound /></el-icon>
+        </div>
+        <strong>等待指令</strong>
+        <p>多智能体研判、证据命中与预案状态会在这里同步展开。</p>
       </div>
       <template v-else>
         <ChatMessage
@@ -33,7 +39,7 @@
       <el-input
         v-model="inputText"
         type="textarea"
-        :rows="3"
+        :rows="2"
         placeholder="向指挥中心 AI 下达指令… (Ctrl + Enter 发送)"
         :disabled="loading"
         resize="none"
@@ -107,16 +113,30 @@ watch(
   min-height: 0;
 }
 
+.fm-chat__heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fm-chat__count {
+  color: var(--fm-fg-mute);
+  font-family: var(--fm-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+
 .fm-chat__messages {
   flex: 1;
   overflow-y: auto;
-  padding: 18px 20px;
+  padding: 22px 22px 18px;
   min-height: 0;
-  background: linear-gradient(
-    180deg,
-    rgba(47, 123, 255, 0.04) 0%,
-    transparent 30%
-  );
+  background:
+    linear-gradient(rgba(73, 225, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(73, 225, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(47, 123, 255, 0.05) 0%, transparent 220px);
+  background-size: 32px 32px, 32px 32px, auto;
 }
 
 .fm-chat__empty {
@@ -129,35 +149,57 @@ watch(
   color: var(--fm-fg-mute);
   text-align: center;
 
-  .icon {
-    font-size: 48px;
-    margin-bottom: 16px;
+  .empty-mark {
+    width: 72px;
+    height: 72px;
+    border-radius: 22px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 18px;
     color: var(--fm-brand-2);
-    opacity: 0.5;
+    background: rgba(73, 225, 255, 0.08);
+    border: 1px solid rgba(73, 225, 255, 0.22);
+    box-shadow: inset 0 0 24px rgba(73, 225, 255, 0.04);
+
+    .el-icon {
+      font-size: 34px;
+    }
+  }
+
+  strong {
+    color: var(--fm-fg);
+    font-size: 18px;
+    font-weight: 650;
   }
 
   p {
-    max-width: 320px;
+    max-width: 360px;
+    margin: 8px 0 0;
     line-height: 1.6;
+    text-wrap: pretty;
   }
 }
 
 .fm-chat__input {
-  padding: 14px 16px;
+  padding: 10px 12px;
   border-top: 1px solid var(--fm-line);
   display: flex;
   gap: 10px;
   align-items: stretch;
-  background: var(--fm-bg-1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+    var(--fm-bg-1);
 
   :deep(.el-textarea__inner) {
     background: var(--fm-bg-2);
     border-color: var(--fm-line-2);
     color: var(--fm-fg);
     font-family: var(--fm-font-sans);
-    font-size: 13.5px;
+    font-size: 14px;
     line-height: 1.6;
     box-shadow: none;
+    min-height: 58px !important;
+    border-radius: 8px;
 
     &::placeholder {
       color: var(--fm-fg-mute);
@@ -172,9 +214,11 @@ watch(
 
 .fm-chat__send {
   height: auto;
-  padding: 0 18px;
+  min-width: 80px;
+  padding: 0 14px;
   font-size: 13px;
   gap: 6px;
+  justify-content: center;
 
   &:disabled {
     filter: grayscale(0.4);

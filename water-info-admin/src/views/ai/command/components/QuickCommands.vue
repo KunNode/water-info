@@ -3,12 +3,13 @@
     <span class="label">快捷指令</span>
     <div class="chips">
       <button
-        v-for="cmd in commands"
+        v-for="(cmd, index) in commands"
         :key="cmd"
         class="chip"
         :disabled="disabled"
         @click="emit('send', cmd)"
       >
+        <span class="chip-index">0{{ index + 1 }}</span>
         {{ cmd }}
       </button>
     </div>
@@ -37,7 +38,7 @@ const commands = [
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 16px;
+  padding: 7px 12px;
   border-top: 1px solid var(--fm-line);
   flex-wrap: wrap;
   background: var(--fm-bg-1);
@@ -55,15 +56,19 @@ const commands = [
 
 .chips {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .chip {
-  padding: 4px 12px;
-  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 8px;
   border: 1px solid var(--fm-line-2);
-  background: var(--fm-bg-2);
+  background: rgba(255, 255, 255, 0.018);
   color: var(--fm-fg-soft);
   font-size: 12px;
   font-family: var(--fm-font-sans);
@@ -72,14 +77,22 @@ const commands = [
   white-space: nowrap;
 
   &:hover:not(:disabled) {
-    background: rgba(47, 123, 255, 0.12);
-    border-color: var(--fm-brand);
+    background: rgba(73, 225, 255, 0.08);
+    border-color: rgba(73, 225, 255, 0.42);
     color: var(--fm-fg);
+    transform: translateY(-1px);
   }
 
   &:disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }
+}
+
+.chip-index {
+  color: var(--fm-brand-2);
+  font-family: var(--fm-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
 }
 </style>

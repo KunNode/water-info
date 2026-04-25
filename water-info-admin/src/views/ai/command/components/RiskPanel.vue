@@ -5,17 +5,24 @@
       <span class="mono">live</span>
     </div>
     <div class="fm-card__body">
-      <div
-        class="risk-ring"
-        :style="{
-          '--ring': riskColor,
-          '--ring-glow': riskLevel !== 'none' ? `${riskColor}66` : 'transparent',
-        }"
-      >
-        <div class="risk-ring__inner">
-          <div class="label">{{ riskLabel }}</div>
-          <div class="sub">{{ riskSublabel }}</div>
+      <div class="risk-summary" :style="{ '--risk-color': riskColor }">
+        <div>
+          <div class="risk-summary__label">{{ riskLabel }}</div>
+          <div class="risk-summary__sub">{{ riskSublabel }}</div>
         </div>
+        <span class="risk-summary__pulse" />
+      </div>
+      <div class="risk-meter">
+        <span
+          v-for="level in riskOrder"
+          :key="level"
+          :class="{ on: levelActive(level) }"
+          :style="{ '--level-color': riskMap[level].color }"
+        />
+      </div>
+      <div class="risk-scale">
+        <span>正常</span>
+        <span>I 级</span>
       </div>
     </div>
   </div>
@@ -35,57 +42,99 @@ const riskMap: Record<string, { label: string; sublabel: string; color: string }
   high:     { label: '高风险', sublabel: 'II 级响应',  color: '#ff5a6a' },
   critical: { label: '极高危', sublabel: 'I 级响应',   color: '#ff8a96' },
 }
+const riskOrder = ['none', 'low', 'moderate', 'high', 'critical']
 
 const riskInfo = computed(() => riskMap[props.riskLevel] ?? riskMap['none'])
 const riskColor = computed(() => riskInfo.value.color)
 const riskLabel = computed(() => riskInfo.value.label)
 const riskSublabel = computed(() => riskInfo.value.sublabel)
+
+function levelActive(level: string) {
+  const current = riskOrder.indexOf(props.riskLevel)
+  const target = riskOrder.indexOf(level)
+  return target <= Math.max(current, 0)
+}
 </script>
 
 <style scoped lang="scss">
 .fm-risk .fm-card__body {
   display: flex;
-  justify-content: center;
-  padding: 20px 16px 22px;
+  flex-direction: column;
+  gap: 12px;
+  padding: 15px 16px 16px;
 }
 
-.risk-ring {
-  width: 118px;
-  height: 118px;
+.risk-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 74px;
+  padding: 13px 14px;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--risk-color) 16%, transparent), transparent 62%),
+    var(--fm-bg-2);
+  border: 1px solid color-mix(in srgb, var(--risk-color) 38%, var(--fm-line));
+}
+
+.risk-summary__label {
+  color: var(--risk-color);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.risk-summary__sub {
+  margin-top: 5px;
+  color: var(--fm-fg-soft);
+  font-family: var(--fm-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.risk-summary__pulse {
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  border: 3px solid var(--ring);
-  background: var(--fm-bg-1);
-  display: grid;
-  place-items: center;
-  transition: all 0.4s ease;
-  box-shadow: 0 0 24px -6px var(--ring-glow), inset 0 0 24px -10px var(--ring-glow);
+  border: 1px solid var(--risk-color);
+  box-shadow: 0 0 18px -4px var(--risk-color), inset 0 0 18px -10px var(--risk-color);
   position: relative;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 10px;
+    border-radius: 50%;
+    background: var(--risk-color);
+  }
 }
 
-.risk-ring::before {
-  content: "";
-  position: absolute;
-  inset: 6px;
-  border-radius: 50%;
-  border: 1px dashed var(--ring);
-  opacity: 0.4;
+.risk-meter {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+
+  span {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--fm-bg-3);
+    border: 1px solid var(--fm-line);
+  }
+
+  span.on {
+    background: var(--level-color);
+    border-color: var(--level-color);
+    box-shadow: 0 0 12px -5px var(--level-color);
+  }
 }
 
-.risk-ring__inner {
-  text-align: center;
-  color: var(--ring);
-
-  .label {
-    font-size: 18px;
-    font-weight: 600;
-    line-height: 1.2;
-  }
-  .sub {
-    font-size: 11px;
-    font-family: var(--fm-font-mono);
-    opacity: 0.8;
-    margin-top: 4px;
-    letter-spacing: 0.04em;
-  }
+.risk-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--fm-fg-mute);
+  font-family: var(--fm-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
 }
 </style>
