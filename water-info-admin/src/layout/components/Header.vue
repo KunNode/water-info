@@ -25,14 +25,22 @@
     <div class="fm-chip"><span class="ind" />系统运行中</div>
     <div class="fm-chip">{{ nowText }}</div>
 
-    <el-tooltip content="切换主题" placement="bottom">
-      <div class="fm-topbar__theme" @click="appStore.toggleDarkMode">
+    <div class="fm-theme-toggle" role="group" aria-label="主题模式">
+      <button
+        v-for="opt in themeOptions"
+        :key="opt.value"
+        class="fm-theme-toggle__btn"
+        :class="{ active: appStore.themeMode === opt.value }"
+        :title="opt.label"
+        :aria-label="opt.label"
+        :aria-pressed="appStore.themeMode === opt.value"
+        @click="appStore.setThemeMode(opt.value)"
+      >
         <el-icon>
-          <Moon v-if="appStore.darkMode" />
-          <Sunny v-else />
+          <component :is="opt.icon" />
         </el-icon>
-      </div>
-    </el-tooltip>
+      </button>
+    </div>
 
     <el-dropdown trigger="click" @command="handleCommand">
       <div class="fm-topbar__avatar">
@@ -53,7 +61,14 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
-import { Search, Moon, Sunny, Expand, Fold } from '@element-plus/icons-vue'
+import { Search, Moon, Sunny, Monitor, Expand, Fold } from '@element-plus/icons-vue'
+import type { ThemeMode } from '@/stores/app'
+
+const themeOptions: Array<{ value: ThemeMode; icon: typeof Monitor; label: string }> = [
+  { value: 'auto', icon: Monitor, label: '跟随系统' },
+  { value: 'light', icon: Sunny, label: '浅色模式' },
+  { value: 'dark', icon: Moon, label: '深色模式' },
+]
 
 const route = useRoute()
 const appStore = useAppStore()
@@ -211,20 +226,44 @@ html:not(.dark) .fm-topbar {
   }
 }
 
-.fm-topbar__theme {
-  width: 32px;
-  height: 32px;
-  display: grid;
+.fm-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--fm-bg-4);
+  border: 1px solid var(--fm-line);
+  border-radius: 8px;
+}
+
+.fm-theme-toggle__btn {
+  display: inline-grid;
   place-items: center;
-  border-radius: var(--fm-radius-sm);
-  color: var(--fm-fg-soft);
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font: inherit;
+  color: var(--fm-fg-mute);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 13px;
 
   &:hover {
-    background: var(--fm-bg-2);
-    color: var(--fm-brand-2);
+    color: var(--fm-fg);
   }
+
+  &.active {
+    background: var(--fm-bg-2);
+    color: var(--fm-fg);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+}
+
+html.dark .fm-theme-toggle__btn.active {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  color: var(--fm-brand-2);
 }
 
 .fm-topbar__avatar {

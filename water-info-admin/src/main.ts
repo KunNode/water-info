@@ -15,8 +15,13 @@ const app = createApp(App)
 const pinia = createPinia()
 app.use(pinia)
 
-// Apply persisted theme (FloodMind defaults to dark) before first paint.
-useAppStore().applyTheme()
+// Apply persisted theme (FloodMind defaults to dark) before first paint,
+// and start watching the system color-scheme for `auto` mode.
+{
+  const appStore = useAppStore()
+  appStore.applyTheme()
+  appStore.watchSystemTheme()
+}
 
 // Icons are imported on-demand in each component that uses them
 // No global registration needed - reduces bundle size

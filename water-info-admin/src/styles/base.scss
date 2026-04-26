@@ -21,6 +21,7 @@ html {
   color: var(--fm-fg);
   font-family: var(--fm-font-sans);
   font-size: 14px;
+  font-weight: var(--fm-body-weight);
   line-height: 1.5;
   letter-spacing: 0.005em;
   -webkit-font-smoothing: antialiased;
@@ -34,6 +35,22 @@ body {
     radial-gradient(900px 500px at 110% 10%, rgba(73, 225, 255, 0.08), transparent 60%);
   color: var(--fm-fg);
   min-height: 100vh;
+}
+
+/* Theme cross-fade — 200ms ease on color-related properties.
+ * Component-defined transitions (e.g. `transition: all 250ms`) win because
+ * the cascade prefers the more specific declaration.
+ */
+*,
+*::before,
+*::after {
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    fill 200ms ease,
+    stroke 200ms ease,
+    box-shadow 200ms ease;
 }
 
 html:not(.dark) body {
