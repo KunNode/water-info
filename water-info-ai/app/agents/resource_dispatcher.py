@@ -1,95 +1,68 @@
-"""Resource dispatcher agent."""
+"""Resource dispatcher node."""
 
 from __future__ import annotations
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from loguru import logger
+import json
 
 from app.services.llm import get_llm
-from app.state import FloodResponseState, ResourceAllocation
+from app.state import ResourceAllocation, to_plain_data
 from app.utils.json_parser import extract_json
-from app.utils.timeout import with_timeout
-
-RESOURCE_DISPATCHER_PROMPT = """你是防汛应急预案系统的资源调度智能体。
-请输出 JSON 数组格式的资源调度方案。
-"""
 
 
-def _build_deterministic_resources(state: FloodResponseState) -> list[ResourceAllocation]:
+async def resource_dispatcher_node(state: dict) -> dict:
     plan = state.get("emergency_plan")
-    if plan and plan.resources:
-        return plan.resources
-
-    affected_area = "重点防汛区域"
-    risk = state.get("risk_assessment")
-    if risk and risk.affected_stations:
-        affected_area = ", ".join(risk.affected_stations[:3])
-
-    return [
-        ResourceAllocation(
-            resource_type="人员",
-            resource_name="巡查队",
-            quantity=8,
-            source_location="防汛值班中心",
-            target_location=affected_area,
-            eta_minutes=25,
-        )
-    ]
-
-
-@with_timeout(120)
-async def resource_dispatcher_node(state: FloodResponseState) -> dict:
-    try:
-        resource_plan = _build_deterministic_resources(state)
-        logger.info(f"Deterministic resource plan generated: {len(resource_plan)} resources")
-        return {
-            "resource_plan": resource_plan,
-            "current_agent": "resource_dispatcher",
-            "messages": [{"role": "resource_dispatcher", "content": f"生成 {len(resource_plan)} 项资源调度"}],
-        }
-    except Exception as exc:
-        logger.warning(f"Deterministic resource dispatch failed, falling back to LLM: {exc}")
+    resources = list(getattr(plan, "resources", [])) if plan else []
+    if not resources:
+        resources = [
+            ResourceAllocation(
+                resource_type="人员",
+                resource_name="抢险队",
+                quantity=12,
+                source_location="市级应急仓库",
+                target_location="城区河段",
+                eta_minutes=30,
+            )
+        ]
 
     llm = get_llm()
-    plan = state.get("emergency_plan")
-    risk = state.get("risk_assessment")
-
-    plan_info = ""
-    if plan and plan.actions:
-        actions_str = "\n".join(
-            f"- [{action.priority}级] {action.action_type}: {action.description}"
-            for action in plan.actions
-        )
-        plan_info = f"预案: {plan.plan_name}\n措施清单:\n{actions_str}"
-
-    risk_info = ""
-    if risk:
-        risk_info = f"风险等级: {risk.risk_level.value}, 受影响站点: {', '.join(risk.affected_stations)}"
-
-    messages = [
-        SystemMessage(content=RESOURCE_DISPATCHER_PROMPT),
-        HumanMessage(content=f"{plan_info}\n\n{risk_info}"),
-    ]
-
-    response = await llm.ainvoke(messages)
-    final_message = response.content
-    resources_data = extract_json(final_message, expect_array=True)
-    resource_plan: list[ResourceAllocation] = []
-    if resources_data and isinstance(resources_data, list):
-        for item in resources_data:
-            resource_plan.append(
-                ResourceAllocation(
-                    resource_type=item.get("resource_type", "物资"),
-                    resource_name=item.get("resource_name", ""),
-                    quantity=item.get("quantity", 0),
-                    source_location=item.get("source_location", ""),
-                    target_location=item.get("target_location", ""),
-                    eta_minutes=item.get("eta_minutes"),
-                )
+    message = f"已制定 {len(resources)} 项资源调度安排"
+    if llm.is_enabled:
+        try:
+            response = await llm.ainvoke(
+                json.dumps({
+                    "user_query": state.get("user_query", ""),
+                    "risk_assessment": to_plain_data(state.get("risk_assessment")),
+                    "plan": to_plain_data(plan),
+                    "fallback_resources": to_plain_data(resources),
+                }, ensure_ascii=False, indent=2),
+                system_prompt=(
+                    "你是防汛资源调度智能体。"
+                    "请输出严格 JSON 数组，每项包含 resource_type, resource_name, quantity, source_location, target_location, eta_minutes。"
+                    "调度方案要与当前防汛预案匹配。"
+                ),
+                temperature=0.2,
             )
+            content = getattr(response, "content", "")
+            parsed = extract_json(content, expect_array=True)
+            if isinstance(parsed, list) and parsed:
+                resources = [
+                    ResourceAllocation(
+                        resource_type=str(item.get("resource_type", "")),
+                        resource_name=str(item.get("resource_name", "")),
+                        quantity=int(item.get("quantity", 0)),
+                        source_location=str(item.get("source_location", "应急物资仓库")),
+                        target_location=str(item.get("target_location", "重点防汛区域")),
+                        eta_minutes=int(item["eta_minutes"]) if item.get("eta_minutes") is not None else None,
+                    )
+                    for item in parsed
+                    if item.get("resource_type") and item.get("resource_name")
+                ] or resources
+                message = f"已制定 {len(resources)} 项资源调度安排"
+        except Exception:
+            message = f"已制定 {len(resources)} 项资源调度安排"
 
     return {
-        "resource_plan": resource_plan,
+        "resource_plan": resources,
         "current_agent": "resource_dispatcher",
-        "messages": [{"role": "resource_dispatcher", "content": final_message}],
+        "messages": [{"role": "resource_dispatcher", "content": message}],
     }

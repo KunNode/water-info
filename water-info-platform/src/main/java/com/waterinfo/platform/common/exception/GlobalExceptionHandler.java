@@ -9,6 +9,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -44,9 +45,17 @@ public class GlobalExceptionHandler {
      * Handle business exceptions
      */
     @ExceptionHandler(BusinessException.class)
-    public ApiResponse<Object> handleBusinessException(BusinessException e, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Object>> handleBusinessException(BusinessException e, HttpServletRequest request) {
         log.warn("[{}] Business exception: {} - {}", request.getRequestURI(), e.getCode(), e.getMessage());
-        return ApiResponse.error(e.getCode(), e.getMessage(), e.getData());
+        HttpStatus status = switch (e.getCode()) {
+            case 400, 1100, 1101, 1102, 1600, 1601 -> HttpStatus.BAD_REQUEST;
+            case 401, 1200, 1201, 1202, 1203, 1204 -> HttpStatus.UNAUTHORIZED;
+            case 403 -> HttpStatus.FORBIDDEN;
+            case 404, 1300, 1400, 1500, 1700, 1800, 1900, 1902 -> HttpStatus.NOT_FOUND;
+            case 409, 1301, 1401, 1801, 1802, 1901 -> HttpStatus.CONFLICT;
+            default -> HttpStatus.OK;
+        };
+        return ResponseEntity.status(status).body(ApiResponse.error(e.getCode(), e.getMessage(), e.getData()));
     }
 
     /**

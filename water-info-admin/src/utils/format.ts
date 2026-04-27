@@ -32,6 +32,12 @@ export const stationTypeMap: Record<string, string> = {
   PUMP_STATION: '泵站',
 }
 
+export const stationStatusMap: Record<string, string> = {
+  ACTIVE: '正常',
+  INACTIVE: '离线',
+  MAINTENANCE: '维护',
+}
+
 export const metricTypeMap: Record<string, string> = {
   WATER_LEVEL: '水位',
   RAINFALL: '降雨量',

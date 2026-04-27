@@ -138,6 +138,7 @@ export interface Alarm {
   endAt: string | null
   status: AlarmStatus
   message: string
+  sourceTag?: string
   acknowledgedBy: string | null
   acknowledgedByName: string | null
   acknowledgedAt: string | null
@@ -145,6 +146,19 @@ export interface Alarm {
   closedByName: string | null
   closedAt: string | null
   createdAt: string
+}
+
+export interface AiAssessment {
+  id: string
+  stationId: string
+  stationName?: string
+  metricType?: string
+  level: string
+  summary: string
+  planExcerpt?: string
+  source: 'PERIODIC' | 'EVENT'
+  assessedAt: string
+  createdAt?: string
 }
 
 export interface AlarmQuery {
@@ -216,6 +230,53 @@ export interface CreateUserRequest {
   email?: string
   orgId?: string
   deptId?: string
+}
+
+// ─── Knowledge Base ───
+export interface KnowledgeDocument {
+  id: string
+  title: string
+  source_type: string
+  source_uri: string
+  mime: string
+  lang: string
+  version: number
+  status: string
+  chunk_count: number
+  file_size: number
+  embedding_model?: string | null
+  created_by?: string | null
+  latest_job_status?: string | null
+  latest_error?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  last_indexed_at?: string | null
+}
+
+export interface KnowledgeDocumentUploadResponse {
+  document_id: string
+  job_id: string
+  status: string
+}
+
+export interface KnowledgeSearchHit {
+  chunk_id: string
+  document_id: string
+  document_title: string
+  source_uri: string
+  heading_path: string[]
+  content: string
+  score: number
+  vector_score?: number | null
+  keyword_score?: number | null
+}
+
+export interface KnowledgeStats {
+  document_count: number
+  ready_document_count: number
+  chunk_count: number
+  job_success_rate: number
+  model_distribution: Record<string, number>
 }
 
 export interface UserQuery {
@@ -309,6 +370,74 @@ export interface FloodPlan {
   status: 'draft' | 'approved' | 'executing' | 'completed'
   createdAt: string
   updatedAt: string
+}
+
+export interface PlanExecuteResult {
+  planId: string
+  status: string
+  executedActions: number
+  message: string
+}
+
+export interface FloodSession {
+  sessionId: string
+  plans: FloodPlan[]
+  createdAt: string
+}
+
+// ─── Conversation (AI session with memory) ───
+export interface ConversationItem {
+  session_id: string
+  title: string
+  message_count: number
+  last_message: string | null
+  status?: string
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ConversationMessage {
+  id?: number
+  role: 'user' | 'assistant'
+  content: string
+  message_type?: string
+  status?: string
+  created_at: string | null
+}
+
+export interface ConversationSnapshot {
+  risk_level: string
+  plan_info: Record<string, any> | null
+  agent_status_summary: Record<string, any> | null
+  query_count: number
+}
+
+export interface ConversationSession {
+  session_id: string
+  title: string
+  status: string
+  user_id?: string
+  username?: string
+  last_message_at?: string
+  last_message_preview?: string
+  title_source?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ConversationDetail {
+  session_id: string
+  title: string
+  messages: ConversationMessage[]
+  snapshot?: ConversationSnapshot | null
+  has_more?: boolean
+  created_at: string | null
+}
+
+export interface ConversationFullResponse {
+  session: ConversationSession
+  snapshot?: ConversationSnapshot | null
+  latest_plan_summary?: Record<string, any> | null
 }
 
 export interface PlanAction {

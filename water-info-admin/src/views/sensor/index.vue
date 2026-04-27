@@ -1,6 +1,39 @@
 <template>
-  <div class="page-container">
-    <div class="search-bar">
+  <div class="fm-admin-page">
+    <div class="fm-page-head">
+      <h1>传感器管理</h1>
+      <span class="sub">// device fleet · telemetry edge</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--ok">{{ onlineCount }} online</span>
+      <el-button v-permission="['ADMIN', 'OPERATOR']" type="primary" :icon="Plus" @click="handleAdd">
+        新增传感器
+      </el-button>
+    </div>
+
+    <div class="fm-summary-strip">
+      <div class="fm-card fm-mini-stat">
+        <div class="label">DEVICES</div>
+        <div class="value">{{ total }}</div>
+        <div class="hint">设备总数</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">ONLINE</div>
+        <div class="value">{{ onlineCount }}</div>
+        <div class="hint">当前在线</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">OFFLINE</div>
+        <div class="value">{{ offlineCount }}</div>
+        <div class="hint">需要巡检</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">METRICS</div>
+        <div class="value">{{ metricCount }}</div>
+        <div class="hint">采集指标类型</div>
+      </div>
+    </div>
+
+    <div class="fm-admin-search">
       <el-form :model="queryParams" inline>
         <el-form-item label="所属站点">
           <el-input v-model="queryParams.stationId" placeholder="站点ID" clearable />
@@ -26,12 +59,15 @@
       </el-form>
     </div>
 
-    <div class="table-card">
-      <div class="table-header">
-        <span class="table-title">传感器列表</span>
-        <el-button v-permission="['ADMIN', 'OPERATOR']" type="primary" :icon="Plus" @click="handleAdd">新增传感器</el-button>
+    <div class="fm-admin-table">
+      <div class="fm-admin-table__head">
+        <span class="title">传感器列表</span>
+        <span class="mono">{{ total }} records</span>
+        <span class="sp" />
+        <span class="fm-tag">显示 {{ tableData.length }} 条</span>
       </div>
-      <el-table v-loading="loading" :data="tableData" border stripe>
+      <div class="fm-admin-table__body">
+      <el-table v-loading="loading" :data="tableData" stripe>
         <el-table-column prop="stationName" label="所属站点" min-width="150" />
         <el-table-column prop="type" label="类型" width="100">
           <template #default="{ row }">
@@ -67,6 +103,7 @@
         @size-change="fetchData"
         @current-change="fetchData"
       />
+      </div>
     </div>
 
     <!-- Add/Edit Dialog -->
@@ -98,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessageBox, ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import { getSensors, createSensor, updateSensor, deleteSensor } from '@/api/sensor'
@@ -119,6 +156,10 @@ const rules: FormRules = {
   stationId: [{ required: true, message: '请输入站点ID', trigger: 'blur' }],
   type: [{ required: true, message: '请选择类型', trigger: 'change' }],
 }
+
+const onlineCount = computed(() => tableData.value.filter((item) => item.status === 'ONLINE').length)
+const offlineCount = computed(() => tableData.value.filter((item) => item.status === 'OFFLINE').length)
+const metricCount = computed(() => new Set(tableData.value.map((item) => item.type).filter(Boolean)).size)
 
 async function fetchData() {
   loading.value = true

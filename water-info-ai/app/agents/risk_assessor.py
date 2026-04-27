@@ -1,43 +1,45 @@
-"""Risk assessor agent."""
+"""Risk assessor node."""
 
 from __future__ import annotations
 
 import json
-from typing import Any
 
-from langchain_core.messages import HumanMessage
-from langgraph.prebuilt import create_react_agent
-from loguru import logger
+from pydantic import BaseModel, Field
 
+from app.rag.service import build_evidence, format_evidence_markdown, search_knowledge_base
+from app.risk import calculate_composite_risk, calculate_rainfall_risk, calculate_water_level_risk
 from app.services.llm import get_llm
-from app.state import FloodResponseState, RiskAssessment, RiskLevel
-from app.tools.risk_tools import risk_assessment_tools
+from app.state import RiskAssessment, RiskLevel, to_plain_data
 from app.utils.json_parser import extract_json
-from app.utils.timeout import with_timeout
 
-RISK_ASSESSOR_PROMPT = """你是防汛应急预案系统的风险评估智能体。
-请基于数据摘要，调用风险计算工具并输出严格 JSON：
-{
-  "risk_level": "none|low|moderate|high|critical",
-  "risk_score": 0-100,
-  "affected_stations": ["站点ID"],
-  "key_risks": ["关键风险"],
-  "trend": "rising|stable|falling",
-  "reasoning": "评估说明"
+
+class RiskAssessmentPayload(BaseModel):
+    risk_level: str
+    risk_score: float = Field(ge=0, le=100)
+    affected_stations: list[str] = Field(default_factory=list)
+    key_risks: list[str] = Field(default_factory=list)
+    trend: str | None = None
+    reasoning: str | None = None
+    response_level: str | None = None
+
+
+RISK_ORDER = {
+    RiskLevel.NONE: 0,
+    RiskLevel.LOW: 1,
+    RiskLevel.MODERATE: 2,
+    RiskLevel.HIGH: 3,
+    RiskLevel.CRITICAL: 4,
 }
-"""
 
 
-def _to_number(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
+def _to_risk_level(level: str) -> RiskLevel:
     try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+        return RiskLevel(level)
+    except Exception:
+        return RiskLevel.NONE
 
 
-def _score_to_level(score: float) -> RiskLevel:
+def _level_for_score(score: float) -> RiskLevel:
     if score >= 80:
         return RiskLevel.CRITICAL
     if score >= 60:
@@ -49,162 +51,141 @@ def _score_to_level(score: float) -> RiskLevel:
     return RiskLevel.NONE
 
 
-def _water_score(station: dict[str, Any]) -> tuple[float, str | None]:
-    water_level = _to_number(station.get("water_level"))
-    warning = _to_number(station.get("warning_level"))
-    danger = _to_number(station.get("danger_level"))
-    if water_level is None or warning is None or danger is None:
-        return 0.0, None
-
-    if water_level >= danger:
-        return min(100.0, 80 + (water_level - danger) / max(danger, 0.1) * 20), "水位超过危险线"
-    if water_level >= warning:
-        return 40 + (water_level - warning) / max(danger - warning, 0.1) * 40, "水位超过警戒线"
-
-    score = water_level / max(warning, 0.1) * 40
-    note = "水位接近警戒线" if score >= 25 else None
-    return score, note
+def _max_level(left: RiskLevel, right: RiskLevel) -> RiskLevel:
+    return left if RISK_ORDER[left] >= RISK_ORDER[right] else right
 
 
-def _rain_score(station: dict[str, Any], forecast_total: float) -> tuple[float, str | None]:
-    rainfall = _to_number(station.get("rainfall"))
-    warning = _to_number(station.get("rainfall_warning"))
-    danger = _to_number(station.get("rainfall_danger"))
-    if rainfall is None:
-        base = 0.0
-    elif danger is not None and rainfall >= danger:
-        base = 85.0
-    elif warning is not None and rainfall >= warning:
-        base = 55.0
-    elif warning:
-        base = rainfall / max(warning, 0.1) * 35
-    else:
-        base = min(rainfall, 20.0)
-
-    forecast_bonus = min(forecast_total / 5, 20.0)
-    score = min(100.0, base + forecast_bonus)
-
-    if score >= 80:
-        return score, "强降雨风险高"
-    if score >= 40:
-        return score, "降雨可能持续推高风险"
-    return score, None
+def _format_assessment_content(assessment: RiskAssessment, prefix: str) -> str:
+    content = f"{prefix} **{assessment.risk_level.value}**，综合评分 {assessment.risk_score:.1f}"
+    reasons = "；".join(assessment.key_risks[:2])
+    if reasons:
+        content += f"。主要依据：{reasons}"
+    return content
 
 
-def _build_deterministic_risk(state: FloodResponseState) -> RiskAssessment | None:
-    overview = state.get("overview_data")
-    if not overview:
-        return None
+def _assessment_from_model(parsed: dict, baseline: RiskAssessment) -> RiskAssessment:
+    payload = RiskAssessmentPayload.model_validate(parsed)
+    score = float(payload.risk_score)
+    level = _to_risk_level(payload.risk_level)
+    key_risks = list(payload.key_risks) or list(baseline.key_risks)
 
-    stations = [station for station in overview.get("stations", []) if isinstance(station, dict)]
-    alarms = [alarm for alarm in overview.get("active_alarms", []) if isinstance(alarm, dict)]
-    weather = state.get("weather_forecast", {})
-    forecast = weather.get("forecast", {}) if isinstance(weather, dict) else {}
-    forecast_total = _to_number(forecast.get("total_precip_24h_mm")) or 0.0
+    if baseline.risk_score > 0:
+        conservative_floor = max(0.0, baseline.risk_score - 15.0)
+        if score < conservative_floor:
+            score = conservative_floor
+            key_risks.append("模型风险分低于监测规则基线，已按阈值结果保守上调")
+        level = _max_level(level, _level_for_score(score))
 
-    top_water_score = 0.0
-    top_rain_score = 0.0
-    affected_stations: list[str] = []
+    return RiskAssessment(
+        risk_level=level,
+        risk_score=round(score, 1),
+        affected_stations=list(payload.affected_stations) or list(baseline.affected_stations),
+        key_risks=key_risks or ["当前未发现显著风险"],
+        trend=payload.trend or baseline.trend,
+        reasoning=payload.reasoning or baseline.reasoning,
+        response_level=payload.response_level or baseline.response_level,
+    )
+
+
+def _from_structured_data(state: dict) -> RiskAssessment:
+    overview = state.get("overview_data") or {}
+    weather = state.get("weather_forecast") or {}
+    forecast = weather.get("forecast", weather)
+    focus_station = state.get("focus_station")
+    stations = [focus_station] if focus_station else overview.get("stations", [])
+    alarms = overview.get("active_alarms", [])
+    if focus_station:
+        alarms = [
+            alarm for alarm in alarms
+            if str(alarm.get("station_id")) == str(focus_station.get("id"))
+        ]
+    forecast_24h = float(forecast.get("total_precip_24h_mm", 0))
+
+    max_wl_score = 0.0
+    max_rf_score = 0.0
+    affected: list[str] = []
     key_risks: list[str] = []
 
     for station in stations:
-        station_id = station.get("code") or station.get("id") or station.get("name", "")
-        water_score, water_note = _water_score(station)
-        rain_score, rain_note = _rain_score(station, forecast_total)
-        station_score = max(water_score, rain_score)
+        name = station.get("name", station.get("code", "未知站点"))
+        wl = station.get("water_level")
+        warn = station.get("warning_level")
+        danger = station.get("danger_level")
+        if wl is not None and warn and danger:
+            wl_result = calculate_water_level_risk(float(wl), float(warn), float(danger))
+            max_wl_score = max(max_wl_score, wl_result["risk_score"])
+            if wl_result["risk_score"] >= 40:
+                affected.append(name)
+                key_risks.append(f"{name} 水位接近或超过警戒线")
 
-        top_water_score = max(top_water_score, water_score)
-        top_rain_score = max(top_rain_score, rain_score)
+        rainfall = station.get("rainfall")
+        if rainfall is not None:
+            rf_result = calculate_rainfall_risk(float(rainfall), float(rainfall) * 4, forecast_24h)
+            max_rf_score = max(max_rf_score, rf_result["risk_score"])
 
-        if station_score >= 40:
-            affected_stations.append(str(station_id))
-        if water_note:
-            key_risks.append(f"{station.get('name', '未知站点')}{water_note}")
-        if rain_note and station_score >= 40:
-            key_risks.append(f"{station.get('name', '未知站点')}{rain_note}")
+    if alarms:
+        key_risks.append(f"当前存在 {len(alarms)} 条活跃告警")
+    if forecast_24h >= 50:
+        key_risks.append(f"未来24小时预报降雨量 {forecast_24h:.0f}mm")
 
-    for alarm in alarms[:5]:
-        station_name = alarm.get("station_name", "未知站点")
-        key_risks.append(f"{station_name}{alarm.get('message', '存在活跃告警')}")
-        station_id = alarm.get("station_id")
-        if station_id:
-            affected_stations.append(str(station_id))
-
-    alarm_bonus = min(len(alarms) * 5, 20)
-    total_score = min(100.0, top_water_score * 0.5 + top_rain_score * 0.35 + alarm_bonus)
-    if forecast_total >= 50:
-        total_score = min(100.0, total_score + 8)
-    if forecast_total >= 100:
-        total_score = min(100.0, total_score + 6)
-
-    risk_level = _score_to_level(total_score)
-    trend = "rising" if forecast_total >= 50 or len(alarms) >= 2 else "stable"
-
-    reasoning = (
-        f"最高水位风险分 {top_water_score:.1f}，最高雨量风险分 {top_rain_score:.1f}，"
-        f"活跃告警 {len(alarms)} 条，未来24小时降雨 {forecast_total:.1f} mm。"
-    )
-
+    composite = calculate_composite_risk(max_wl_score, max_rf_score, len(alarms))
     return RiskAssessment(
-        risk_level=risk_level,
-        risk_score=round(total_score, 1),
-        affected_stations=sorted(set(affected_stations)),
-        key_risks=key_risks[:5],
-        trend=trend,
-        reasoning=reasoning,
+        risk_level=_to_risk_level(composite["risk_level"]),
+        risk_score=float(composite["composite_risk_score"]),
+        affected_stations=affected,
+        key_risks=key_risks or ["当前未发现显著风险"],
+        trend="rising" if forecast_24h > 0 else "stable",
+        reasoning="基于监测站水位、雨量和活跃告警的综合评分",
+        response_level=composite.get("response_level"),
     )
 
 
-async def _build_llm_risk(state: FloodResponseState) -> tuple[RiskAssessment, str]:
+async def risk_assessor_node(state: dict) -> dict:
+    assessment = _from_structured_data(state) if state.get("overview_data") else RiskAssessment()
+    evidence = build_evidence(await search_knowledge_base(str(state.get("user_query", "")), top_k=4))
     llm = get_llm()
-    agent = create_react_agent(
-        model=llm,
-        tools=risk_assessment_tools,
-        prompt=RISK_ASSESSOR_PROMPT,
-    )
-    data_summary = state.get("data_summary", "暂无数据分析结果")
-    prompt = f"""请基于以下数据分析结果进行风险评估：
+    station_name = state.get("focus_station", {}).get("name") if state.get("focus_station") else None
+    prefix = f"{station_name} 的当前风险判断是" if station_name else "当前整体风险判断是"
+    content = _format_assessment_content(assessment, prefix)
 
-{data_summary}
-
-请使用工具进行量化计算，并输出综合风险评估结果。
-"""
-    result = await agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
-    final_message = result["messages"][-1].content if result["messages"] else ""
-    risk_data = extract_json(final_message)
-    if risk_data and isinstance(risk_data, dict):
+    if llm.is_enabled and state.get("overview_data"):
         try:
-            assessment = RiskAssessment(
-                risk_level=RiskLevel(risk_data.get("risk_level", "none")),
-                risk_score=float(risk_data.get("risk_score", 0)),
-                affected_stations=risk_data.get("affected_stations", []),
-                key_risks=risk_data.get("key_risks", []),
-                trend=risk_data.get("trend", "stable"),
-                reasoning=risk_data.get("reasoning", final_message),
+            response = await llm.ainvoke(
+                json.dumps({
+                    "user_query": state.get("user_query", ""),
+                    "intent": state.get("intent", "risk_assessment"),
+                    "focus_station": to_plain_data(state.get("focus_station")),
+                    "overview_data": to_plain_data(state.get("overview_data")),
+                    "weather_forecast": to_plain_data(state.get("weather_forecast")),
+                    "evidence": to_plain_data(evidence),
+                    "deterministic_baseline": to_plain_data(assessment),
+                }, ensure_ascii=False, indent=2),
+                system_prompt=(
+                    "你是防汛风险评估智能体。"
+                    "如果用户问的是某个具体站点，就优先评估该站点的风险，而不是泛泛地评估全局。"
+                    "如果 evidence 非空，请把可引用的专业依据融入 reasoning，并保留 [1][2] 编号。"
+                    "如果 evidence 为空，不要编造制度或规范。"
+                    "请结合监测数据和规则基线，输出严格 JSON。"
+                    "字段必须包含：risk_level, risk_score, affected_stations, key_risks, "
+                    "trend, reasoning, response_level。"
+                    "risk_level 只能是 none/low/moderate/high/critical。"
+                ),
+                temperature=0.1,
+                response_format={"type": "json_object"},
             )
-            return assessment, final_message
-        except (ValueError, KeyError):
-            pass
-    return RiskAssessment(reasoning=final_message), final_message
+            parsed = extract_json(getattr(response, "content", None)) or {}
+            if parsed:
+                assessment = _assessment_from_model(parsed, assessment)
+                content = _format_assessment_content(assessment, prefix)
+        except Exception:
+            content = _format_assessment_content(assessment, prefix)
 
+    if evidence:
+        content = f"{content}\n\n{format_evidence_markdown(evidence)}"
 
-@with_timeout(120)
-async def risk_assessor_node(state: FloodResponseState) -> dict:
-    deterministic = _build_deterministic_risk(state)
-    if deterministic is not None:
-        logger.info(
-            f"Deterministic risk assessment generated: level={deterministic.risk_level.value}, score={deterministic.risk_score}"
-        )
-        return {
-            "risk_assessment": deterministic,
-            "current_agent": "risk_assessor",
-            "messages": [{"role": "risk_assessor", "content": json.dumps(deterministic.model_dump(), ensure_ascii=False)}],
-        }
-
-    risk_assessment, final_message = await _build_llm_risk(state)
-    logger.info(f"LLM risk assessment generated: {final_message[:200]}")
     return {
-        "risk_assessment": risk_assessment,
+        "risk_assessment": assessment,
+        "evidence": evidence,
         "current_agent": "risk_assessor",
-        "messages": [{"role": "risk_assessor", "content": final_message}],
+        "messages": [{"role": "risk_assessor", "content": content or "风险评估完成"}],
     }

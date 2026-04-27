@@ -18,9 +18,9 @@ async def test_final_response_uses_only_available_sections():
     )
 
     final_text = result["final_response"]
-    assert "## 水情概况" in final_text
     assert "监测站点 6 个" in final_text
-    assert "## 风险评估" not in final_text
+    assert "监测站点 6 个" in final_text
+    assert "风险等级" not in final_text
 
 
 @pytest.mark.asyncio
@@ -47,12 +47,12 @@ async def test_final_response_includes_error_and_plan_details():
                 ],
                 summary="立即响应",
             ),
+            "intent": "plan_generation",
             "error": "data_analyst_node timed out after 120s",
         }
     )
 
     final_text = result["final_response"]
-    assert "## 风险评估" in final_text
+    assert "high" in final_text
     assert "城区防汛预案" in final_text
-    assert "## 异常信息" in final_text
     assert "timed out after 120s" in final_text

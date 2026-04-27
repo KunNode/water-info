@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1440" />
+<title>防洪应急 · 多智能体平台 · 完整线框图</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="placeholders.jsx"></script>
+<script type="text/babel" src="primitives.jsx"></script>
+<script type="text/babel" src="shell.jsx"></script>
+<script type="text/babel" src="dashboard.jsx"></script>
+<script type="text/babel" src="ai_center.jsx"></script>
+<script type="text/babel" src="bigscreen.jsx"></script>
+<script type="text/babel" src="pages_auth.jsx"></script>
+<script type="text/babel" src="pages_monitor.jsx"></script>
+<script type="text/babel" src="pages_data.jsx"></script>
+<script type="text/babel" src="pages_warning.jsx"></script>
+<script type="text/babel" src="pages_plan_map.jsx"></script>
+<script type="text/babel" src="pages_system.jsx"></script>
+
+<script type="text/babel" data-presets="env,react">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": false
+}/*EDITMODE-END*/;
+
+const PAGE_META = {
+  'dash-v1':   { label: '仪表盘 · v1 地图驱动',       crumbs: '概览 / 仪表盘 / v1' },
+  'dash-v2':   { label: '仪表盘 · v2 告警时间轴',     crumbs: '概览 / 仪表盘 / v2' },
+  'big':       { label: '大屏 BigScreen',             crumbs: '概览 / 大屏' },
+  'station':   { label: '站点管理',                    crumbs: '监测 / 站点' },
+  'sensor':    { label: '传感器管理',                  crumbs: '监测 / 传感器' },
+  'obs':       { label: '观测数据',                    crumbs: '数据 / 观测' },
+  'alarm':     { label: '告警管理',                    crumbs: '告警 / 告警列表' },
+  'threshold': { label: '阈值规则',                    crumbs: '告警 / 阈值' },
+  'ai-v1':     { label: 'AI 命令中心 · v1 对话+时间线', crumbs: 'AI / 命令中心 / v1' },
+  'ai-v2':     { label: 'AI 命令中心 · v2 流水线',      crumbs: 'AI / 命令中心 / v2' },
+  'plan':      { label: '应急计划',                    crumbs: 'AI / 应急计划' },
+  'map':       { label: '地图',                        crumbs: '系统 / 地图' },
+  'user':      { label: '用户管理',                    crumbs: '系统 / 用户' },
+  'role':      { label: '角色管理',                    crumbs: '系统 / 角色' },
+  'orgdept':   { label: '组织 / 部门',                 crumbs: '系统 / 组织' },
+  'log':       { label: '操作日志',                    crumbs: '系统 / 日志' },
+  'login':     { label: '登录页',                      crumbs: '/ login' },
+};
+
+function BigScreenStage() {
+  const [scale, setScale] = React.useState(1);
+  const wrapRef = React.useRef(null);
+  React.useEffect(() => {
+    const recalc = () => {
+      if (!wrapRef.current) return;
+      const w = wrapRef.current.clientWidth - 32;
+      setScale(Math.min(1, w / 1920));
+    };
+    recalc();
+    window.addEventListener('resize', recalc);
+    return () => window.removeEventListener('resize', recalc);
+  }, []);
+  return (
+    <div ref={wrapRef} className="bs-stage" style={{ minHeight: 1080 * scale + 32, padding: 16 }}>
+      <div style={{ width: 1920 * scale, height: 1080 * scale, position: 'relative' }}>
+        <div className="bs-scaler" style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: 1920, height: 1080, position: 'absolute', top: 0, left: 0 }}>
+          <BigScreen />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function renderPage(key) {
+  switch (key) {
+    case 'dash-v1':   return <DashboardV1 />;
+    case 'dash-v2':   return <DashboardV2 />;
+    case 'big':       return <BigScreenStage />;
+    case 'station':   return <StationPage />;
+    case 'sensor':    return <SensorPage />;
+    case 'obs':       return <ObservationPage />;
+    case 'alarm':     return <AlarmPage />;
+    case 'threshold': return <ThresholdPage />;
+    case 'ai-v1':     return <AiCenterV1 />;
+    case 'ai-v2':     return <AiCenterV2 />;
+    case 'plan':      return <PlanPage />;
+    case 'map':       return <MapPage />;
+    case 'user':      return <UserPage />;
+    case 'role':      return <RolePage />;
+    case 'orgdept':   return <OrgDeptPage />;
+    case 'log':       return <LogPage />;
+    default:          return <DashboardV1 />;
+  }
+}
+
+function App() {
+  const [page, setPage] = React.useState(() => localStorage.getItem('wf-page') || 'dash-v1');
+  const [dark, setDark] = React.useState(!!TWEAK_DEFAULTS.dark);
+
+  React.useEffect(() => { localStorage.setItem('wf-page', page); }, [page]);
+  React.useEffect(() => {
+    document.body.classList.toggle('dark', dark);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { dark } }, '*');
+  }, [dark]);
+
+  const meta = PAGE_META[page] || PAGE_META['dash-v1'];
+
+  // Login page is full-bleed, no chrome
+  if (page === 'login') {
+    return (
+      <div data-screen-label="登录页">
+        <LoginPage />
+        <div style={{position:'fixed',top:12,right:12,zIndex:30}}>
+          <button className="btn" onClick={() => setPage('dash-v1')}>← 返回应用</button>
+        </div>
+        <TweakPanel dark={dark} setDark={setDark} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="wf-app" data-screen-label={meta.label}>
+      <TopBar crumbs={meta.crumbs} variantLabel={`LOFI · ${page}`} />
+      <SideNav active={page} onNav={setPage} />
+      <div className="wf-main">
+        {renderPage(page)}
+      </div>
+      <TweakPanel dark={dark} setDark={setDark} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

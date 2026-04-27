@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1200, initial-scale=1" />
+  <title>FloodMind · Theme Demo · Dieter Rams × Apple HIG</title>
+  <style>
+    /* ---------- Dark tokens (FloodMind command-center, kept as-is) ---------- */
+    :root {
+      --fm-bg-0: #060a14;
+      --fm-bg-1: #0b1220;
+      --fm-bg-2: #111a2c;
+      --fm-bg-3: #172338;
+      --fm-bg-4: #1f2d45;
+      --fm-line: #1f2a3f;
+      --fm-line-2: #2a3a57;
+      --fm-fg: #e8eef8;
+      --fm-fg-soft: #a9b3c6;
+      --fm-fg-mute: #6a7590;
+      --fm-fg-dim: #475268;
+      --fm-brand: #2f7bff;
+      --fm-brand-2: #49e1ff;
+      --fm-brand-deep: #0a3b99;
+      --fm-ok: #2bd99f;
+      --fm-warn: #ffb547;
+      --fm-danger: #ff5a6a;
+      --fm-info: #7aa2ff;
+      --fm-card-bg: linear-gradient(180deg, #111a2c 0%, #0c1322 100%);
+      --fm-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 20px 40px -24px rgba(0, 0, 0, 0.6);
+      --fm-body-weight: 400;
+      --fm-radius: 10px;
+      --fm-radius-sm: 6px;
+      --fm-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    /* ---------- Light tokens (Direction B · Dieter Rams × Apple HIG) ---------- */
+    html:not(.dark) {
+      --fm-bg-0: #f5f5f7;           /* Apple warm neutral */
+      --fm-bg-1: #fafafc;           /* subtle lift */
+      --fm-bg-2: #ffffff;           /* cards pure white */
+      --fm-bg-3: #ffffff;
+      --fm-bg-4: #f2f2f5;
+      --fm-line: #e5e5ea;           /* Apple system separator */
+      --fm-line-2: #d1d1d6;
+      --fm-fg: #1d1d1f;             /* Apple near-black */
+      --fm-fg-soft: #424245;
+      --fm-fg-mute: #6e6e73;
+      --fm-fg-dim: #a1a1a6;
+      --fm-brand: #1d5bd6;          /* darkened for visual weight on white */
+      --fm-brand-2: #007aff;        /* Apple system blue */
+      --fm-ok: #34c759;             /* Apple system green */
+      --fm-warn: #ff9500;           /* Apple system orange */
+      --fm-danger: #ff3b30;         /* Apple system red */
+      --fm-card-bg: #ffffff;
+      --fm-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -16px rgba(0, 0, 0, 0.12);
+      --fm-body-weight: 450;        /* bolder body text on light bg (HIG rule) */
+    }
+
+    /* ---------- Reset & global ---------- */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      font-family: var(--fm-font-sans);
+      font-weight: var(--fm-body-weight);
+      background: var(--fm-bg-0);
+      color: var(--fm-fg);
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "tnum" 1, "cv11" 1;
+    }
+
+    /* 200ms cross-fade on theme flip */
+    html, body, .card, .alert, .pill, .nav-item, .toggle, .toggle__btn, .chip, .swatch, .station, .kpi, .topbar, .sidebar {
+      transition:
+        background-color 200ms ease,
+        background 200ms ease,
+        color 200ms ease,
+        border-color 200ms ease,
+        box-shadow 200ms ease,
+        fill 200ms ease;
+    }
+
+    /* ---------- Layout ---------- */
+    .app {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      grid-template-rows: 56px 1fr;
+      height: 100vh;
+    }
+    .topbar {
+      grid-column: 1 / 3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: var(--fm-bg-1);
+      border-bottom: 1px solid var(--fm-line);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+    .brand__logo {
+      width: 26px; height: 26px; border-radius: 7px;
+      background: linear-gradient(135deg, var(--fm-brand) 0%, var(--fm-brand-2) 100%);
+      display: grid; place-items: center;
+      color: white; font-size: 13px; font-weight: 700;
+    }
+    .brand__sub { color: var(--fm-fg-mute); font-weight: 400; font-size: 13px; margin-left: 6px; }
+
+    .sidebar {
+      background: var(--fm-bg-1);
+      border-right: 1px solid var(--fm-line);
+      padding: 18px 12px;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      color: var(--fm-fg-soft);
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .nav-item + .nav-item { margin-top: 2px; }
+    .nav-item:hover { background: var(--fm-bg-4); color: var(--fm-fg); }
+    .nav-item.active {
+      background: color-mix(in srgb, var(--fm-brand) 14%, transparent);
+      color: var(--fm-brand);
+    }
+    .nav-item__badge {
+      margin-left: auto;
+      font-size: 11px; font-weight: 600;
+      padding: 1px 7px; border-radius: 999px;
+      background: var(--fm-danger); color: white;
+    }
+    .nav-item svg { width: 16px; height: 16px; flex: 0 0 16px; }
+
+    .main { padding: 24px 28px; overflow: auto; }
+    .section-title {
+      font-size: 12px; font-weight: 600;
+      color: var(--fm-fg-mute);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin: 22px 0 10px;
+    }
+    .section-title:first-child { margin-top: 0; }
+
+    /* ---------- Cards & alerts ---------- */
+    .row { display: grid; gap: 12px; }
+    .row.cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .row.cols-8 { grid-template-columns: repeat(8, 1fr); }
+
+    .card {
+      background: var(--fm-card-bg);
+      border: 1px solid var(--fm-line);
+      border-radius: var(--fm-radius);
+      padding: 16px 18px;
+      box-shadow: var(--fm-shadow-card);
+    }
+    .card__head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .card__title { font-size: 14px; font-weight: 600; color: var(--fm-fg); }
+
+    .alert {
+      background: var(--fm-card-bg);
+      border: 1px solid var(--fm-line);
+      border-left: 3px solid var(--fm-fg-dim);
+      border-radius: var(--fm-radius);
+      padding: 14px 16px;
+      box-shadow: var(--fm-shadow-card);
+    }
+    .alert--critical { border-left-color: var(--fm-danger); }
+    .alert--high     { border-left-color: var(--fm-warn); }
+    .alert--medium   { border-left-color: var(--fm-info); }
+
+    .alert__level {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .alert__level.critical {
+      background: color-mix(in srgb, var(--fm-danger) 14%, transparent);
+      color: var(--fm-danger);
+    }
+    .alert__level.high {
+      background: color-mix(in srgb, var(--fm-warn) 16%, transparent);
+      color: var(--fm-warn);
+    }
+    .alert__level.medium {
+      background: color-mix(in srgb, var(--fm-info) 16%, transparent);
+      color: var(--fm-info);
+    }
+    .alert__station { margin-top: 8px; font-size: 14px; font-weight: 600; }
+    .alert__metric  { margin-top: 4px; font-size: 13px; color: var(--fm-fg-soft); }
+    .alert__meta    { margin-top: 10px; font-size: 12px; color: var(--fm-fg-mute); display: flex; gap: 14px; }
+    .alert__meta b  { color: var(--fm-fg-soft); font-weight: 600; }
+
+    /* ---------- AI assessment ---------- */
+    .ai {
+      background: var(--fm-card-bg);
+      border: 1px solid var(--fm-line);
+      border-radius: var(--fm-radius);
+      padding: 18px 20px;
+      box-shadow: var(--fm-shadow-card);
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 22px;
+    }
+    .ai__risk {
+      display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+      padding-right: 22px; border-right: 1px solid var(--fm-line);
+    }
+    .ai__risk-label { font-size: 11px; font-weight: 600; color: var(--fm-fg-mute); text-transform: uppercase; letter-spacing: 0.6px; }
+    .ai__risk-value { font-size: 28px; font-weight: 700; color: var(--fm-warn); letter-spacing: -0.5px; }
+    .ai__risk-meta  { font-size: 12px; color: var(--fm-fg-mute); }
+    .ai__body h4   { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .ai__body p    { font-size: 13px; color: var(--fm-fg-soft); line-height: 1.7; }
+    .ai__actions   { margin-top: 12px; display: flex; gap: 8px; }
+    .btn {
+      font: inherit; font-size: 12px; font-weight: 500;
+      padding: 6px 12px; border-radius: 7px;
+      border: 1px solid var(--fm-line-2);
+      background: var(--fm-bg-2); color: var(--fm-fg-soft);
+      cursor: pointer;
+    }
+    .btn--primary {
+      background: var(--fm-brand); border-color: var(--fm-brand); color: white;
+    }
+
+    /* ---------- Stations grid ---------- */
+    .station {
+      background: var(--fm-card-bg);
+      border: 1px solid var(--fm-line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      box-shadow: var(--fm-shadow-card);
+    }
+    .station__name { font-size: 12px; color: var(--fm-fg-mute); }
+    .station__val  { margin-top: 4px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .station__val small { font-size: 11px; font-weight: 400; color: var(--fm-fg-mute); margin-left: 3px; }
+    .station__dot {
+      display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--fm-ok); margin-right: 6px; vertical-align: middle;
+    }
+    .station--warn .station__dot { background: var(--fm-warn); }
+    .station--crit .station__dot { background: var(--fm-danger); }
+
+    /* ---------- 3-state toggle (Apple segmented control) ---------- */
+    .toggle {
+      display: inline-flex;
+      background: var(--fm-bg-4);
+      border: 1px solid var(--fm-line);
+      border-radius: 8px;
+      padding: 2px;
+      gap: 2px;
+    }
+    .toggle__btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      font: inherit; font-size: 12px; font-weight: 500;
+      color: var(--fm-fg-soft);
+      padding: 5px 10px; border-radius: 6px;
+      background: transparent; border: 0; cursor: pointer;
+    }
+    .toggle__btn svg { width: 13px; height: 13px; }
+    .toggle__btn:hover { color: var(--fm-fg); }
+    .toggle__btn.active {
+      background: var(--fm-bg-2);
+      color: var(--fm-fg);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    }
+    html.dark .toggle__btn.active { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); }
+
+    /* ---------- Palette strip ---------- */
+    .palette {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .swatch {
+      border: 1px solid var(--fm-line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: var(--fm-bg-2);
+    }
+    .swatch__chip {
+      height: 36px; border-radius: 6px; margin-bottom: 8px;
+      border: 1px solid var(--fm-line);
+    }
+    .swatch__name { font-size: 11px; font-weight: 600; color: var(--fm-fg); }
+    .swatch__hex  { font-size: 10px; color: var(--fm-fg-mute); font-family: "SFMono-Regular", ui-monospace, Menlo, monospace; margin-top: 2px; }
+
+    .mode-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 10px; border-radius: 999px;
+      background: color-mix(in srgb, var(--fm-brand) 12%, transparent);
+      color: var(--fm-brand);
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .muted { color: var(--fm-fg-mute); }
+    .small { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- ================= Top bar ================= -->
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand__logo">F</div>
+        <span>FloodMind</span>
+        <span class="brand__sub">防汛应急智能平台</span>
+      </div>
+
+      <!-- 3-state theme toggle -->
+      <div class="toggle" role="group" aria-label="主题模式">
+        <button class="toggle__btn" data-mode="auto" title="跟随系统">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="18" x2="12" y2="21"/>
+          </svg>
+          自动
+        </button>
+        <button class="toggle__btn" data-mode="light" title="浅色模式">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+          </svg>
+          浅色
+        </button>
+        <button class="toggle__btn active" data-mode="dark" title="深色模式">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+          深色
+        </button>
+      </div>
+    </div>
+
+    <!-- ================= Sidebar ================= -->
+    <div class="sidebar">
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        首页总览
+      </div>
+      <div class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+        实时监测
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        告警中心
+        <span class="nav-item__badge">3</span>
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v6"/><path d="M12 17v6"/></svg>
+        AI 研判
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        应急预案
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        系统设置
+      </div>
+    </div>
+
+    <!-- ================= Main ================= -->
+    <div class="main">
+      <div class="section-title">当前告警</div>
+      <div class="row cols-3">
+        <div class="alert alert--critical">
+          <span class="alert__level critical">● CRITICAL</span>
+          <div class="alert__station">翠屏湖 1# 水位站</div>
+          <div class="alert__metric">水位 <b>4.82 m</b> · 超警戒 0.32 m</div>
+          <div class="alert__meta"><span>触发 <b>2 min 前</b></span><span>源 <b>SCHEDULED</b></span></div>
+        </div>
+        <div class="alert alert--high">
+          <span class="alert__level high">● HIGH</span>
+          <div class="alert__station">青山桥 雨量站</div>
+          <div class="alert__metric">1h 降雨 <b>42 mm</b> · 超阈 12 mm</div>
+          <div class="alert__meta"><span>触发 <b>8 min 前</b></span><span>源 <b>SCHEDULED</b></span></div>
+        </div>
+        <div class="alert alert--medium">
+          <span class="alert__level medium">● MEDIUM</span>
+          <div class="alert__station">东溪闸 流量站</div>
+          <div class="alert__metric">流量 <b>186 m³/s</b> · 上升趋势</div>
+          <div class="alert__meta"><span>触发 <b>14 min 前</b></span><span>源 <b>MANUAL</b></span></div>
+        </div>
+      </div>
+
+      <div class="section-title">AI 综合研判 <span class="mode-pill" style="margin-left:8px;">EVENT · 3 min 前</span></div>
+      <div class="ai">
+        <div class="ai__risk">
+          <span class="ai__risk-label">当前风险</span>
+          <span class="ai__risk-value">HIGH</span>
+          <span class="ai__risk-meta">由翠屏湖 CRITICAL 告警触发</span>
+        </div>
+        <div class="ai__body">
+          <h4>态势摘要</h4>
+          <p>上游降雨持续 3 小时，翠屏湖水位以 0.15 m/h 速率上涨，预计 90 分钟内达到历史警戒位。东溪闸流量同步上升，需警惕下游管涌风险。建议启动 III 级响应并提前部署堤防巡查。</p>
+          <div class="ai__actions">
+            <button class="btn btn--primary">查看完整预案</button>
+            <button class="btn">派遣巡查队</button>
+            <button class="btn">转人工研判</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title">站点状态 · 8 处关键断面</div>
+      <div class="row cols-8">
+        <div class="station station--crit"><div class="station__name"><span class="station__dot"></span>翠屏湖 1#</div><div class="station__val">4.82<small>m</small></div></div>
+        <div class="station station--warn"><div class="station__name"><span class="station__dot"></span>青山桥</div><div class="station__val">42<small>mm/h</small></div></div>
+        <div class="station"><div class="station__name"><span class="station__dot"></span>东溪闸</div><div class="station__val">186<small>m³/s</small></div></div>
+        <div class="station"><div class="station__name"><span class="station__dot"></span>翠屏湖 2#</div><div class="station__val">4.21<small>m</small></div></div>
+        <div class="station"><div class="station__name"><span class="station__dot"></span>北溪站</div><div class="station__val">2.88<small>m</small></div></div>
+        <div class="station"><div class="station__name"><span class="station__dot"></span>南桥雨量</div><div class="station__val">18<small>mm/h</small></div></div>
+        <div class="station"><div class="station__name"><span class="station__dot"></span>洪塘泵站</div><div class="station__val">运行</div></div>
+        <div class="station"><div class="station__name"><span class="station__dot"></span>西坝闸</div><div class="station__val">备用</div></div>
+      </div>
+
+      <div class="section-title">设计 Token · 方向 B（Dieter Rams × Apple HIG）</div>
+      <div class="palette">
+        <div class="swatch"><div class="swatch__chip" style="background:var(--fm-bg-0)"></div><div class="swatch__name">bg-0</div><div class="swatch__hex" id="hex-bg-0">—</div></div>
+        <div class="swatch"><div class="swatch__chip" style="background:var(--fm-bg-2)"></div><div class="swatch__name">bg-2 / card</div><div class="swatch__hex" id="hex-bg-2">—</div></div>
+        <div class="swatch"><div class="swatch__chip" style="background:var(--fm-fg)"></div><div class="swatch__name">fg</div><div class="swatch__hex" id="hex-fg">—</div></div>
+        <div class="swatch"><div class="swatch__chip" style="background:var(--fm-brand)"></div><div class="swatch__name">brand</div><div class="swatch__hex" id="hex-brand">—</div></div>
+        <div class="swatch"><div class="swatch__chip" style="background:var(--fm-ok)"></div><div class="swatch__name">ok</div><div class="swatch__hex" id="hex-ok">—</div></div>
+        <div class="swatch"><div class="swatch__chip" style="background:var(--fm-warn)"></div><div class="swatch__name">warn</div><div class="swatch__hex" id="hex-warn">—</div></div>
+        <div class="swatch"><div class="swatch__chip" style="background:var(--fm-danger)"></div><div class="swatch__name">danger</div><div class="swatch__hex" id="hex-danger">—</div></div>
+        <div class="swatch"><div class="swatch__chip" style="background:var(--fm-line-2)"></div><div class="swatch__name">line-2</div><div class="swatch__hex" id="hex-line">—</div></div>
+      </div>
+
+      <div class="section-title">交互说明</div>
+      <div class="card small muted" style="line-height:1.8;">
+        · <b>三态循环</b>：自动（跟随系统 <code>prefers-color-scheme</code>）→ 浅色 → 深色，偏好写入 localStorage <code>fm-theme</code><br/>
+        · <b>200ms cross-fade</b>：切换时背景 / 文字 / 边框 / 阴影同步过渡，无白屏闪烁<br/>
+        · <b>告警语义跨模式稳定</b>：红 / 橙 / 蓝在两模式下仅调饱和度，不改色相<br/>
+        · <b>浅色下字重 +50</b>（400 → 450）：Apple HIG 规范，细字在白底下可读性不足<br/>
+        · <b>品牌色分支</b>：深色用电光蓝 <code>#2f7bff</code>，浅色加深为 <code>#1d5bd6</code> 保视觉重量
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- 3-state theme toggle ----------
+    const KEY = 'demo-fm-theme';
+    const mql = window.matchMedia('(prefers-color-scheme: light)');
+    const buttons = document.querySelectorAll('.toggle__btn');
+    const hexTargets = {
+      'hex-bg-0': '--fm-bg-0',
+      'hex-bg-2': '--fm-bg-2',
+      'hex-fg': '--fm-fg',
+      'hex-brand': '--fm-brand',
+      'hex-ok': '--fm-ok',
+      'hex-warn': '--fm-warn',
+      'hex-danger': '--fm-danger',
+      'hex-line': '--fm-line-2',
+    };
+
+    function resolveDark(mode) {
+      if (mode === 'dark') return true;
+      if (mode === 'light') return false;
+      return !mql.matches; // auto → follow system (mql=light means system prefers light)
+    }
+
+    function apply(mode) {
+      const dark = resolveDark(mode);
+      document.documentElement.classList.toggle('dark', dark);
+      buttons.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+      localStorage.setItem(KEY, mode);
+      // Wait a tick for CSS vars to settle before reading them
+      requestAnimationFrame(() => {
+        const style = getComputedStyle(document.documentElement);
+        for (const [id, varName] of Object.entries(hexTargets)) {
+          const el = document.getElementById(id);
+          if (el) el.textContent = style.getPropertyValue(varName).trim();
+        }
+      });
+    }
+
+    buttons.forEach(b => b.addEventListener('click', () => apply(b.dataset.mode)));
+    mql.addEventListener('change', () => {
+      if ((localStorage.getItem(KEY) || 'auto') === 'auto') apply('auto');
+    });
+
+    apply(localStorage.getItem(KEY) || 'dark');
+  </script>
+</body>
+</html>

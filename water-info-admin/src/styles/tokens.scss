@@ -1,0 +1,101 @@
+/* FloodMind · Design Tokens
+ * Deep command center aesthetic — electric deep blue #2f7bff + cyan #49e1ff glow
+ * Dark is the default; light mode is opt-in via `html:not(.dark)`.
+ */
+
+:root {
+  /* Palette — dark (default) */
+  --fm-bg-0: #060a14;
+  --fm-bg-1: #0b1220;
+  --fm-bg-2: #111a2c;
+  --fm-bg-3: #172338;
+  --fm-bg-4: #1f2d45;
+
+  --fm-line: #1f2a3f;
+  --fm-line-2: #2a3a57;
+  --fm-line-glow: rgba(73, 225, 255, 0.18);
+
+  --fm-fg: #e8eef8;
+  --fm-fg-soft: #a9b3c6;
+  --fm-fg-mute: #6a7590;
+  --fm-fg-dim: #475268;
+
+  --fm-brand: #2f7bff;
+  --fm-brand-2: #49e1ff;
+  --fm-brand-deep: #0a3b99;
+  --fm-brand-glow: rgba(73, 225, 255, 0.35);
+
+  --fm-ok: #2bd99f;
+  --fm-warn: #ffb547;
+  --fm-danger: #ff5a6a;
+  --fm-danger-glow: rgba(255, 90, 106, 0.35);
+  --fm-info: #7aa2ff;
+
+  --fm-grad-panel: linear-gradient(180deg, #111a2c 0%, #0c1322 100%);
+  --fm-grad-raised: linear-gradient(180deg, #17223a 0%, #0f1828 100%);
+  --fm-grad-hero: radial-gradient(120% 80% at 50% 0%, rgba(47, 123, 255, 0.18) 0%, rgba(10, 15, 28, 0) 60%);
+  --fm-grad-line: linear-gradient(90deg, transparent, var(--fm-line-2), transparent);
+  --fm-grad-brand: linear-gradient(135deg, #2f7bff 0%, #49e1ff 100%);
+  --fm-grad-danger: linear-gradient(135deg, #ff5a6a 0%, #ffb547 100%);
+
+  --fm-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 20px 40px -24px rgba(0, 0, 0, 0.6);
+  --fm-shadow-pop: 0 30px 60px -30px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--fm-line) inset;
+
+  --fm-radius: 10px;
+  --fm-radius-sm: 6px;
+
+  --fm-font-sans: "Inter", "Helvetica Neue", "Hiragino Sans GB", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --fm-font-mono: "JetBrains Mono", "SFMono-Regular", "Menlo", monospace;
+  --fm-body-weight: 400;
+
+  --fm-sidebar-w: 240px;
+  --fm-sidebar-w-collapsed: 72px;
+  --fm-topbar-h: 60px;
+  --fm-tags-h: 34px;
+}
+
+/* Light theme · Direction B — Dieter Rams × Apple HIG
+ * Warm-neutral background (#f5f5f7), Apple system semantic colors,
+ * brand darkened to #1d5bd6 to retain visual weight on white.
+ */
+html:not(.dark) {
+  --fm-bg-0: #f5f5f7;
+  --fm-bg-1: #fafafc;
+  --fm-bg-2: #ffffff;
+  --fm-bg-3: #ffffff;
+  --fm-bg-4: #f2f2f5;
+
+  --fm-line: #e5e5ea;
+  --fm-line-2: #d1d1d6;
+  --fm-line-glow: rgba(29, 91, 214, 0.12);
+
+  --fm-fg: #1d1d1f;
+  --fm-fg-soft: #424245;
+  --fm-fg-mute: #6e6e73;
+  --fm-fg-dim: #a1a1a6;
+
+  /* Brand darkened so it still reads as a primary accent on pure white */
+  --fm-brand: #1d5bd6;
+  --fm-brand-2: #007aff;
+  --fm-brand-deep: #0a3b99;
+  --fm-brand-glow: rgba(29, 91, 214, 0.22);
+
+  /* Apple system semantic colors — same hue intent as dark, retuned for white bg */
+  --fm-ok: #34c759;
+  --fm-warn: #ff9500;
+  --fm-danger: #ff3b30;
+  --fm-danger-glow: rgba(255, 59, 48, 0.28);
+  --fm-info: #1d5bd6;
+
+  --fm-grad-panel: linear-gradient(180deg, #ffffff 0%, #fafafc 100%);
+  --fm-grad-raised: linear-gradient(180deg, #ffffff 0%, #f2f2f5 100%);
+  --fm-grad-hero: radial-gradient(120% 80% at 50% 0%, rgba(29, 91, 214, 0.06) 0%, rgba(255, 255, 255, 0) 60%);
+  --fm-grad-brand: linear-gradient(135deg, #1d5bd6 0%, #007aff 100%);
+  --fm-grad-danger: linear-gradient(135deg, #ff3b30 0%, #ff9500 100%);
+
+  --fm-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -16px rgba(0, 0, 0, 0.12);
+  --fm-shadow-pop: 0 20px 40px -20px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--fm-line) inset;
+
+  /* Slightly heavier body weight reads better on light bg (Apple HIG) */
+  --fm-body-weight: 450;
+}
