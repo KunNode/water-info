@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import operator
 from dataclasses import asdict, dataclass, field
+from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Annotated, TypedDict
 
@@ -110,10 +112,16 @@ def to_plain_data(value):
     """Convert domain models to JSON-serialisable structures."""
     if isinstance(value, Enum):
         return value.value
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
     if hasattr(value, "__dataclass_fields__"):
         return {key: to_plain_data(val) for key, val in asdict(value).items()}
     if isinstance(value, list):
         return [to_plain_data(item) for item in value]
     if isinstance(value, dict):
         return {key: to_plain_data(val) for key, val in value.items()}
+    if isinstance(value, tuple):
+        return [to_plain_data(item) for item in value]
     return value

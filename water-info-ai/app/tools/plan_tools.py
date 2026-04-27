@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 
-from app.plan import generate_plan_id as _generate_plan_id, get_response_template as _get_response_template
+from app.plan import generate_plan_id as _generate_plan_id
+from app.plan import get_response_template as _get_response_template
 from app.tools.simple_tool import SimpleTool
 
 

@@ -6,11 +6,14 @@ from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import _build_stream_events, app
 from app.rag.models import SearchResult
 from app.state import EmergencyAction, EmergencyPlan, NotificationRecord, ResourceAllocation, RiskAssessment, RiskLevel
+
+pytestmark = pytest.mark.smoke
 
 
 class StubGraph:

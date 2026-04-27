@@ -115,7 +115,7 @@ def _summarise_focus_station(station: dict, overview: dict) -> str:
         if str(alarm.get("station_id")) == str(station_id)
     ]
     lines = [
-        f"## 站点状态",
+        "## 站点状态",
         f"- 站点名称：{station.get('name', station.get('code', '未知站点'))}",
         f"- 站点编码：{station.get('code', '---')}",
         f"- 行政区域：{station.get('admin_region', '---')}",

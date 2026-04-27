@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 
 from app.services.llm import get_llm
-from app.state import ResourceAllocation
-from app.state import to_plain_data
+from app.state import ResourceAllocation, to_plain_data
 from app.utils.json_parser import extract_json
 
 

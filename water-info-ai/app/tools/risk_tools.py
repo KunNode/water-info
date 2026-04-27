@@ -6,7 +6,11 @@ import json
 
 from app.risk import (
     calculate_composite_risk as _calculate_composite_risk,
+)
+from app.risk import (
     calculate_rainfall_risk as _calculate_rainfall_risk,
+)
+from app.risk import (
     calculate_water_level_risk as _calculate_water_level_risk,
 )
 from app.tools.simple_tool import SimpleTool

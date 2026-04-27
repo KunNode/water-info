@@ -6,8 +6,7 @@ import json
 
 from app.plan import build_notifications
 from app.services.llm import get_llm
-from app.state import NotificationRecord, RiskLevel
-from app.state import to_plain_data
+from app.state import NotificationRecord, RiskLevel, to_plain_data
 from app.utils.json_parser import extract_json
 
 

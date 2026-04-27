@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import asdict
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from app.api.risk_scan import router as risk_scan_router
 from app.config import get_settings
 from app.database import get_db_service
+from app.graph import flood_response_graph
 from app.models import (
     ConversationDetailResponse,
     ConversationFullResponse,
@@ -37,7 +38,6 @@ from app.models import (
     PlanExecuteResponse,
     SessionResponse,
 )
-from app.graph import flood_response_graph
 from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
@@ -71,7 +71,7 @@ async def _persist_result(session_id: str, graph_state: dict) -> None:
     """Persist emergency plan and update conversation snapshot."""
     plan = graph_state.get("emergency_plan")
     db = get_db_service()
-    
+
     # Always update snapshot with current state
     assessment = graph_state.get("risk_assessment")
     risk_level = _risk_level_value(assessment)
@@ -83,7 +83,7 @@ async def _persist_result(session_id: str, graph_state: dict) -> None:
             "status": plan.status,
             "actions_count": len(plan.actions) if plan.actions else 0,
         }
-    
+
     try:
         await db.save_conversation_snapshot(
             session_id=session_id,
@@ -96,7 +96,7 @@ async def _persist_result(session_id: str, graph_state: dict) -> None:
 
     if not plan:
         return
-    
+
     try:
         await db.save_emergency_plan(
             plan_id=plan.plan_id,
@@ -304,10 +304,9 @@ async def health_check() -> HealthResponse:
 async def flood_query(request: FloodQueryRequest, http_request: Request) -> FloodQueryResponse:
     """Execute flood emergency query (non-streaming)."""
     user_id, username = _get_user_from_request(http_request)
-    is_new_session = not request.session_id
     session_id = request.session_id or str(uuid.uuid4())
     logger.info("[%s] flood query from user=%s: %s", session_id, user_id or "anonymous", request.query[:80])
-    
+
     db = get_db_service()
     sessions = session_service.get_session_service()
 
@@ -330,10 +329,10 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
     # Save assistant response
     response_content = final_state.get("final_response") or "处理完成"
     await db.save_conversation_message(session_id, "assistant", response_content, message_type="chat", status="completed")
-    
+
     # Persist plan and snapshot
     asyncio.create_task(_persist_result(session_id, final_state))
-    
+
     assessment = final_state.get("risk_assessment")
     plan = final_state.get("emergency_plan")
     resources = final_state.get("resource_plan", [])
@@ -355,7 +354,6 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
 async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
     """Execute flood emergency query with streaming (SSE)."""
     user_id, username = _get_user_from_request(http_request)
-    is_new_session = not request.session_id
     session_id = request.session_id or str(uuid.uuid4())
     db = get_db_service()
     sessions = session_service.get_session_service()
@@ -363,25 +361,25 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
     async def event_stream():
         nonlocal session_id
         title = request.query[:30] + ("…" if len(request.query) > 30 else "")
-        
+
         # Create session with user ownership
         await db.ensure_or_create_session(
             session_id, title, user_id=user_id, username=username, title_source="auto_first_query"
         )
-        
+
         history = await sessions.get_history(session_id)
-        
+
         # Save user message
         await db.save_conversation_message(session_id, "user", request.query, message_type="chat", status="completed")
-        
+
         # Create assistant placeholder message with streaming status
         assistant_msg_id = await db.save_conversation_message(
             session_id, "assistant", "", message_type="chat", status="streaming"
         )
-        
+
         final_state = None
         accumulated_response = ""
-        
+
         try:
             yield _event_line({"type": "session_init", "sessionId": session_id})
             async for update in flood_response_graph.astream(
@@ -395,7 +393,7 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
                     # Track final response for persistence
                     if event.get("type") == "agent_message" and event.get("agent") == "final_response":
                         accumulated_response = event.get("response", "")
-            
+
             if final_state:
                 final_response = final_state.get("final_response") or accumulated_response or "处理完成"
                 # Update assistant message to completed
@@ -672,7 +670,7 @@ async def get_conversation(session_id: str, http_request: Request):
         session = await db.get_session_by_id(session_id, user_id=user_id if user_id else None)
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
-        
+
         snapshot_row = await db.get_conversation_snapshot(session_id)
         snapshot = None
         if snapshot_row:
@@ -682,11 +680,11 @@ async def get_conversation(session_id: str, http_request: Request):
                 agent_status_summary=snapshot_row.get("agent_status_summary"),
                 query_count=snapshot_row.get("query_count", 0),
             )
-        
+
         # Get latest plan summary if any
         plans = await db.get_plans_by_session(session_id)
         latest_plan = plans[0] if plans else None
-        
+
         return ConversationFullResponse(
             session=ConversationSession(
                 session_id=session["session_id"],
@@ -725,12 +723,12 @@ async def get_conversation_messages(
         session = await db.get_session_by_id(session_id, user_id=user_id if user_id else None)
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
-        
+
         msgs = await db.get_conversation_messages(session_id, limit=limit + 1, before_id=before_id)
         has_more = len(msgs) > limit
         if has_more:
             msgs = msgs[1:]  # Remove the extra item used for pagination check
-        
+
         snapshot_row = await db.get_conversation_snapshot(session_id)
         snapshot = None
         if snapshot_row:
@@ -740,7 +738,7 @@ async def get_conversation_messages(
                 agent_status_summary=snapshot_row.get("agent_status_summary"),
                 query_count=snapshot_row.get("query_count", 0),
             )
-        
+
         return ConversationDetailResponse(
             session_id=session_id,
             title=session["title"],

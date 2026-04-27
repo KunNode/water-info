@@ -343,7 +343,7 @@ async function updateRainfallChart(stations: any[]) {
     sums[k] = 0
   })
   responses.forEach((res) => {
-    ;(res.data?.records || []).forEach((r) => {
+    (res.data?.records || []).forEach((r) => {
       const day = r.observedAt.split('T')[0]
       if (day in sums) sums[day] += r.value
     })

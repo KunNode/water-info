@@ -65,7 +65,7 @@ export const useAppStore = defineStore('app', () => {
     } else {
       // Safari < 14 fallback
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(mql as unknown as { addListener: (fn: (e: MediaQueryListEvent) => void) => void }).addListener(
+      (mql as unknown as { addListener: (fn: (e: MediaQueryListEvent) => void) => void }).addListener(
         onChange as (e: MediaQueryListEvent) => void,
       )
     }

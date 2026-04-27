@@ -241,13 +241,13 @@ async function processTypewriterQueue() {
   }
 
   let pos = store.messages[actualIdx].content.length
-  while (true) {
-    const full = agentLatestContent.get(task.agent) ?? task.fullContent
-    if (pos >= full.length) break
+  let full = agentLatestContent.get(task.agent) ?? task.fullContent
+  while (pos < full.length) {
     pos = Math.min(pos + CHARS_PER_TICK, full.length)
     store.messages[actualIdx].content = full.slice(0, pos)
     await nextTick()
     await new Promise<void>((r) => setTimeout(r, TICK_MS))
+    full = agentLatestContent.get(task.agent) ?? task.fullContent
   }
 
   store.messages[actualIdx].agentStatus = 'done'

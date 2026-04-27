@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -496,7 +495,7 @@ class DatabaseService:
         before_id: int | None = None,
     ) -> list[dict]:
         """Return messages for a session with cursor-based pagination.
-        
+
         If before_id is provided, returns messages with id < before_id (for loading history).
         Messages are returned oldest-first.
         """
