@@ -104,6 +104,11 @@ class FloodGraphState(TypedDict, total=False):
     resource_plan: list[ResourceAllocation]
     notifications: list[NotificationRecord]
     evidence: list[Evidence]
+    evidence_context: list[Evidence]
+    rag_target: str
+    rag_call_count: int
+    rag_query_cache: dict
+    rag_skip_reasons: list[str]
     final_response: str
     error: str
 

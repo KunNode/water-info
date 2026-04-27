@@ -64,7 +64,11 @@ def build_flood_response_graph():
     graph.add_edge("notification", "supervisor")
     graph.add_edge("execution_monitor", "supervisor")
     graph.add_edge("parallel_dispatch", "supervisor")
-    graph.add_edge("knowledge_retriever", END)
+    graph.add_conditional_edges(
+        "knowledge_retriever",
+        lambda s: "final_response" if s.get("rag_target", "answer") == "answer" else "supervisor",
+        {"final_response": "final_response", "supervisor": "supervisor"},
+    )
     graph.add_edge("final_response", END)
     return graph.compile()
 

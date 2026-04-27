@@ -2,13 +2,79 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
 from app.services.llm import get_llm
+from app.state import RiskLevel
 from app.utils.json_parser import extract_json
+
+_RAG_GROUNDING_RISK = {RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.CRITICAL}
+
+
+def _normalize_query_hash(query: str) -> str:
+    return hashlib.sha1(query.strip().lower().encode("utf-8")).hexdigest()
+
+
+def _risk_level_value(state: dict) -> RiskLevel:
+    assessment = state.get("risk_assessment")
+    if not assessment:
+        return RiskLevel.NONE
+    level = getattr(assessment, "risk_level", None)
+    if isinstance(level, RiskLevel):
+        return level
+    try:
+        return RiskLevel(level)
+    except Exception:
+        return RiskLevel.NONE
+
+
+def _should_invoke_rag(state: dict, deterministic_next: str | None) -> tuple[str, str] | None:
+    """Decide whether to slot knowledge_retriever ahead of the planned next agent.
+
+    Returns (rag_target, reason) when RAG should run, otherwise None.
+    """
+    settings = get_settings()
+    query = str(state.get("user_query", "")).strip()
+    if not query:
+        return None
+
+    # Budget cap: limit retrieval traffic per session.
+    if int(state.get("rag_call_count", 0)) >= settings.rag_max_calls_per_session:
+        return None
+
+    # In-session cache: skip if this exact query was already retrieved.
+    query_hash = _normalize_query_hash(query)
+    if query_hash in (state.get("rag_query_cache") or {}):
+        return None
+
+    intent = str(state.get("intent") or "")
+
+    # Mode: direct knowledge Q&A (manuals/regulations/...).
+    if intent == "knowledge_qa" or deterministic_next == "knowledge_retriever":
+        return "answer", "intent=knowledge_qa"
+
+    has_evidence = bool(state.get("evidence_context"))
+    if has_evidence:
+        return None
+
+    # Mode: preflight grounding for plan generation when stakes are non-trivial.
+    if deterministic_next == "plan_generator" and _risk_level_value(state) in _RAG_GROUNDING_RISK:
+        return "preflight_plan", "preflight grounding for plan_generator (risk>=moderate)"
+
+    # Optional preflight for risk_assessor when query mentions regulations.
+    if (
+        settings.rag_preflight_risk_enabled
+        and deterministic_next == "risk_assessor"
+        and _is_knowledge_query(query)
+    ):
+        return "preflight_risk", "preflight grounding for risk_assessor (regulation-tagged query)"
+
+    return None
 
 
 class SupervisorDecision(BaseModel):
@@ -272,6 +338,34 @@ def _guard_model_route(next_agent: str, state: dict, deterministic: str | None) 
     return next_agent, None
 
 
+def _rag_preempt(
+    next_agent: str,
+    state: dict,
+    deterministic: str | None,
+    inferred_intent: str,
+    inferred_focus_station: str | None,
+    iteration: int,
+    base_reasoning: str,
+) -> dict | None:
+    """If the RAG gate fires for the planned next agent, redirect to knowledge_retriever."""
+    if next_agent in {"__end__", "conversation_assistant", "execution_monitor", "knowledge_retriever"}:
+        if next_agent != "knowledge_retriever":
+            return None
+    decision = _should_invoke_rag(state, next_agent)
+    if not decision:
+        return None
+    rag_target, reason = decision
+    return {
+        "next_agent": "knowledge_retriever",
+        "rag_target": rag_target,
+        "iteration": iteration,
+        "current_agent": "supervisor",
+        "intent": inferred_intent,
+        "focus_station_query": inferred_focus_station,
+        "supervisor_reasoning": f"{base_reasoning}; rag-gate: {reason}",
+    }
+
+
 async def supervisor_node(state: dict) -> dict:
     iteration = int(state.get("iteration", 0)) + 1
     if iteration > 8:
@@ -314,8 +408,15 @@ async def supervisor_node(state: dict) -> dict:
 
     # When LLM is unavailable, fall back to deterministic routing immediately.
     if not llm.is_enabled:
+        next_agent = deterministic or "__end__"
+        preempt = _rag_preempt(
+            next_agent, state, deterministic, inferred_intent, inferred_focus_station,
+            iteration, "deterministic (no llm)",
+        )
+        if preempt:
+            return preempt
         return {
-            "next_agent": deterministic or "__end__",
+            "next_agent": next_agent,
             "iteration": iteration,
             "current_agent": "supervisor",
             "intent": inferred_intent,
@@ -378,6 +479,12 @@ async def supervisor_node(state: dict) -> dict:
         intent = inferred_intent
         focus_station_query = inferred_focus_station
         reasoning = "deterministic fallback"
+
+    preempt = _rag_preempt(
+        next_agent, state, deterministic, intent, focus_station_query, iteration, reasoning,
+    )
+    if preempt:
+        return preempt
 
     return {
         "next_agent": next_agent,

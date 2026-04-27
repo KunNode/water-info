@@ -6,7 +6,7 @@ import json
 
 from pydantic import BaseModel, Field
 
-from app.rag.service import build_evidence, format_evidence_markdown, search_knowledge_base
+from app.rag.service import format_evidence_markdown
 from app.risk import calculate_composite_risk, calculate_rainfall_risk, calculate_water_level_risk
 from app.services.llm import get_llm
 from app.state import RiskAssessment, RiskLevel, to_plain_data
@@ -142,7 +142,7 @@ def _from_structured_data(state: dict) -> RiskAssessment:
 
 async def risk_assessor_node(state: dict) -> dict:
     assessment = _from_structured_data(state) if state.get("overview_data") else RiskAssessment()
-    evidence = build_evidence(await search_knowledge_base(str(state.get("user_query", "")), top_k=4))
+    evidence = list(state.get("evidence_context") or [])
     llm = get_llm()
     station_name = state.get("focus_station", {}).get("name") if state.get("focus_station") else None
     prefix = f"{station_name} 的当前风险判断是" if station_name else "当前整体风险判断是"
@@ -185,7 +185,6 @@ async def risk_assessor_node(state: dict) -> dict:
 
     return {
         "risk_assessment": assessment,
-        "evidence": evidence,
         "current_agent": "risk_assessor",
         "messages": [{"role": "risk_assessor", "content": content or "风险评估完成"}],
     }

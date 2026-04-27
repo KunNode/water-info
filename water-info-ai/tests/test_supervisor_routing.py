@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.agents.supervisor import SupervisorDecision, supervisor_node
+from app.agents.supervisor import SupervisorDecision, _should_invoke_rag, supervisor_node
 from app.state import EmergencyPlan, NotificationRecord, ResourceAllocation, RiskAssessment, RiskLevel
 
 
@@ -157,6 +157,88 @@ class TestSupervisorNode:
 
         assert result["next_agent"] == "data_analyst"
         assert "guarded" in result["supervisor_reasoning"]
+
+    @pytest.mark.asyncio
+    async def test_rag_answer_target_set_for_knowledge_query(self):
+        """Knowledge Q&A queries should be routed to knowledge_retriever with rag_target=answer."""
+        mock_llm = SimpleNamespace(is_enabled=False, ainvoke=AsyncMock())
+        with patch("app.agents.supervisor.get_llm", return_value=mock_llm):
+            result = await supervisor_node(
+                {
+                    "user_query": "我们的防汛值班制度是什么",
+                    "messages": [],
+                    "iteration": 0,
+                }
+            )
+        assert result["next_agent"] == "knowledge_retriever"
+        assert result["rag_target"] == "answer"
+
+    @pytest.mark.asyncio
+    async def test_rag_preflight_inserted_before_plan_generator_when_risk_high(self):
+        """High-risk plan generation should preflight RAG once before plan_generator runs."""
+        mock_llm = SimpleNamespace(is_enabled=False, ainvoke=AsyncMock())
+        state = {
+            "user_query": "生成翠屏城区排涝预案",
+            "messages": [],
+            "iteration": 1,
+            "data_summary": "已有摘要",
+            "risk_assessment": RiskAssessment(risk_level=RiskLevel.HIGH, risk_score=72.0),
+            "intent": "plan_generation",
+        }
+        with patch("app.agents.supervisor.get_llm", return_value=mock_llm):
+            result = await supervisor_node(state)
+        assert result["next_agent"] == "knowledge_retriever"
+        assert result["rag_target"] == "preflight_plan"
+        assert "rag-gate" in result["supervisor_reasoning"]
+
+    @pytest.mark.asyncio
+    async def test_rag_skipped_for_low_risk_plan(self):
+        """Low-risk plans should not trigger preflight RAG; route straight to plan_generator."""
+        mock_llm = SimpleNamespace(is_enabled=False, ainvoke=AsyncMock())
+        state = {
+            "user_query": "生成翠屏城区排涝预案",
+            "messages": [],
+            "iteration": 1,
+            "data_summary": "已有摘要",
+            "risk_assessment": RiskAssessment(risk_level=RiskLevel.LOW, risk_score=15.0),
+            "intent": "plan_generation",
+        }
+        with patch("app.agents.supervisor.get_llm", return_value=mock_llm):
+            result = await supervisor_node(state)
+        assert result["next_agent"] == "plan_generator"
+        assert result.get("rag_target") is None
+
+    def test_rag_gate_respects_budget_cap(self):
+        """When the per-session RAG budget is exhausted, the gate must return None."""
+        state = {
+            "user_query": "我们的防汛值班制度是什么",
+            "intent": "knowledge_qa",
+            "rag_call_count": 2,
+        }
+        assert _should_invoke_rag(state, "knowledge_retriever") is None
+
+    def test_rag_gate_respects_query_cache(self):
+        """A query already retrieved this session should not be re-issued."""
+        import hashlib
+        query = "我们的防汛值班制度是什么"
+        query_hash = hashlib.sha1(query.strip().lower().encode("utf-8")).hexdigest()
+        state = {
+            "user_query": query,
+            "intent": "knowledge_qa",
+            "rag_call_count": 0,
+            "rag_query_cache": {query_hash: [{"content": "cached"}]},
+        }
+        assert _should_invoke_rag(state, "knowledge_retriever") is None
+
+    def test_rag_gate_skips_when_evidence_already_present(self):
+        """Preflight should not re-run if downstream evidence_context is already populated."""
+        state = {
+            "user_query": "生成翠屏城区排涝预案",
+            "intent": "plan_generation",
+            "risk_assessment": RiskAssessment(risk_level=RiskLevel.HIGH, risk_score=70.0),
+            "evidence_context": [SimpleNamespace(citation_id="[1]")],
+        }
+        assert _should_invoke_rag(state, "plan_generator") is None
 
     @pytest.mark.asyncio
     async def test_plain_text_fallback_defaults_to_end_when_invalid(self):

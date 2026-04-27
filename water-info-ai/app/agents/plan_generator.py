@@ -7,7 +7,6 @@ import json
 from pydantic import BaseModel, Field
 
 from app.plan import generate_plan_id, get_response_template
-from app.rag.service import build_evidence, search_knowledge_base
 from app.services.llm import get_llm
 from app.state import EmergencyAction, EmergencyPlan, NotificationRecord, ResourceAllocation, RiskLevel, to_plain_data
 from app.utils.json_parser import extract_json
@@ -144,7 +143,7 @@ def _plan_from_model_payload(
 
 async def plan_generator_node(state: dict) -> dict:
     assessment = state.get("risk_assessment")
-    evidence = build_evidence(await search_knowledge_base(str(state.get("user_query", "")), top_k=5))
+    evidence = list(state.get("evidence_context") or [])
     level = assessment.risk_level.value if assessment else RiskLevel.LOW.value
     level = level if level != RiskLevel.NONE.value else RiskLevel.LOW.value
     template = get_response_template(level)
@@ -198,7 +197,6 @@ async def plan_generator_node(state: dict) -> dict:
 
     return {
         "emergency_plan": plan,
-        "evidence": evidence,
         "current_agent": "plan_generator",
         "messages": [{"role": "plan_generator", "content": message}],
     }
