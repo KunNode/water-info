@@ -40,6 +40,10 @@ class TestRouteFromSupervisor:
         state = {"next_agent": "parallel_dispatch"}
         assert _route_from_supervisor(state) == "parallel_dispatch"
 
+    def test_knowledge_retriever_route(self):
+        state = {"next_agent": "knowledge_retriever"}
+        assert _route_from_supervisor(state) == "knowledge_retriever"
+
     def test_missing_next_agent_defaults_to_final_response(self):
         state = {}
         assert _route_from_supervisor(state) == "final_response"

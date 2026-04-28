@@ -61,53 +61,56 @@ watch(
 
 <style scoped lang="scss">
 .tags-view {
-  height: 34px;
-  background: #fff;
-  border-bottom: 1px solid #d8dce5;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
-}
-
-html.dark .tags-view {
-  background: #1d1e1f;
-  border-bottom-color: #414243;
+  height: var(--fm-tags-h);
+  background: var(--fm-bg-1);
+  border-bottom: 1px solid var(--fm-line);
 }
 
 .tags-wrapper {
   display: flex;
   align-items: center;
-  padding: 0 8px;
-  height: 34px;
-  gap: 4px;
+  padding: 0 10px;
+  height: var(--fm-tags-h);
+  gap: 6px;
 }
 
 .tag-item {
   display: inline-flex;
   align-items: center;
-  height: 26px;
+  height: 24px;
   padding: 0 10px;
-  font-size: 12px;
-  color: #495060;
-  background: #fff;
-  border: 1px solid #d8dce5;
-  border-radius: 3px;
+  font-size: 11.5px;
+  font-family: var(--fm-font-mono);
+  letter-spacing: 0.02em;
+  color: var(--fm-fg-soft);
+  background: var(--fm-bg-2);
+  border: 1px solid var(--fm-line);
+  border-radius: 12px;
   white-space: nowrap;
   cursor: pointer;
   text-decoration: none;
+  transition: all 0.15s ease;
+
+  &:hover {
+    color: var(--fm-fg);
+    border-color: var(--fm-line-2);
+  }
 
   &.active {
-    background-color: #409eff;
-    color: #fff;
-    border-color: #409eff;
+    background: linear-gradient(90deg, rgba(47, 123, 255, 0.22), rgba(73, 225, 255, 0.08));
+    color: var(--fm-fg);
+    border-color: rgba(73, 225, 255, 0.4);
+    box-shadow: 0 0 0 1px rgba(73, 225, 255, 0.2), 0 0 12px -4px var(--fm-brand-glow);
   }
 
   .tag-close {
-    margin-left: 4px;
-    font-size: 12px;
+    margin-left: 6px;
+    font-size: 11px;
     border-radius: 50%;
 
     &:hover {
-      background-color: rgba(0, 0, 0, 0.15);
-      color: #fff;
+      background-color: rgba(255, 255, 255, 0.12);
+      color: var(--fm-fg);
     }
   }
 }

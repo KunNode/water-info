@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.waterinfo.platform.common.exception.BusinessException;
 import com.waterinfo.platform.common.exception.ErrorCode;
 import com.waterinfo.platform.config.AlarmWebSocketHandler;
+import com.waterinfo.platform.module.alarm.dto.AlarmCreateResult;
 import com.waterinfo.platform.module.alarm.dto.AlarmQueryRequest;
 import com.waterinfo.platform.module.alarm.entity.Alarm;
 import com.waterinfo.platform.module.alarm.mapper.AlarmMapper;
@@ -52,6 +53,16 @@ public class AlarmService extends ServiceImpl<AlarmMapper, Alarm> {
     @Transactional
     public Alarm createOrUpdateAlarm(String stationId, String metricType, String level,
                                      LocalDateTime observedAt, String message) {
+        return createOrUpdateAlarmWithResult(stationId, metricType, level, observedAt, message, "MANUAL").getAlarm();
+    }
+
+    /**
+     * Create or update alarm with creation semantics for scheduled scanners.
+     */
+    @Transactional
+    public AlarmCreateResult createOrUpdateAlarmWithResult(String stationId, String metricType, String level,
+                                                           LocalDateTime observedAt, String message,
+                                                           String sourceTag) {
         // Find existing OPEN alarm for same station + metric + level
         Alarm existingAlarm = getOne(new LambdaQueryWrapper<Alarm>()
                 .eq(Alarm::getStationId, stationId)
@@ -65,13 +76,20 @@ public class AlarmService extends ServiceImpl<AlarmMapper, Alarm> {
             // Update existing alarm
             existingAlarm.setLastTriggerAt(observedAt);
             existingAlarm.setMessage(message);
+            if (StringUtils.hasText(sourceTag)) {
+                existingAlarm.setSourceTag(sourceTag);
+            }
             updateById(existingAlarm);
             log.info("Updated existing alarm: id={}, station={}, metric={}, level={}",
                     existingAlarm.getId(), stationId, metricType, level);
 
             // Broadcast update via WebSocket
             broadcastAlarmUpdate(existingAlarm, station);
-            return existingAlarm;
+            return AlarmCreateResult.builder()
+                    .alarm(existingAlarm)
+                    .created(false)
+                    .updated(true)
+                    .build();
         } else {
             // Create new alarm
             Alarm alarm = Alarm.builder()
@@ -82,6 +100,7 @@ public class AlarmService extends ServiceImpl<AlarmMapper, Alarm> {
                     .lastTriggerAt(observedAt)
                     .status(STATUS_OPEN)
                     .message(message)
+                    .sourceTag(StringUtils.hasText(sourceTag) ? sourceTag : "MANUAL")
                     .build();
             save(alarm);
             log.info("Created new alarm: id={}, station={}, metric={}, level={}",
@@ -89,7 +108,11 @@ public class AlarmService extends ServiceImpl<AlarmMapper, Alarm> {
 
             // Broadcast new alarm via WebSocket
             broadcastNewAlarm(alarm, station);
-            return alarm;
+            return AlarmCreateResult.builder()
+                    .alarm(alarm)
+                    .created(true)
+                    .updated(false)
+                    .build();
         }
     }
 
@@ -107,6 +130,7 @@ public class AlarmService extends ServiceImpl<AlarmMapper, Alarm> {
             alarmData.put("level", alarm.getLevel());
             alarmData.put("status", alarm.getStatus());
             alarmData.put("message", alarm.getMessage());
+            alarmData.put("sourceTag", alarm.getSourceTag());
             alarmData.put("startAt", alarm.getStartAt() != null ? alarm.getStartAt().toString() : null);
 
             alarmWebSocketHandler.broadcastAlarm(alarmData);
@@ -130,6 +154,7 @@ public class AlarmService extends ServiceImpl<AlarmMapper, Alarm> {
             alarmData.put("level", alarm.getLevel());
             alarmData.put("status", alarm.getStatus());
             alarmData.put("message", alarm.getMessage());
+            alarmData.put("sourceTag", alarm.getSourceTag());
             alarmData.put("lastTriggerAt", alarm.getLastTriggerAt() != null ? alarm.getLastTriggerAt().toString() : null);
 
             alarmWebSocketHandler.broadcastAlarmUpdate(alarmData);
@@ -307,6 +332,7 @@ public class AlarmService extends ServiceImpl<AlarmMapper, Alarm> {
                 .endAt(alarm.getEndAt())
                 .status(alarm.getStatus())
                 .message(alarm.getMessage())
+                .sourceTag(alarm.getSourceTag())
                 .acknowledgedBy(alarm.getAcknowledgedBy())
                 .acknowledgedByName(getUsernameById(alarm.getAcknowledgedBy()))
                 .acknowledgedAt(alarm.getAcknowledgedAt())

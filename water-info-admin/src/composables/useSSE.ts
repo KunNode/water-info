@@ -7,6 +7,18 @@ export type SSEEventType =
   | { type: 'plan_update'; name: string; status: string; total: number; completed: number; failed: number }
   | { type: 'session_init'; sessionId: string }
   | { type: 'agent_message'; agent: string; content: string }
+  | {
+      type: 'evidence_update'
+      agent: string
+      items: Array<{
+        citation_id: string
+        content: string
+        document_title: string
+        source_uri?: string
+        heading_path?: string[]
+        score?: number
+      }>
+    }
 
 export function useSSE() {
   const MAX_CHUNKS = 100
@@ -22,6 +34,93 @@ export function useSSE() {
 
   function onStructuredEvent(cb: (event: SSEEventType) => void) {
     onEvent = cb
+  }
+
+  function pushPlainText(text: string) {
+    if (!text) return
+    chunks.value.push(text)
+    fullText.value += text
+    if (chunks.value.length > MAX_CHUNKS) {
+      chunks.value.shift()
+    }
+  }
+
+  function dispatchStructuredEvent(payload: string): boolean {
+    let normalized = payload.trim()
+    if (!normalized || normalized === '[DONE]') return true
+
+    // Some proxy layers may forward already-prefixed SSE payloads again.
+    while (normalized.startsWith('data:')) {
+      normalized = normalized.slice(5).trim()
+    }
+    if (!normalized || normalized === '[DONE]') return true
+
+    const emitIfStructured = (value: unknown) => {
+      if (value && typeof value === 'object' && 'type' in value) {
+        const event = value as SSEEventType
+        structuredEvents.value.push(event)
+        onEvent?.(event)
+        return true
+      }
+      return false
+    }
+
+    try {
+      const parsed = JSON.parse(normalized)
+      if (typeof parsed === 'string') {
+        normalized = parsed.trim()
+        if (!normalized || normalized === '[DONE]') return true
+      } else if (emitIfStructured(parsed)) {
+        return true
+      } else {
+        return false
+      }
+    } catch {
+      // Fall through and let the caller decide whether this is plain text
+      // or an incomplete fragment that needs more bytes.
+    }
+
+    try {
+      return emitIfStructured(JSON.parse(normalized))
+    } catch {
+      return false
+    }
+  }
+
+  function flushChunk(chunk: string) {
+    const trimmed = chunk.trim()
+    if (!trimmed) return
+
+    const dataLines = chunk
+      .split(/\r?\n/)
+      .map(line => line.trimEnd())
+      .filter(line => line.startsWith('data:'))
+
+    if (dataLines.length > 0) {
+      const payload = dataLines
+        .map(line => line.slice(5).trim())
+        .join('\n')
+
+      if (!dispatchStructuredEvent(payload)) {
+        pushPlainText(payload)
+      }
+      return
+    }
+
+    if (!dispatchStructuredEvent(trimmed)) {
+      pushPlainText(chunk)
+    }
+  }
+
+  function looksLikeStructuredFragment(buffer: string) {
+    const trimmed = buffer.trimStart()
+    return (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('event:') ||
+      trimmed.startsWith('{') ||
+      trimmed.startsWith('[') ||
+      trimmed.startsWith('"')
+    )
   }
 
   async function start(url: string, body: any) {
@@ -54,42 +153,35 @@ export function useSSE() {
 
       if (!reader) throw new Error('No readable stream')
 
-      while (true) {
+      // Keep incomplete fragments between reads so structured SSE blocks can
+      // span network chunks, while still allowing raw text streams to render
+      // incrementally even when the backend does not emit newline delimiters.
+      let buffer = ''
+
+      let streamDone = false
+      while (!streamDone) {
         const { done, value } = await reader.read()
-        if (done) break
+        streamDone = done
+        if (streamDone) break
 
-        const text = decoder.decode(value, { stream: true })
-        const lines = text.split('\n')
+        buffer += decoder.decode(value, { stream: true })
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
+        let blockEnd = buffer.search(/\r?\n\r?\n/)
+        while (blockEnd >= 0) {
+          const block = buffer.slice(0, blockEnd)
+          flushChunk(block)
+          buffer = buffer.slice(blockEnd).replace(/^\r?\n\r?\n/, '')
+          blockEnd = buffer.search(/\r?\n\r?\n/)
+        }
 
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') continue
-          if (!data) continue
-
-          // Try to parse as structured JSON event
-          if (data.startsWith('{')) {
-            try {
-              const parsed = JSON.parse(data) as SSEEventType
-              if (parsed.type) {
-                structuredEvents.value.push(parsed)
-                onEvent?.(parsed)
-                continue
-              }
-            } catch {
-              // Not valid JSON, fall through to treat as text
-            }
-          }
-
-          // Plain text chunk
-          chunks.value.push(data)
-          fullText.value += data
-          if (chunks.value.length > MAX_CHUNKS) {
-            chunks.value.shift()
-          }
+        if (buffer && !looksLikeStructuredFragment(buffer)) {
+          pushPlainText(buffer)
+          buffer = ''
         }
       }
+
+      // Flush any remaining buffered content after stream closes.
+      if (buffer) flushChunk(buffer)
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         error.value = err.message

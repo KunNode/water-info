@@ -1,6 +1,37 @@
 <template>
-  <div class="page-container">
-    <div class="search-bar">
+  <div class="fm-admin-page">
+    <div class="fm-page-head">
+      <h1>用户管理</h1>
+      <span class="sub">// identity · roles · duty users</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--brand">{{ total }} users</span>
+      <el-button type="primary" :icon="Plus" @click="handleAdd">新增用户</el-button>
+    </div>
+
+    <div class="fm-summary-strip">
+      <div class="fm-card fm-mini-stat">
+        <div class="label">USERS</div>
+        <div class="value">{{ total }}</div>
+        <div class="hint">账号总数</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">ACTIVE</div>
+        <div class="value">{{ activeCount }}</div>
+        <div class="hint">启用账号</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">DISABLED</div>
+        <div class="value">{{ disabledCount }}</div>
+        <div class="hint">已禁用</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">ROLES</div>
+        <div class="value">{{ roleCount }}</div>
+        <div class="hint">当前页角色</div>
+      </div>
+    </div>
+
+    <div class="fm-admin-search">
       <el-form :model="queryParams" inline>
         <el-form-item label="关键词">
           <el-input v-model="queryParams.keyword" placeholder="用户名/姓名" clearable @keyup.enter="handleSearch" />
@@ -18,12 +49,15 @@
       </el-form>
     </div>
 
-    <div class="table-card">
-      <div class="table-header">
-        <span class="table-title">用户管理</span>
-        <el-button type="primary" :icon="Plus" @click="handleAdd">新增用户</el-button>
+    <div class="fm-admin-table">
+      <div class="fm-admin-table__head">
+        <span class="title">用户列表</span>
+        <span class="mono">RBAC</span>
+        <span class="sp" />
+        <span class="fm-tag">显示 {{ tableData.length }} 条</span>
       </div>
-      <el-table v-loading="loading" :data="tableData" border stripe>
+      <div class="fm-admin-table__body">
+      <el-table v-loading="loading" :data="tableData" stripe>
         <el-table-column prop="username" label="用户名" width="120" />
         <el-table-column prop="realName" label="姓名" width="100" />
         <el-table-column prop="phone" label="手机号" width="130" />
@@ -63,6 +97,7 @@
         @size-change="fetchData"
         @current-change="fetchData"
       />
+      </div>
     </div>
 
     <!-- User form dialog -->
@@ -93,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessageBox, ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import { getUsers, createUser, updateUser, changePassword, deleteUser } from '@/api/system'
@@ -114,6 +149,13 @@ const rules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }, { min: 3, max: 64, message: '长度3-64位', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }, { min: 6, message: '密码至少6位', trigger: 'blur' }],
 }
+
+const activeCount = computed(() => tableData.value.filter((item) => item.status === 'ACTIVE').length)
+const disabledCount = computed(() => tableData.value.filter((item) => item.status === 'DISABLED').length)
+const roleCount = computed(() => {
+  const roles = tableData.value.flatMap((item) => item.roles || []).map((role) => role.id)
+  return new Set(roles).size
+})
 
 async function fetchData() {
   loading.value = true

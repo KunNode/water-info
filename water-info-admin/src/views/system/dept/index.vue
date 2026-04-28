@@ -1,6 +1,14 @@
 <template>
-  <div class="page-container">
-    <div class="search-bar">
+  <div class="fm-admin-page">
+    <div class="fm-page-head">
+      <h1>部门管理</h1>
+      <span class="sub">// departments · response teams</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--brand">{{ total }} depts</span>
+      <el-button type="primary" :icon="Plus" @click="handleAdd">新增部门</el-button>
+    </div>
+
+    <div class="fm-admin-search">
       <el-form inline>
         <el-form-item label="组织">
           <el-input v-model="queryParams.orgId" placeholder="组织ID" clearable />
@@ -11,12 +19,13 @@
       </el-form>
     </div>
 
-    <div class="table-card">
-      <div class="table-header">
-        <span class="table-title">部门管理</span>
-        <el-button type="primary" :icon="Plus" @click="handleAdd">新增部门</el-button>
+    <div class="fm-admin-table">
+      <div class="fm-admin-table__head">
+        <span class="title">部门列表</span>
+        <span class="mono">{{ total }} records</span>
       </div>
-      <el-table v-loading="loading" :data="tableData" border stripe>
+      <div class="fm-admin-table__body">
+      <el-table v-loading="loading" :data="tableData" stripe>
         <el-table-column prop="name" label="部门名称" min-width="200" />
         <el-table-column prop="orgId" label="所属组织" width="200" show-overflow-tooltip />
         <el-table-column prop="parentId" label="上级部门" width="200" show-overflow-tooltip>
@@ -33,6 +42,7 @@
         </el-table-column>
       </el-table>
       <el-pagination v-model:current-page="queryParams.page" :page-size="20" :total="total" layout="total, prev, pager, next" style="margin-top: 16px; justify-content: flex-end" @current-change="fetchData" />
+      </div>
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editRow ? '编辑部门' : '新增部门'" width="480px" destroy-on-close>

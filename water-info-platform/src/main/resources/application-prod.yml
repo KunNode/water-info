@@ -15,3 +15,12 @@ logging:
   level:
     root: WARN
     com.waterinfo.platform: INFO
+
+water-info:
+  risk-scan:
+    lightweight:
+      enabled: ${RISK_SCAN_LIGHTWEIGHT_ENABLED:true}
+      interval-ms: ${RISK_SCAN_LIGHTWEIGHT_INTERVAL_MS:120000}
+    ai:
+      base-url: ${AI_SERVICE_URL:http://water-info-ai:8100}
+      service-token: ${AI_SERVICE_TOKEN:}

@@ -1,6 +1,14 @@
 <template>
-  <div class="page-container">
-    <div class="search-bar">
+  <div class="fm-admin-page">
+    <div class="fm-page-head">
+      <h1>组织机构</h1>
+      <span class="sub">// organization · command hierarchy</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--brand">{{ total }} orgs</span>
+      <el-button type="primary" :icon="Plus" @click="handleAdd">新增机构</el-button>
+    </div>
+
+    <div class="fm-admin-search">
       <el-form inline>
         <el-form-item label="关键词">
           <el-input v-model="keyword" placeholder="名称/编码" clearable @keyup.enter="fetchData" />
@@ -11,12 +19,13 @@
       </el-form>
     </div>
 
-    <div class="table-card">
-      <div class="table-header">
-        <span class="table-title">组织机构</span>
-        <el-button type="primary" :icon="Plus" @click="handleAdd">新增机构</el-button>
+    <div class="fm-admin-table">
+      <div class="fm-admin-table__head">
+        <span class="title">机构列表</span>
+        <span class="mono">{{ total }} records</span>
       </div>
-      <el-table v-loading="loading" :data="tableData" border stripe>
+      <div class="fm-admin-table__body">
+      <el-table v-loading="loading" :data="tableData" stripe>
         <el-table-column prop="code" label="编码" width="150" />
         <el-table-column prop="name" label="名称" min-width="200" />
         <el-table-column prop="region" label="区域" width="150" />
@@ -31,6 +40,7 @@
         </el-table-column>
       </el-table>
       <el-pagination v-model:current-page="page" :page-size="20" :total="total" layout="total, prev, pager, next" style="margin-top: 16px; justify-content: flex-end" @current-change="fetchData" />
+      </div>
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editRow ? '编辑机构' : '新增机构'" width="480px" destroy-on-close>

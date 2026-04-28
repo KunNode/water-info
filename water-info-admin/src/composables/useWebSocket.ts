@@ -7,8 +7,13 @@ export function useWebSocket(path: string) {
   const connected = ref(false)
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let manuallyClosed = false
 
   function connect() {
+    manuallyClosed = false
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      return
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
     const token = getToken()
@@ -38,8 +43,9 @@ export function useWebSocket(path: string) {
 
     ws.onclose = () => {
       connected.value = false
-      // Auto reconnect after 5s
-      reconnectTimer = setTimeout(connect, 5000)
+      if (!manuallyClosed) {
+        reconnectTimer = setTimeout(connect, 5000)
+      }
     }
 
     ws.onerror = () => {
@@ -54,6 +60,7 @@ export function useWebSocket(path: string) {
   }
 
   function disconnect() {
+    manuallyClosed = true
     if (reconnectTimer) clearTimeout(reconnectTimer)
     ws?.close()
     ws = null

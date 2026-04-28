@@ -8,6 +8,7 @@ import com.waterinfo.platform.common.exception.ErrorCode;
 import com.waterinfo.platform.module.alarm.service.AlarmService;
 import com.waterinfo.platform.module.observation.dto.BatchObservationRequest;
 import com.waterinfo.platform.module.observation.dto.BatchObservationResponse;
+import com.waterinfo.platform.module.observation.dto.LatestObservationBatchRequest;
 import com.waterinfo.platform.module.observation.dto.ObservationQueryRequest;
 import com.waterinfo.platform.module.observation.entity.Observation;
 import com.waterinfo.platform.module.observation.mapper.ObservationMapper;
@@ -245,6 +246,56 @@ public class ObservationService extends ServiceImpl<ObservationMapper, Observati
     }
 
     /**
+     * Get latest observations for multiple station+metric pairs in one query.
+     */
+    public List<ObservationVO> getLatestObservations(List<LatestObservationBatchRequest.Item> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+
+        List<LatestObservationBatchRequest.Item> normalizedItems = items.stream()
+                .filter(Objects::nonNull)
+                .filter(item -> StringUtils.hasText(item.getStationId()) && StringUtils.hasText(item.getMetricType()))
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toMap(
+                                item -> buildObservationKey(item.getStationId(), item.getMetricType()),
+                                item -> item,
+                                (left, right) -> left,
+                                LinkedHashMap::new
+                        ),
+                        map -> new ArrayList<>(map.values())
+                ));
+
+        if (normalizedItems.isEmpty()) {
+            return List.of();
+        }
+
+        List<Observation> latestObservations = observationMapper.selectLatestByStationMetricPairs(normalizedItems);
+        Set<String> stationIds = latestObservations.stream()
+                .map(Observation::getStationId)
+                .collect(Collectors.toSet());
+
+        Map<String, Station> stationMap = new HashMap<>();
+        if (!stationIds.isEmpty()) {
+            stationMap = stationMapper.selectBatchIds(stationIds).stream()
+                    .collect(Collectors.toMap(Station::getId, station -> station));
+        }
+
+        Map<String, Station> finalStationMap = stationMap;
+        Map<String, ObservationVO> latestByKey = latestObservations.stream()
+                .map(obs -> convertToVO(obs, finalStationMap.get(obs.getStationId())))
+                .collect(Collectors.toMap(
+                        obs -> buildObservationKey(obs.getStationId(), obs.getMetricType()),
+                        obs -> obs
+                ));
+
+        return normalizedItems.stream()
+                .map(item -> latestByKey.get(buildObservationKey(item.getStationId(), item.getMetricType())))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    /**
      * Convert entity to VO
      */
     private ObservationVO convertToVO(Observation obs, Station station) {
@@ -261,5 +312,9 @@ public class ObservationService extends ServiceImpl<ObservationMapper, Observati
                 .source(obs.getSource())
                 .createdAt(obs.getCreatedAt())
                 .build();
+    }
+
+    private String buildObservationKey(String stationId, String metricType) {
+        return stationId + ":" + metricType;
     }
 }

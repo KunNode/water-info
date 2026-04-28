@@ -16,4 +16,4 @@ def test_build_graph_returns_compiled_graph():
 
 def test_graph_contains_core_nodes():
     node_names = set(flood_response_graph.nodes.keys())
-    assert {"supervisor", "data_analyst", "risk_assessor", "plan_generator", "final_response"} <= node_names
+    assert {"supervisor", "data_analyst", "risk_assessor", "plan_generator", "knowledge_retriever", "final_response"} <= node_names

@@ -79,19 +79,17 @@ Each module under `module/` follows a consistent structure: `entity/ â†’ dto/ â†
 
 ```bash
 cd water-info-ai
-python -m venv .venv
-.venv\Scripts\activate       # Windows
-pip install -e ".[dev]"      # Install with dev dependencies
+uv sync --extra dev          # Install dependencies
 
-python -m app.main           # Run service
+uv run python -m app.main    # Run service
 
-pytest tests/                # Run all tests
-pytest tests/test_agents.py -v                                        # Single test file
-pytest tests/test_agents.py::TestSupervisorAgent::test_supervisor_routes_to_data_analyst_for_data_query -v  # Single test
+uv run pytest tests/         # Run all tests
+uv run pytest tests/test_agents.py -v                                        # Single test file
+uv run pytest tests/test_agents.py::TestSupervisorAgent::test_supervisor_routes_to_data_analyst_for_data_query -v  # Single test
 
-ruff check app/ tests/       # Lint
-ruff format app/ tests/      # Format
-mypy app/ --ignore-missing-imports  # Type check
+uv run ruff check app/ tests/       # Lint
+uv run ruff format app/ tests/      # Format
+uv run mypy app/ --ignore-missing-imports  # Type check
 ```
 
 ### Frontend (water-info-admin)

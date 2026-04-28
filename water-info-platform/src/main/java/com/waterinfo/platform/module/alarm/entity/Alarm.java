@@ -37,6 +37,8 @@ public class Alarm {
 
     private String message;
 
+    private String sourceTag;
+
     private String acknowledgedBy;
 
     private LocalDateTime acknowledgedAt;

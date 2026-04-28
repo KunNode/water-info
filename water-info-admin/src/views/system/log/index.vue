@@ -1,6 +1,13 @@
 <template>
-  <div class="page-container">
-    <div class="search-bar">
+  <div class="fm-admin-page">
+    <div class="fm-page-head">
+      <h1>操作日志</h1>
+      <span class="sub">// audit · security trail</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--brand">{{ total }} records</span>
+    </div>
+
+    <div class="fm-admin-search">
       <el-form :model="queryParams" inline>
         <el-form-item label="操作类型">
           <el-input v-model="queryParams.action" placeholder="如 CREATE_STATION" clearable />
@@ -15,11 +22,13 @@
       </el-form>
     </div>
 
-    <div class="table-card">
-      <div class="table-header">
-        <span class="table-title">操作日志</span>
+    <div class="fm-admin-table">
+      <div class="fm-admin-table__head">
+        <span class="title">操作日志</span>
+        <span class="mono">immutable trail</span>
       </div>
-      <el-table v-loading="loading" :data="tableData" border stripe>
+      <div class="fm-admin-table__body">
+      <el-table v-loading="loading" :data="tableData" stripe>
         <el-table-column prop="actorUsername" label="操作人" width="120" />
         <el-table-column prop="action" label="操作类型" width="160" />
         <el-table-column prop="targetType" label="目标类型" width="120" />
@@ -44,6 +53,7 @@
         @size-change="fetchData"
         @current-change="fetchData"
       />
+      </div>
     </div>
   </div>
 </template>

@@ -10,3 +10,8 @@ logging:
     root: INFO
     com.waterinfo.platform: DEBUG
     org.springframework.web: DEBUG
+
+water-info:
+  risk-scan:
+    lightweight:
+      enabled: ${RISK_SCAN_LIGHTWEIGHT_ENABLED:true}

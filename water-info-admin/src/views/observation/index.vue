@@ -1,6 +1,37 @@
 <template>
-  <div class="page-container">
-    <div class="search-bar">
+  <div class="fm-admin-page">
+    <div class="fm-page-head">
+      <h1>观测数据</h1>
+      <span class="sub">// timeseries · query · export</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--brand">{{ total }} records</span>
+      <span class="fm-tag">5 min avg</span>
+    </div>
+
+    <div class="fm-summary-strip">
+      <div class="fm-card fm-mini-stat">
+        <div class="label">SAMPLES</div>
+        <div class="value">{{ total }}</div>
+        <div class="hint">查询结果总量</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">CURRENT</div>
+        <div class="value">{{ tableData.length }}</div>
+        <div class="hint">当前页采样</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">MAX</div>
+        <div class="value">{{ maxValue }}</div>
+        <div class="hint">当前页峰值</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">QUALITY</div>
+        <div class="value">{{ goodCount }}</div>
+        <div class="hint">GOOD 标记</div>
+      </div>
+    </div>
+
+    <div class="fm-admin-search">
       <el-form :model="queryParams" inline>
         <el-form-item label="站点">
           <el-input v-model="queryParams.stationId" placeholder="站点ID" clearable />
@@ -28,25 +59,29 @@
     </div>
 
     <!-- Chart area -->
-    <el-card shadow="hover" style="margin-bottom: 16px">
-      <template #header>
-        <div class="card-header">
-          <span>数据趋势</span>
+    <div class="fm-card">
+      <div class="fm-card__head">
+          <span class="title">数据趋势</span>
+          <span class="mono">value / time</span>
+          <span class="sp" />
           <el-radio-group v-model="chartType" size="small">
             <el-radio-button value="line">折线图</el-radio-button>
             <el-radio-button value="bar">柱状图</el-radio-button>
           </el-radio-group>
-        </div>
-      </template>
-      <div ref="chartRef" class="chart-container"></div>
-    </el-card>
+      </div>
+      <div class="fm-card__body">
+        <div ref="chartRef" class="chart-container"></div>
+      </div>
+    </div>
 
     <!-- Table -->
-    <div class="table-card">
-      <div class="table-header">
-        <span class="table-title">观测数据</span>
+    <div class="fm-admin-table">
+      <div class="fm-admin-table__head">
+        <span class="title">观测数据</span>
+        <span class="mono">{{ queryParams.metricType || 'ALL METRICS' }}</span>
       </div>
-      <el-table v-loading="loading" :data="tableData" border stripe>
+      <div class="fm-admin-table__body">
+      <el-table v-loading="loading" :data="tableData" stripe>
         <el-table-column prop="stationName" label="站点" min-width="150" />
         <el-table-column prop="metricType" label="指标类型" width="100">
           <template #default="{ row }">{{ metricTypeMap[row.metricType] || row.metricType }}</template>
@@ -77,6 +112,7 @@
         @size-change="fetchData"
         @current-change="fetchData"
       />
+      </div>
     </div>
   </div>
 </template>
@@ -101,6 +137,12 @@ const queryParams = reactive({ page: 1, size: 20, stationId: '', metricType: '' 
 
 // Memoize chart data - only recomputed when tableData changes
 const chartData = computed(() => tableData.value.map((o) => [o.observedAt, o.value]))
+const maxValue = computed(() => {
+  const values = tableData.value.map((item) => Number(item.value)).filter(Number.isFinite)
+  if (values.length === 0) return '—'
+  return formatNumber(Math.max(...values))
+})
+const goodCount = computed(() => tableData.value.filter((item) => item.qualityFlag === 'GOOD').length)
 
 async function fetchData() {
   loading.value = true
@@ -124,11 +166,38 @@ function updateChart() {
 
   // Use memoized computed data instead of mapping on every render
   chart.setOption({
-    tooltip: { trigger: 'axis' },
-    grid: { left: 50, right: 20, top: 20, bottom: 30 },
-    xAxis: { type: 'time' },
-    yAxis: { type: 'value' },
-    series: [{ type: chartType.value, data: chartData.value, smooth: true, areaStyle: chartType.value === 'line' ? { opacity: 0.1 } : undefined }],
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#0b1220',
+      borderColor: '#1f2a3f',
+      textStyle: { color: '#e8eef8' },
+    },
+    grid: { left: 50, right: 20, top: 24, bottom: 34 },
+    xAxis: {
+      type: 'time',
+      axisLine: { lineStyle: { color: '#1f2a3f' } },
+      axisLabel: { color: '#6a7590', fontFamily: 'JetBrains Mono, monospace' },
+      splitLine: { lineStyle: { color: '#1f2a3f', type: 'dashed' } },
+    },
+    yAxis: {
+      type: 'value',
+      axisLine: { lineStyle: { color: '#1f2a3f' } },
+      axisLabel: { color: '#6a7590', fontFamily: 'JetBrains Mono, monospace' },
+      splitLine: { lineStyle: { color: '#1f2a3f', type: 'dashed' } },
+    },
+    series: [{
+      type: chartType.value,
+      data: chartData.value,
+      smooth: true,
+      symbol: 'circle',
+      symbolSize: 5,
+      itemStyle: { color: '#49e1ff' },
+      lineStyle: { color: '#49e1ff', width: 2 },
+      areaStyle: chartType.value === 'line'
+        ? { color: 'rgba(73, 225, 255, 0.14)' }
+        : undefined,
+    }],
   }, true)
 }
 
@@ -144,7 +213,5 @@ onUnmounted(() => { chart?.dispose(); window.removeEventListener('resize', handl
 </script>
 
 <style scoped>
-.card-header { display: flex; justify-content: space-between; align-items: center; }
 .chart-container { height: 300px; }
-.table-title { font-size: 16px; font-weight: 600; }
 </style>

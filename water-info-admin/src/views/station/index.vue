@@ -1,7 +1,39 @@
 <template>
-  <div class="page-container">
-    <!-- Search bar -->
-    <div class="search-bar">
+  <div class="fm-admin-page">
+    <div class="fm-page-head">
+      <h1>站点管理</h1>
+      <span class="sub">// station registry · basin assets</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--brand">{{ total }} total</span>
+      <el-button v-permission="['ADMIN', 'OPERATOR']" type="primary" :icon="Plus" @click="handleAdd">
+        新增站点
+      </el-button>
+    </div>
+
+    <div class="fm-summary-strip">
+      <div class="fm-card fm-mini-stat">
+        <div class="label">STATIONS</div>
+        <div class="value">{{ total }}</div>
+        <div class="hint">全域监测站点</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">ACTIVE</div>
+        <div class="value">{{ activeCount }}</div>
+        <div class="hint">在线 / 正常运行</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">MAINTENANCE</div>
+        <div class="value">{{ maintenanceCount }}</div>
+        <div class="hint">维护中站点</div>
+      </div>
+      <div class="fm-card fm-mini-stat">
+        <div class="label">BASINS</div>
+        <div class="value">{{ basinCount }}</div>
+        <div class="hint">覆盖流域</div>
+      </div>
+    </div>
+
+    <div class="fm-admin-search">
       <el-form :model="queryParams" inline>
         <el-form-item label="关键词">
           <el-input v-model="queryParams.keyword" placeholder="站点名称/编码" clearable @keyup.enter="handleSearch" />
@@ -26,12 +58,15 @@
     </div>
 
     <!-- Table -->
-    <div class="table-card">
-      <div class="table-header">
-        <span class="table-title">站点列表</span>
-        <el-button v-permission="['ADMIN', 'OPERATOR']" type="primary" :icon="Plus" @click="handleAdd">新增站点</el-button>
+    <div class="fm-admin-table">
+      <div class="fm-admin-table__head">
+        <span class="title">站点列表</span>
+        <span class="mono">{{ queryParams.page }} / {{ Math.max(1, Math.ceil(total / queryParams.size)) }} page</span>
+        <span class="sp" />
+        <span class="fm-tag">显示 {{ tableData.length }} 条</span>
       </div>
-      <el-table v-loading="loading" :data="tableData" border stripe>
+      <div class="fm-admin-table__body">
+      <el-table v-loading="loading" :data="tableData" stripe>
         <el-table-column prop="code" label="站点编码" width="130" />
         <el-table-column prop="name" label="站点名称" min-width="150" />
         <el-table-column prop="type" label="类型" width="100">
@@ -74,6 +109,7 @@
         @size-change="fetchData"
         @current-change="fetchData"
       />
+      </div>
     </div>
 
     <!-- Form dialog -->
@@ -86,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import { getStations, deleteStation } from '@/api/station'
@@ -106,6 +142,12 @@ const queryParams = reactive({
   keyword: '',
   type: '' as '' | StationType,
   status: '' as '' | StationStatus,
+})
+
+const activeCount = computed(() => tableData.value.filter((item) => item.status === 'ACTIVE').length)
+const maintenanceCount = computed(() => tableData.value.filter((item) => item.status === 'MAINTENANCE').length)
+const basinCount = computed(() => {
+  return new Set(tableData.value.map((item) => item.riverBasin).filter(Boolean)).size
 })
 
 async function fetchData() {

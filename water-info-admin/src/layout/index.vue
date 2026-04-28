@@ -1,10 +1,10 @@
 <template>
-  <el-container class="layout-container">
+  <div class="fm-shell" :class="{ collapsed: appStore.sidebarCollapsed }">
+    <Header />
     <Sidebar />
-    <el-container class="main-container" :style="{ marginLeft: sidebarWidth }">
-      <Header />
+    <main class="fm-main">
       <TagsView />
-      <el-main class="main-content">
+      <div class="fm-main__body">
         <router-view v-slot="{ Component }">
           <transition name="fade-transform" mode="out-in">
             <keep-alive :max="10">
@@ -12,58 +12,88 @@
             </keep-alive>
           </transition>
         </router-view>
-      </el-main>
-    </el-container>
-  </el-container>
+      </div>
+    </main>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import Sidebar from './components/Sidebar.vue'
 import Header from './components/Header.vue'
 import TagsView from './components/TagsView.vue'
 
 const appStore = useAppStore()
-const sidebarWidth = computed(() => (appStore.sidebarCollapsed ? '64px' : '210px'))
 </script>
 
 <style scoped lang="scss">
-.layout-container {
+.fm-shell {
+  display: grid;
+  grid-template-columns: var(--fm-sidebar-w) 1fr;
+  grid-template-rows: var(--fm-topbar-h) 1fr;
   height: 100vh;
-  width: 100%;
+  overflow: hidden;
+  transition: grid-template-columns 0.2s ease;
+
+  &.collapsed {
+    grid-template-columns: var(--fm-sidebar-w-collapsed) 1fr;
+  }
 }
 
-.main-container {
+.fm-main {
+  grid-column: 2;
+  grid-row: 2;
+  position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  transition: margin-left 0.28s;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  height: 100%;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--fm-grad-hero);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  > :deep(*) {
+    position: relative;
+    z-index: 1;
+  }
 }
 
-.main-content {
-  background-color: #f0f2f5;
-  padding: 0;
-  overflow-y: auto;
+.fm-main__body {
   flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 22px 26px 60px;
 }
 
 .fade-transform-enter-active,
 .fade-transform-leave-active {
   transition: all 0.2s;
 }
-
 .fade-transform-enter-from {
   opacity: 0;
   transform: translateX(-10px);
 }
-
 .fade-transform-leave-to {
   opacity: 0;
   transform: translateX(10px);
 }
 
-html.dark .main-content {
-  background-color: #141414;
+@media (max-width: 760px) {
+  .fm-shell,
+  .fm-shell.collapsed {
+    grid-template-columns: var(--fm-sidebar-w-collapsed) 1fr;
+  }
+
+  .fm-main__body {
+    padding: 16px 12px 42px;
+  }
 }
 </style>

@@ -1,88 +1,131 @@
 <template>
-  <div class="map-page">
-    <div class="map-toolbar">
-      <el-select v-model="filterType" placeholder="站点类型" clearable size="small" style="width: 140px" @change="updateMarkers">
-        <el-option v-for="(label, key) in stationTypeMap" :key="key" :label="label" :value="key" />
-      </el-select>
-      <el-tag size="small" effect="plain" style="margin-left: 12px">
-        共 {{ filteredStations.length }} 个站点
-      </el-tag>
-      <div class="legend">
-        <span class="legend-item"><i class="dot" style="background: #67C23A"></i>正常</span>
-        <span class="legend-item"><i class="dot" style="background: #F56C6C"></i>告警</span>
-        <span class="legend-item"><i class="dot" style="background: #909399"></i>离线</span>
+  <div class="fm-map-page">
+    <div class="fm-page-head">
+      <h1>流域地图</h1>
+      <span class="sub">// realtime map · station markers · alarm layer</span>
+      <span class="sp" />
+      <span class="fm-tag fm-tag--brand">{{ filteredStations.length }} stations</span>
+    </div>
+
+    <div class="fm-map-shell">
+      <div class="fm-map-side fm-card">
+        <div class="fm-card__head">
+          <span class="title">图层控制</span>
+          <span class="mono">layers</span>
+        </div>
+        <div class="fm-card__body">
+          <span class="fm-label-sm">站点类型</span>
+          <el-select v-model="filterType" placeholder="全部站点" clearable style="width: 100%">
+            <el-option v-for="(label, key) in stationTypeMap" :key="key" :label="label" :value="key" />
+          </el-select>
+
+          <div class="fm-divider" />
+
+          <div class="fm-map-layer on"><span class="fm-switch on" />水系基础</div>
+          <div class="fm-map-layer on"><span class="fm-switch on" />站点标记</div>
+          <div class="fm-map-layer on"><span class="fm-switch on" />实时告警</div>
+          <div class="fm-map-layer"><span class="fm-switch" />雨量热力</div>
+
+          <div class="fm-divider" />
+
+          <span class="fm-label-sm">状态图例</span>
+          <div class="legend">
+            <span class="legend-item"><i class="fm-dot ok" />正常</span>
+            <span class="legend-item"><i class="fm-dot danger" />告警</span>
+            <span class="legend-item"><i class="fm-dot off" />离线/维护</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="fm-map-main fm-card">
+        <div class="fm-map-floating">
+          <span class="fm-chip">30.88N 114.34E</span>
+          <span class="fm-chip">zoom 11</span>
+          <span class="fm-chip"><span class="ind" />live</span>
+        </div>
+        <div ref="mapRef" class="map-container"></div>
       </div>
     </div>
-    <div ref="mapRef" class="map-container"></div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
 import { getStations } from '@/api/station'
+import { getAlarms } from '@/api/alarm'
+import { getLatestObservations, type LatestObservationBatchItem } from '@/api/observation'
 import { stationTypeMap } from '@/utils/format'
-import type { Station } from '@/types'
+import { useLakeMap, type StationMarker } from '@/composables/useLakeMap'
+import type { Station, MetricType } from '@/types'
 
 const mapRef = ref<HTMLElement>()
 const stations = ref<Station[]>([])
 const filterType = ref('')
-let map: L.Map | null = null
-let markerGroup: L.LayerGroup | null = null
+const { init, updateStations, resize, dispose } = useLakeMap(mapRef)
 
 const filteredStations = computed(() => {
   if (!filterType.value) return stations.value
   return stations.value.filter((s) => s.type === filterType.value)
 })
 
-function getMarkerColor(status: string): string {
-  if (status === 'ACTIVE') return '#67C23A'
-  if (status === 'MAINTENANCE') return '#E6A23C'
-  return '#909399'
+const stationMetricType: Partial<Record<Station['type'], MetricType>> = {
+  WATER_LEVEL: 'WATER_LEVEL',
+  RAIN_GAUGE: 'RAINFALL',
+  FLOW: 'FLOW',
+  RESERVOIR: 'WATER_LEVEL',
+  GATE: 'WATER_LEVEL',
+  PUMP_STATION: 'FLOW',
 }
 
-function createCircleIcon(color: string) {
-  return L.divIcon({
-    className: 'custom-marker',
-    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3)"></div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
-  })
+const metricUnits: Record<MetricType, string> = {
+  WATER_LEVEL: 'm',
+  RAINFALL: 'mm',
+  FLOW: 'm³/s',
 }
 
-function updateMarkers() {
-  if (!map || !markerGroup) return
-  markerGroup.clearLayers()
+function buildObservationKey(stationId: string, metricType: MetricType) {
+  return `${stationId}:${metricType}`
+}
 
-  filteredStations.value.forEach((station) => {
-    if (!station.lat || !station.lon) return
+async function refreshMap() {
+  try {
+    const alarmsRes = await getAlarms({ page: 1, size: 50, status: 'OPEN' })
+    const alarmStationIds = new Set((alarmsRes.data?.records || []).map((a) => a.stationId))
+    const markers: StationMarker[] = []
+    const observationItems: LatestObservationBatchItem[] = filteredStations.value.flatMap((station) => {
+      const metric = stationMetricType[station.type]
+      return metric ? [{ stationId: station.id, metricType: metric }] : []
+    })
+    const latestObservationMap = new Map<string, number>()
 
-    const color = getMarkerColor(station.status)
-    const marker = L.marker([station.lat, station.lon], { icon: createCircleIcon(color) })
-
-    marker.bindPopup(`
-      <div style="min-width:180px">
-        <h4 style="margin:0 0 8px">${station.name}</h4>
-        <p style="margin:2px 0;font-size:13px">编码：${station.code}</p>
-        <p style="margin:2px 0;font-size:13px">类型：${stationTypeMap[station.type] || station.type}</p>
-        <p style="margin:2px 0;font-size:13px">流域：${station.riverBasin || '-'}</p>
-        <p style="margin:2px 0;font-size:13px">行政区：${station.adminRegion || '-'}</p>
-        <p style="margin:2px 0;font-size:13px">高程：${station.elevation || '-'} m</p>
-        <p style="margin:2px 0;font-size:13px">状态：<span style="color:${color};font-weight:600">${station.status === 'ACTIVE' ? '正常' : station.status === 'MAINTENANCE' ? '维护中' : '离线'}</span></p>
-      </div>
-    `)
-
-    markerGroup!.addLayer(marker)
-  })
-
-  // Fit bounds if stations exist
-  if (filteredStations.value.length > 0) {
-    const validStations = filteredStations.value.filter((s) => s.lat && s.lon)
-    if (validStations.length > 0) {
-      const bounds = L.latLngBounds(validStations.map((s) => [s.lat, s.lon] as [number, number]))
-      map.fitBounds(bounds, { padding: [50, 50] })
+    if (observationItems.length > 0) {
+      const latestRes = await getLatestObservations(observationItems)
+      ;(latestRes.data || []).forEach((observation) => {
+        latestObservationMap.set(
+          buildObservationKey(observation.stationId, observation.metricType),
+          observation.value,
+        )
+      })
     }
+
+    filteredStations.value.forEach((station) => {
+      const metric = stationMetricType[station.type]
+      if (!metric) {
+        markers.push({ station, hasAlarm: alarmStationIds.has(station.id) })
+        return
+      }
+
+      markers.push({
+        station,
+        latestValue: latestObservationMap.get(buildObservationKey(station.id, metric)) ?? null,
+        unit: metricUnits[metric],
+        hasAlarm: alarmStationIds.has(station.id),
+      })
+    })
+
+    updateStations(markers)
+  } catch {
+    updateStations([])
   }
 }
 
@@ -90,87 +133,99 @@ async function loadStations() {
   try {
     const res = await getStations({ page: 1, size: 1000 })
     stations.value = res.data?.records || []
-    updateMarkers()
+    await refreshMap()
   } catch {
-    // Fallback: show empty map
+    stations.value = []
+    updateStations([])
   }
 }
 
-function initMap() {
-  if (!mapRef.value) return
+watch(filterType, () => {
+  refreshMap()
+})
 
-  map = L.map(mapRef.value, {
-    center: [30.5, 114.3], // Default: Wuhan area
-    zoom: 8,
-    zoomControl: true,
-  })
-
-  // Use OpenStreetMap tiles
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
-    maxZoom: 18,
-  }).addTo(map)
-
-  markerGroup = L.layerGroup().addTo(map)
+function handleResize() {
+  resize()
 }
 
-watch(filterType, updateMarkers)
-
 onMounted(() => {
-  initMap()
+  init()
   loadStations()
+  window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
-  map?.remove()
-  map = null
+  window.removeEventListener('resize', handleResize)
+  dispose()
 })
 </script>
 
 <style scoped lang="scss">
-.map-page {
-  height: calc(100vh - 84px);
-  display: flex;
-  flex-direction: column;
+.fm-map-page {
+  min-height: calc(100vh - var(--fm-topbar-h) - var(--fm-tags-h) - 44px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
 }
-
-.map-toolbar {
+.fm-map-shell {
+  min-height: 640px;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+}
+.fm-map-side {
+  overflow: hidden;
+}
+.fm-map-layer {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  background: #fff;
-  border-bottom: 1px solid #ebeef5;
-  z-index: 500;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--fm-radius-sm);
+  color: var(--fm-fg-soft);
+  font-size: 12.5px;
 }
-
+.fm-map-layer.on {
+  background: rgba(73, 225, 255, 0.08);
+  color: var(--fm-fg);
+}
 .legend {
-  display: flex;
-  gap: 16px;
-  margin-left: auto;
-  font-size: 13px;
+  display: grid;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--fm-fg-soft);
 }
-
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
-
-.dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+.fm-map-main {
+  position: relative;
+  overflow: hidden;
+  min-height: 640px;
 }
-
+.fm-map-floating {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  gap: 8px;
+  z-index: 5;
+}
 .map-container {
-  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 640px;
   z-index: 0;
 }
-
-// Fix leaflet icon default paths
-:deep(.custom-marker) {
-  background: transparent;
-  border: none;
+@media (max-width: 1100px) {
+  .fm-map-shell {
+    grid-template-columns: 1fr;
+  }
+  .fm-map-main,
+  .map-container {
+    min-height: 520px;
+  }
 }
 </style>

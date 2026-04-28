@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1440" />
+<title>FloodMind · 防洪应急智能指挥平台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="hifi/styles.css" />
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="hifi/icons.jsx"></script>
+<script type="text/babel" src="hifi/charts.jsx"></script>
+<script type="text/babel" src="hifi/shell.jsx"></script>
+<script type="text/babel" src="hifi/p_dashboard.jsx"></script>
+<script type="text/babel" src="hifi/p_ai.jsx"></script>
+<script type="text/babel" src="hifi/p_bigscreen.jsx"></script>
+<script type="text/babel" src="hifi/p_alarm_plan.jsx"></script>
+<script type="text/babel" src="hifi/p_monitor.jsx"></script>
+<script type="text/babel" src="hifi/p_system.jsx"></script>
+
+<script type="text/babel" data-presets="env,react">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": true
+}/*EDITMODE-END*/;
+
+const PAGE_META = {
+  'dash':      { label: '指挥仪表盘',     crumbs: '概览 / 指挥仪表盘' },
+  'big':       { label: '大屏 BigScreen', crumbs: '概览 / 大屏' },
+  'station':   { label: '站点管理',       crumbs: '监测 / 站点管理' },
+  'sensor':    { label: '传感器管理',     crumbs: '监测 / 传感器' },
+  'obs':       { label: '观测数据',       crumbs: '数据 / 观测' },
+  'alarm':     { label: '告警管理',       crumbs: '告警 / 告警列表' },
+  'threshold': { label: '阈值规则',       crumbs: '告警 / 阈值' },
+  'ai':        { label: 'AI 命令中心',    crumbs: 'AI / 命令中心' },
+  'plan':      { label: '应急预案',       crumbs: 'AI / 应急预案' },
+  'map':       { label: '流域地图',       crumbs: '系统 / 地图' },
+  'user':      { label: '用户管理',       crumbs: '系统 / 用户' },
+  'role':      { label: '角色 & 权限',    crumbs: '系统 / 角色' },
+  'orgdept':   { label: '组织部门',       crumbs: '系统 / 组织' },
+  'log':       { label: '操作日志',       crumbs: '系统 / 日志' },
+  'login':     { label: '登录页',         crumbs: '/ login' },
+};
+
+function BigScreenStage() {
+  const [scale, setScale] = React.useState(1);
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    const f = () => {
+      if (!ref.current) return;
+      const w = ref.current.clientWidth - 32;
+      const h = ref.current.clientHeight - 32;
+      setScale(Math.min(w/1920, h/1080, 1));
+    };
+    f(); window.addEventListener('resize', f);
+    return () => window.removeEventListener('resize', f);
+  }, []);
+  return (
+    <div ref={ref} style={{height:'calc(100vh - 56px)',padding:16,display:'grid',placeItems:'center',background:'#02060d'}}>
+      <div style={{width:1920*scale,height:1080*scale,position:'relative'}}>
+        <div style={{transform:`scale(${scale})`,transformOrigin:'top left',width:1920,height:1080,position:'absolute',top:0,left:0}}>
+          <BigScreen/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function renderPage(key) {
+  switch (key) {
+    case 'dash':      return <Dashboard/>;
+    case 'big':       return <BigScreenStage/>;
+    case 'station':   return <StationPage/>;
+    case 'sensor':    return <SensorPage/>;
+    case 'obs':       return <ObservationPage/>;
+    case 'alarm':     return <AlarmPage/>;
+    case 'threshold': return <ThresholdPage/>;
+    case 'ai':        return <AICenter/>;
+    case 'plan':      return <PlanPage/>;
+    case 'map':       return <MapPage/>;
+    case 'user':      return <UserPage/>;
+    case 'role':      return <RolePage/>;
+    case 'orgdept':   return <OrgDeptPage/>;
+    case 'log':       return <LogPage/>;
+    default:          return <Dashboard/>;
+  }
+}
+
+function App() {
+  const [page, setPage] = React.useState(() => localStorage.getItem('fm-page') || 'dash');
+  const [dark, setDark] = React.useState(!!TWEAK_DEFAULTS.dark);
+
+  React.useEffect(() => { localStorage.setItem('fm-page', page); }, [page]);
+  React.useEffect(() => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { dark } }, '*');
+  }, [dark]);
+
+  const meta = PAGE_META[page] || PAGE_META['dash'];
+  const isBig = page === 'big';
+
+  if (page === 'login') {
+    return (
+      <>
+        <LoginPage onEnter={() => setPage('dash')}/>
+        <TweakFab dark={dark} setDark={setDark}/>
+      </>
+    );
+  }
+
+  return (
+    <div className="app" data-screen-label={meta.label}>
+      <TopBar crumbs={meta.crumbs}/>
+      <Side active={page} onNav={setPage}/>
+      <main className="main" style={isBig ? {padding:0,background:'#02060d'} : {}}>
+        {renderPage(page)}
+      </main>
+      <TweakFab dark={dark} setDark={setDark}/>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
