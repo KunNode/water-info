@@ -119,24 +119,15 @@ java -jar target/water-info-platform-1.0.0-SNAPSHOT.jar
 ```bash
 cd water-info-ai
 
-# 创建虚拟环境
-python -m venv .venv
-
-# 激活（Windows）
-.venv\Scripts\activate
-
-# 激活（Linux/Mac）
-source .venv/bin/activate
-
-# 安装依赖
-pip install -e ".[dev]"
+# 使用 UV 安装依赖
+uv sync --extra dev
 
 # 配置环境变量
 cp .env.example .env
 # 编辑 .env 文件，配置 OPENAI_API_KEY 等
 
 # 启动服务
-python -m app.main
+uv run python -m app.main
 ```
 
 AI 服务启动后访问：
@@ -256,19 +247,19 @@ cd water-info-platform
 cd water-info-ai
 
 # 安装依赖
-pip install -e ".[dev]"
+uv sync --extra dev
 
 # 运行测试
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # 运行单个测试
-pytest tests/test_agents.py::TestSupervisorAgent -v
+uv run pytest tests/test_agents.py::TestSupervisorAgent -v
 
 # 代码检查
-ruff check app/ tests/
+uv run ruff check app/ tests/
 
 # 格式化代码
-ruff format app/ tests/
+uv run ruff format app/ tests/
 ```
 
 ## 部署指南

@@ -42,7 +42,7 @@ The AI module is currently runnable end to end.
 ## Executed Commands
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
+uv run pytest
 ```
 
 Result:

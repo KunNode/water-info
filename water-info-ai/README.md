@@ -270,15 +270,6 @@ Accept: text/event-stream
 
 ```bash
 cd water-info-ai
-python -m venv .venv
-. .venv/bin/activate
-pip install -e .
-```
-
-如果使用 `uv`：
-
-```bash
-cd water-info-ai
 uv sync
 ```
 
@@ -305,7 +296,7 @@ cp .env.example .env
 ### 3. 启动服务
 
 ```bash
-python -m app.main
+uv run python -m app.main
 ```
 
 或：
