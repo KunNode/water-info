@@ -10,6 +10,26 @@ const service: AxiosInstance = axios.create({
   timeout: 30000,
 })
 
+function resolveAuthorizationHeader(config?: AxiosRequestConfig | InternalAxiosRequestConfig): string | undefined {
+  const headers = config?.headers as Record<string, unknown> | undefined
+  const value = headers?.Authorization ?? headers?.authorization
+  return typeof value === 'string' ? value : undefined
+}
+
+function handleUnauthorized(config?: AxiosRequestConfig | InternalAxiosRequestConfig) {
+  const storedToken = getToken()
+  const sentAuthorization = resolveAuthorizationHeader(config)
+
+  if (storedToken && !sentAuthorization) {
+    ElMessage.error('请求未携带登录凭证，请刷新页面后重试')
+    return
+  }
+
+  clearAuth()
+  router.push('/login')
+  ElMessage.error('登录已过期，请重新登录')
+}
+
 // Request interceptor — attach JWT token
 service.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -25,24 +45,24 @@ service.interceptors.request.use(
 // Response interceptor — unwrap ApiResponse, handle errors
 service.interceptors.response.use(
   (response) => {
-    const res = response.data as ApiResponse
-    if (res.code !== 200) {
-      ElMessage.error(res.message || '请求失败')
-      if (res.code === 401) {
-        clearAuth()
-        router.push('/login')
+    const res = response.data
+    if (res !== null && typeof res === 'object' && !Array.isArray(res) && typeof res.code === 'number') {
+      if (res.code !== 200) {
+        ElMessage.error(res.message || '请求失败')
+        if (res.code === 401) {
+          handleUnauthorized(response.config)
+        }
+        return Promise.reject(new Error(res.message || '请求失败'))
       }
-      return Promise.reject(new Error(res.message || '请求失败'))
+      return res
     }
-    return response.data
+    return { code: 200, data: res, message: 'ok' } as ApiResponse
   },
   (error) => {
     if (error.response) {
       const status = error.response.status
       if (status === 401) {
-        clearAuth()
-        router.push('/login')
-        ElMessage.error('登录已过期，请重新登录')
+        handleUnauthorized(error.config)
       } else if (status === 403) {
         ElMessage.error('没有操作权限')
       } else if (status === 404) {
@@ -72,8 +92,21 @@ export function put<T = any>(url: string, data?: any, config?: AxiosRequestConfi
   return service.put(url, data, config) as any
 }
 
+export function patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+  return service.patch(url, data, config) as any
+}
+
 export function del<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
   return service.delete(url, config) as any
+}
+
+export function withAuth(config: AxiosRequestConfig = {}): AxiosRequestConfig {
+  const token = getToken()
+  const headers = {
+    ...(config.headers as Record<string, unknown> | undefined),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+  return { ...config, headers }
 }
 
 export default service

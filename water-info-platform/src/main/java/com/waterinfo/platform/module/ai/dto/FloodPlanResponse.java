@@ -2,7 +2,6 @@ package com.waterinfo.platform.module.ai.dto;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -19,8 +18,8 @@ public class FloodPlanResponse {
     private List<PlanAction> actions;
     private List<PlanResource> resources;
     private List<PlanNotification> notifications;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
+    private String createdAt;
+    private String updatedAt;
 
     @Data
     public static class PlanAction {
@@ -29,7 +28,7 @@ public class FloodPlanResponse {
         private String priority;
         private String assignee;
         private String status;
-        private LocalDateTime scheduledAt;
+        private String scheduledAt;
     }
 
     @Data
@@ -49,6 +48,6 @@ public class FloodPlanResponse {
         private String target;
         private String message;
         private String status;
-        private LocalDateTime sentAt;
+        private String sentAt;
     }
 }
