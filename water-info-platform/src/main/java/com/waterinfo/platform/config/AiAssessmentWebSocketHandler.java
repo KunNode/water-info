@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AiAssessmentWebSocketHandler extends TextWebSocketHandler {
 
     public static final String TYPE_AI_ASSESSMENT_UPDATED = "AI_ASSESSMENT_UPDATED";
+    public static final String TYPE_AI_ASSESSMENT = "AI_ASSESSMENT";
     public static final String TYPE_PONG = "PONG";
     public static final String TYPE_ERROR = "ERROR";
 
@@ -35,7 +36,7 @@ public class AiAssessmentWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        if ("ping".equals(message.getPayload())) {
+        if ("ping".equalsIgnoreCase(message.getPayload())) {
             send(session, Map.of(
                     "type", TYPE_PONG,
                     "timestamp", System.currentTimeMillis()
@@ -44,10 +45,17 @@ public class AiAssessmentWebSocketHandler extends TextWebSocketHandler {
     }
 
     public void broadcastAssessment(Map<String, Object> assessmentData) {
+        long timestamp = System.currentTimeMillis();
         broadcast(Map.of(
                 "type", TYPE_AI_ASSESSMENT_UPDATED,
                 "data", assessmentData,
-                "timestamp", System.currentTimeMillis()
+                "timestamp", timestamp
+        ));
+        // Temporary bridge for legacy clients; remove after frontend migration to the shared situation store.
+        broadcast(Map.of(
+                "type", TYPE_AI_ASSESSMENT,
+                "data", assessmentData,
+                "timestamp", timestamp
         ));
     }
 
