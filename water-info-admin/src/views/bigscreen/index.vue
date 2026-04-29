@@ -190,8 +190,14 @@
               <span class="ai__risk-trend" :style="{ color: aiAssessment.color }">↑ {{ aiAssessment.trend }}</span>
             </div>
             <div class="ai__body">{{ aiAssessment.summary }}</div>
+            <div v-if="aiAssessment.planExcerpt" class="ai__plan">{{ aiAssessment.planExcerpt }}</div>
+            <div v-if="aiAssessment.freshness !== 'fresh'" class="ai__stale">
+              {{ aiAssessment.freshness === 'stale' ? '研判已过期，仅供参考' : '研判同步异常，显示上次结果' }}
+            </div>
           </div>
-          <div v-else class="empty-tip">流域态势平稳，无需特别研判</div>
+          <div v-else class="empty-tip">
+            {{ situationStore.freshness === 'offline' ? '无法获取 AI 研判' : '暂无 AI 研判' }}
+          </div>
         </section>
 
         <!-- 7日降雨 -->
@@ -238,12 +244,14 @@ import { getStations } from '@/api/station'
 import { getSensors } from '@/api/sensor'
 import { getAlarms } from '@/api/alarm'
 import { getLatestObservations, getObservations, type LatestObservationBatchItem } from '@/api/observation'
+import { useSituationStore } from '@/stores/situation'
 import { alarmLevelMap, metricTypeMap, stationTypeMap } from '@/utils/format'
 import type { Alarm, Station, MetricType } from '@/types'
 import type { StationMarker } from '@/composables/useLakeMap'
 import LakeStage from './components/LakeStage.vue'
 
 const router = useRouter()
+const situationStore = useSituationStore()
 const screenRef = ref<HTMLElement>()
 const isFullscreen = ref(false)
 
@@ -342,28 +350,30 @@ const onlineStationPct = computed(() => {
 // Loop the alarm list once for seamless marquee scroll.
 const alarmRiverItems = computed<Alarm[]>(() => [...recentAlarms.value, ...recentAlarms.value])
 
-// Placeholder AI assessment — derives a quick read from the highest-severity OPEN alarm
-// until the ai-assessment WebSocket / REST endpoint lands.
-const aiAssessment = computed(() => {
-  const order: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 }
-  const sorted = [...recentAlarms.value].sort((a, b) => (order[a.level] ?? 9) - (order[b.level] ?? 9))
-  const top = sorted[0]
-  if (!top) return null
+const riskDisplayMap: Record<string, { label: string; color: string; trend: string }> = {
+  none: { label: 'NORMAL', color: '#2bd99f', trend: '平稳' },
+  low: { label: 'LOW', color: '#7aa2ff', trend: '关注' },
+  moderate: { label: 'MEDIUM', color: '#ffb547', trend: '上升' },
+  high: { label: 'HIGH', color: '#ff5a6a', trend: '上升中' },
+  critical: { label: 'CRITICAL', color: '#ff8a96', trend: '急剧上升' },
+}
 
-  const isCritical = top.level === 'CRITICAL'
-  const isHigh = top.level === 'HIGH'
+const aiAssessment = computed(() => {
+  const assessment = situationStore.latestAssessment
+  if (!assessment) return null
+
+  const riskInfo = riskDisplayMap[situationStore.canonicalRiskLevel] ?? riskDisplayMap.none
+
   return {
-    source: isCritical || isHigh ? 'EVENT TRIGGERED' : 'PERIODIC',
-    risk: isCritical ? 'HIGH' : isHigh ? 'MEDIUM' : 'LOW',
-    color: isCritical ? '#ff5a6a' : isHigh ? '#ffb547' : '#7aa2ff',
-    trend: isCritical ? '上升中' : isHigh ? '关注' : '平稳',
-    trigger: `由${top.stationName} ${severityShort(top.level)} 触发`,
-    timeLabel: `${severityShort(top.level)} · ${formatAlarmAge(top.startAt)}`,
-    summary: isCritical
-      ? `${top.stationName} 已超警戒，建议立即启动 III 级响应；上下游联动监测，加密巡查与会商。`
-      : isHigh
-        ? `${top.stationName} 接近警戒值，建议加强观测频次并复核上游输入。`
-        : '当前态势平稳，按计划巡检即可。',
+    source: assessment.source,
+    risk: riskInfo.label,
+    color: riskInfo.color,
+    trend: riskInfo.trend,
+    trigger: assessment.stationName ? `由${assessment.stationName} 触发` : '流域综合研判',
+    timeLabel: `${riskInfo.label} · ${formatAlarmAge(assessment.assessedAt)}`,
+    summary: assessment.summary,
+    planExcerpt: assessment.planExcerpt,
+    freshness: situationStore.freshness,
   }
 })
 
@@ -762,6 +772,8 @@ onMounted(() => {
   initPieChart()
   initWaterLevelChart()
   initRainfallChart()
+  situationStore.connectAssessmentStream()
+  situationStore.ensureFresh()
   loadData()
   dataTimer = setInterval(loadData, 30000)
   window.addEventListener('resize', handleResize)
@@ -1412,6 +1424,20 @@ onUnmounted(() => {
     font-size: 12px;
     color: #c1cbe0;
     line-height: 1.7;
+  }
+
+  &__plan {
+    margin-top: 8px;
+    color: #a9b3c6;
+    font-size: 11px;
+    line-height: 1.55;
+  }
+
+  &__stale {
+    margin-top: 8px;
+    color: #ffb547;
+    font-size: 11px;
+    font-family: var(--bs-display-mono);
   }
 }
 
