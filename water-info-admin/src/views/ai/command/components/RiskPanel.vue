@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useSituationStore } from '@/stores/situation'
 
 const props = defineProps<{
@@ -127,11 +127,6 @@ function levelActive(level: string) {
   const target = riskOrder.indexOf(level)
   return target <= Math.max(current, 0)
 }
-
-onMounted(async () => {
-  situationStore.connectAssessmentStream()
-  await situationStore.ensureFresh()
-})
 </script>
 
 <style scoped lang="scss">
