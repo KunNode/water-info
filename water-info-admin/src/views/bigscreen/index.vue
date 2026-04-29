@@ -370,7 +370,7 @@ const aiAssessment = computed(() => {
     color: riskInfo.color,
     trend: riskInfo.trend,
     trigger: assessment.stationName ? `由${assessment.stationName} 触发` : '流域综合研判',
-    timeLabel: `${riskInfo.label} · ${formatAlarmAge(assessment.assessedAt)}`,
+    timeLabel: `${assessment.source} · ${formatAlarmAge(assessment.assessedAt)}`,
     summary: assessment.summary,
     planExcerpt: assessment.planExcerpt,
     freshness: situationStore.freshness,
