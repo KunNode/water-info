@@ -1,7 +1,7 @@
 <template>
   <div class="fm-card fm-risk">
     <div class="fm-card__head">
-      <button class="tab" :class="{ active: activeTab === 'risk' }" @click="activeTab = 'risk'">风险等级</button>
+      <button class="tab" :class="{ active: activeTab === 'risk' }" @click="activeTab = 'risk'">系统态势</button>
       <button class="tab" :class="{ active: activeTab === 'scan' }" @click="activeTab = 'scan'">AI 巡检</button>
       <span class="sp" />
       <span class="mono">{{ connectionLabel }}</span>
@@ -51,10 +51,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useSituationStore } from '@/stores/situation'
-
-const props = defineProps<{
-  conversationRiskLevel: string
-}>()
 
 const situationStore = useSituationStore()
 
@@ -113,7 +109,12 @@ const assessmentTime = computed(() => {
 })
 const connectionLabel = computed(() => {
   if (situationStore.freshness === 'offline') return 'offline'
-  return situationStore.connection === 'connected' ? 'live' : 'syncing'
+  if (situationStore.connection === 'connected') return 'live'
+  if (situationStore.connection === 'reconnecting') return 'reconnecting'
+  if (situationStore.connection === 'disconnected') return 'disconnected'
+  if (situationStore.connection === 'connecting') return 'syncing'
+  if (situationStore.connection === 'idle') return 'idle'
+  return 'syncing'
 })
 const degradationLabel = computed(() => {
   if (situationStore.freshness === 'stale') return '研判已过期，仅供参考'

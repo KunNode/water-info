@@ -66,7 +66,7 @@
 
       <div class="fm-ai-grid__side">
         <AgentTimeline :agentStatus="store.agentStatus" />
-        <RiskPanel :conversationRiskLevel="store.riskLevel" />
+        <RiskPanel />
         <PlanStatus :planInfo="store.planInfo" />
         <ActiveAlerts />
         <SessionInfo
@@ -289,7 +289,6 @@ onMounted(async () => {
   }
 
   situationStore.connectAssessmentStream()
-  await situationStore.ensureFresh()
 
   onStructuredEvent((event: SSEEventType) => {
     if (event.type === 'session_init') {
@@ -323,6 +322,8 @@ onMounted(async () => {
       enqueueAgentMessage(event.agent, event.content)
     }
   })
+
+  void situationStore.ensureFresh()
 })
 
 watch(fullText, (val) => {
