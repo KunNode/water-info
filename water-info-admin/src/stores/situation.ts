@@ -27,6 +27,12 @@ type AssessmentStreamMessage = {
 
 function normalizeRiskLevel(level?: string | null): CanonicalRiskLevel {
   const normalized = String(level ?? 'none').trim().toLowerCase()
+  if (normalized === 'medium' || normalized === 'warning') {
+    return 'moderate'
+  }
+  if (normalized === 'normal') {
+    return 'none'
+  }
   return CANONICAL_RISK_LEVELS.includes(normalized as CanonicalRiskLevel)
     ? (normalized as CanonicalRiskLevel)
     : 'none'
