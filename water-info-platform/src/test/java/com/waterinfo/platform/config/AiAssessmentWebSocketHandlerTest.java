@@ -13,7 +13,6 @@ import org.springframework.web.socket.WebSocketSession;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,7 +40,7 @@ class AiAssessmentWebSocketHandlerTest {
     }
 
     @Test
-    void broadcastsAssessmentUpdatedAndLegacyEnvelopes() throws Exception {
+    void broadcastsAssessmentUpdatedEnvelope() throws Exception {
         AiAssessmentWebSocketHandler handler = new AiAssessmentWebSocketHandler();
         when(session.getId()).thenReturn("session-1");
         when(session.isOpen()).thenReturn(true);
@@ -53,20 +52,12 @@ class AiAssessmentWebSocketHandlerTest {
         ));
 
         ArgumentCaptor<TextMessage> messageCaptor = ArgumentCaptor.forClass(TextMessage.class);
-        verify(session, times(2)).sendMessage(messageCaptor.capture());
+        verify(session).sendMessage(messageCaptor.capture());
 
-        assertThat(messageCaptor.getAllValues()).hasSize(2);
-
-        JsonNode updatedResponse = objectMapper.readTree(messageCaptor.getAllValues().get(0).getPayload());
+        JsonNode updatedResponse = objectMapper.readTree(messageCaptor.getValue().getPayload());
         assertThat(updatedResponse.path("type").asText()).isEqualTo("AI_ASSESSMENT_UPDATED");
         assertThat(updatedResponse.path("data").path("id").asText()).isEqualTo("assessment-1");
         assertThat(updatedResponse.path("data").path("level").asText()).isEqualTo("HIGH");
         assertThat(updatedResponse.path("timestamp").asLong()).isGreaterThan(0L);
-
-        JsonNode legacyResponse = objectMapper.readTree(messageCaptor.getAllValues().get(1).getPayload());
-        assertThat(legacyResponse.path("type").asText()).isEqualTo("AI_ASSESSMENT");
-        assertThat(legacyResponse.path("data").path("id").asText()).isEqualTo("assessment-1");
-        assertThat(legacyResponse.path("data").path("level").asText()).isEqualTo("HIGH");
-        assertThat(legacyResponse.path("timestamp").asLong()).isGreaterThan(0L);
     }
 }

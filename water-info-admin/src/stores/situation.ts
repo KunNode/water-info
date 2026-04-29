@@ -13,7 +13,6 @@ const FRESHNESS_TICK_MS = 60 * 1000
 const PING_INTERVAL_MS = 20 * 1000
 const RECONNECT_DELAY_MS = 5 * 1000
 const ASSESSMENT_UPDATED_EVENT = 'AI_ASSESSMENT_UPDATED'
-const LEGACY_ASSESSMENT_EVENT = 'AI_ASSESSMENT'
 const ERROR_EVENT = 'ERROR'
 const PONG_EVENT = 'PONG'
 const CANONICAL_RISK_LEVELS: CanonicalRiskLevel[] = ['none', 'low', 'moderate', 'high', 'critical']
@@ -225,7 +224,7 @@ export const useSituationStore = defineStore('situation', () => {
       return
     }
 
-    if (payload.type === ASSESSMENT_UPDATED_EVENT || payload.type === LEGACY_ASSESSMENT_EVENT) {
+    if (payload.type === ASSESSMENT_UPDATED_EVENT) {
       if (isCompleteAssessmentPayload(payload.data)) {
         applyAssessment(payload.data, {
           syncedAt: new Date().toISOString(),
