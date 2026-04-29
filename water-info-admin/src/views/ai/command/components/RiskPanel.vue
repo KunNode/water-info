@@ -4,7 +4,7 @@
       <button class="tab" :class="{ active: activeTab === 'risk' }" @click="activeTab = 'risk'">风险等级</button>
       <button class="tab" :class="{ active: activeTab === 'scan' }" @click="activeTab = 'scan'">AI 巡检</button>
       <span class="sp" />
-      <span class="mono">{{ scanConnected ? 'live' : 'offline' }}</span>
+      <span class="mono">{{ connectionLabel }}</span>
     </div>
     <div v-if="activeTab === 'risk'" class="fm-card__body">
       <div class="risk-summary" :style="{ '--risk-color': riskColor }">
@@ -37,25 +37,26 @@
         </div>
         <div class="summary">{{ latestAssessment.summary }}</div>
         <div v-if="latestAssessment.planExcerpt" class="plan">{{ latestAssessment.planExcerpt }}</div>
+        <div v-if="degradationLabel" class="degraded">{{ degradationLabel }}</div>
         <div class="time">{{ assessmentTime }}</div>
       </div>
       <div v-else class="scan-empty">
-        <span class="fm-dot ok" />
-        <span>等待 AI 巡检结果</span>
+        <span class="fm-dot" :class="situationStore.freshness === 'offline' ? 'warn' : 'ok'" />
+        <span>{{ degradationLabel || '等待 AI 巡检结果' }}</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { getAiAssessments } from '@/api/aiAssessment'
-import { useWebSocket } from '@/composables/useWebSocket'
-import type { AiAssessment } from '@/types'
+import { computed, onMounted, ref } from 'vue'
+import { useSituationStore } from '@/stores/situation'
 
 const props = defineProps<{
-  riskLevel: string
+  conversationRiskLevel: string
 }>()
+
+const situationStore = useSituationStore()
 
 const riskMap: Record<string, { label: string; sublabel: string; color: string }> = {
   none:     { label: '正常',   sublabel: '无需响应',  color: '#6a7590' },
@@ -66,16 +67,41 @@ const riskMap: Record<string, { label: string; sublabel: string; color: string }
 }
 const riskOrder = ['none', 'low', 'moderate', 'high', 'critical']
 const activeTab = ref<'risk' | 'scan'>('risk')
-const latestAssessment = ref<AiAssessment | null>(null)
-const { messages: scanMessages, connected: scanConnected, connect: connectScan } = useWebSocket('/ws/ai-assessments')
+const systemRiskLevel = computed(() => situationStore.canonicalRiskLevel)
+const riskInfo = computed(() => {
+  const current = riskMap[systemRiskLevel.value] ?? riskMap.none
 
-const riskInfo = computed(() => riskMap[props.riskLevel] ?? riskMap['none'])
+  if (!situationStore.latestAssessment) {
+    return {
+      ...riskMap.none,
+      label: '暂无 AI 研判',
+      sublabel: situationStore.freshness === 'offline' ? '同步异常' : '等待系统同步',
+    }
+  }
+
+  if (situationStore.freshness === 'stale') {
+    return {
+      ...current,
+      sublabel: '研判已过期',
+    }
+  }
+
+  if (situationStore.freshness === 'offline') {
+    return {
+      ...current,
+      sublabel: '同步异常',
+    }
+  }
+
+  return current
+})
 const riskColor = computed(() => riskInfo.value.color)
 const riskLabel = computed(() => riskInfo.value.label)
 const riskSublabel = computed(() => riskInfo.value.sublabel)
-const assessmentLevel = computed(() => (latestAssessment.value?.level || 'none').toLowerCase())
+const latestAssessment = computed(() => situationStore.latestAssessment)
+const assessmentLevel = computed(() => situationStore.canonicalRiskLevel)
 const assessmentColor = computed(() => riskMap[assessmentLevel.value]?.color ?? riskMap.none.color)
-const assessmentLabel = computed(() => riskMap[assessmentLevel.value]?.label ?? latestAssessment.value?.level ?? '研判')
+const assessmentLabel = computed(() => riskMap[assessmentLevel.value]?.label ?? '研判')
 const assessmentTime = computed(() => {
   if (!latestAssessment.value?.assessedAt) return ''
   const d = new Date(latestAssessment.value.assessedAt)
@@ -85,28 +111,26 @@ const assessmentTime = computed(() => {
   const min = String(d.getMinutes()).padStart(2, '0')
   return `${mm}-${dd} ${hh}:${min}`
 })
+const connectionLabel = computed(() => {
+  if (situationStore.freshness === 'offline') return 'offline'
+  return situationStore.connection === 'connected' ? 'live' : 'syncing'
+})
+const degradationLabel = computed(() => {
+  if (situationStore.freshness === 'stale') return '研判已过期，仅供参考'
+  if (situationStore.freshness === 'offline') return '研判同步异常，显示上次结果'
+  if (situationStore.freshness === 'none') return '暂无 AI 研判'
+  return ''
+})
 
 function levelActive(level: string) {
-  const current = riskOrder.indexOf(props.riskLevel)
+  const current = riskOrder.indexOf(systemRiskLevel.value)
   const target = riskOrder.indexOf(level)
   return target <= Math.max(current, 0)
 }
 
-watch(scanMessages, (items) => {
-  const last = items[items.length - 1]
-  if (last?.type === 'AI_ASSESSMENT' && last.data) {
-    latestAssessment.value = last.data as AiAssessment
-  }
-}, { deep: true })
-
 onMounted(async () => {
-  connectScan()
-  try {
-    const res = await getAiAssessments({ limit: 1 })
-    latestAssessment.value = res.data?.[0] ?? null
-  } catch {
-    // non-critical panel
-  }
+  situationStore.connectAssessmentStream()
+  await situationStore.ensureFresh()
 })
 </script>
 
@@ -243,6 +267,12 @@ onMounted(async () => {
   margin-top: 8px;
   color: var(--fm-fg-soft);
   -webkit-line-clamp: 2;
+}
+
+.degraded {
+  margin-top: 8px;
+  color: #ffb547;
+  font-size: 11px;
 }
 
 .time {

@@ -66,7 +66,7 @@
 
       <div class="fm-ai-grid__side">
         <AgentTimeline :agentStatus="store.agentStatus" />
-        <RiskPanel :riskLevel="store.riskLevel" />
+        <RiskPanel :conversationRiskLevel="store.riskLevel" />
         <PlanStatus :planInfo="store.planInfo" />
         <ActiveAlerts />
         <SessionInfo
@@ -96,6 +96,7 @@ import { useSSE } from '@/composables/useSSE'
 import type { SSEEventType } from '@/composables/useSSE'
 import { getStreamUrl } from '@/api/flood'
 import { useAiConversationStore } from '@/stores/aiConversation'
+import { useSituationStore } from '@/stores/situation'
 
 // Sub-components
 import ChatPanel from './components/ChatPanel.vue'
@@ -109,6 +110,7 @@ import SessionDrawer from './components/SessionDrawer.vue'
 const router = useRouter()
 const route = useRoute()
 const store = useAiConversationStore()
+const situationStore = useSituationStore()
 const { fullText, loading, error, start, stop, reset, onStructuredEvent } = useSSE()
 
 // True once the current query receives at least one agent_message structured event.
@@ -285,6 +287,9 @@ onMounted(async () => {
     await store.loadSession(store.currentSessionId)
     startTime.value = new Date().toLocaleTimeString()
   }
+
+  situationStore.connectAssessmentStream()
+  await situationStore.ensureFresh()
 
   onStructuredEvent((event: SSEEventType) => {
     if (event.type === 'session_init') {
