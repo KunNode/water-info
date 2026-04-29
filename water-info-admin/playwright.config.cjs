@@ -9,5 +9,9 @@ module.exports = {
       name: "smoke",
       testMatch: /smoke\.spec\.cjs$/,
     },
+    {
+      name: "situation",
+      testMatch: /ai-assessment-situation\.spec\.cjs$/,
+    },
   ],
 }
