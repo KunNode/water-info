@@ -5,6 +5,7 @@ from app.services.plan_persistence import (
     SOURCE_MANUAL,
     build_event_session_id,
     build_trigger_conditions,
+    event_window,
     should_persist_plan,
 )
 from app.state import EmergencyPlan, Evidence, RiskAssessment, RiskLevel
@@ -137,3 +138,8 @@ def test_event_session_id_is_stable_for_same_window():
     session_id = build_event_session_id("ST_CP_LAKE_01", "WATER_LEVEL", "2026043010")
 
     assert session_id == "risk-event:ST_CP_LAKE_01:WATER_LEVEL:2026043010"
+
+
+def test_event_window_uses_30_minute_buckets():
+    assert event_window("2026-04-30T10:14:00") == "202604301000"
+    assert event_window("2026-04-30T10:44:00") == "202604301030"

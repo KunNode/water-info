@@ -778,6 +778,26 @@ class DatabaseService:
             FROM emergency_plan WHERE session_id = $1 ORDER BY created_at DESC
         """, session_id)
 
+    async def find_recent_event_plan(
+        self,
+        *,
+        station_id: str,
+        metric_type: str,
+        risk_level: str,
+        since_minutes: int = 30,
+    ) -> dict | None:
+        session_prefix = f"risk-event:{station_id}:{metric_type}:"
+        return await self._fetchrow("""
+            SELECT plan_id, plan_name, risk_level, status, session_id, created_at
+            FROM emergency_plan
+            WHERE session_id LIKE $1
+              AND risk_level = $2
+              AND status IN ('draft', 'executing')
+              AND created_at >= NOW() - ($3::int * INTERVAL '1 minute')
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, f"{session_prefix}%", risk_level, since_minutes)
+
     async def get_sessions(self, limit: int = 20, offset: int = 0) -> list[dict]:
         return await self._fetch("""
             SELECT session_id, MAX(created_at) AS created_at

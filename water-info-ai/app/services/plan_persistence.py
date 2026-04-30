@@ -242,3 +242,12 @@ def _metric_type(state: dict) -> str:
 def build_event_session_id(station_id: str, metric_type: str, window: str | None = None) -> str:
     resolved_window = window or datetime.now().strftime("%Y%m%d%H%M")
     return f"risk-event:{station_id}:{metric_type}:{resolved_window}"
+
+
+def event_window(iso_timestamp: str | None = None) -> str:
+    if iso_timestamp:
+        parsed = datetime.fromisoformat(iso_timestamp)
+    else:
+        parsed = datetime.now()
+    minute = 0 if parsed.minute < 30 else 30
+    return parsed.replace(minute=minute, second=0, microsecond=0).strftime("%Y%m%d%H%M")
