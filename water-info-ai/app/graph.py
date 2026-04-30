@@ -56,7 +56,7 @@ def build_flood_response_graph():
             "final_response": "final_response",
         },
     )
-    graph.add_edge("conversation_assistant", END)
+    graph.add_edge("conversation_assistant", "final_response")
     graph.add_edge("data_analyst", "supervisor")
     graph.add_edge("risk_assessor", "supervisor")
     graph.add_edge("plan_generator", "supervisor")

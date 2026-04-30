@@ -110,6 +110,7 @@ class FloodGraphState(TypedDict, total=False):
     rag_query_cache: dict
     rag_skip_reasons: list[str]
     final_response: str
+    final_response_draft: str
     error: str
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-from app.rag.service import format_evidence_markdown
 from app.services.llm import get_llm
 
 
@@ -72,11 +71,8 @@ async def conversation_assistant_node(state: dict) -> dict:
         except Exception:
             pass
 
-    if evidence and "[1]" not in reply:
-        reply = f"{reply}\n\n{format_evidence_markdown(evidence)}"
-
     return {
         "current_agent": "conversation_assistant",
-        "final_response": reply,
+        "final_response_draft": reply,
         "messages": [{"role": "conversation_assistant", "content": reply}],
     }

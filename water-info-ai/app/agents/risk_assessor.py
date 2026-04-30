@@ -6,7 +6,6 @@ import json
 
 from pydantic import BaseModel, Field
 
-from app.rag.service import format_evidence_markdown
 from app.risk import calculate_composite_risk, calculate_rainfall_risk, calculate_water_level_risk
 from app.services.llm import get_llm
 from app.state import RiskAssessment, RiskLevel, to_plain_data
@@ -179,9 +178,6 @@ async def risk_assessor_node(state: dict) -> dict:
                 content = _format_assessment_content(assessment, prefix)
         except Exception:
             content = _format_assessment_content(assessment, prefix)
-
-    if evidence:
-        content = f"{content}\n\n{format_evidence_markdown(evidence)}"
 
     return {
         "risk_assessment": assessment,

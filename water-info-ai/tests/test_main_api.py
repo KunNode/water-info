@@ -112,6 +112,24 @@ def test_stream_events_do_not_duplicate_final_response_content():
     ]
 
 
+def test_stream_events_suppress_draft_message_to_avoid_double_send():
+    events = _build_stream_events(
+        "conversation_assistant",
+        {
+            "final_response_draft": "你好，我是防汛智能助手。",
+            "messages": [{"role": "conversation_assistant", "content": "你好，我是防汛智能助手。"}],
+        },
+    )
+
+    message_events = [event for event in events if event["type"] == "agent_message"]
+    assert message_events == []
+    # Activity signals (active/done) should still be emitted so the UI shows progress.
+    assert any(
+        event["type"] == "agent_update" and event["status"] == "active"
+        for event in events
+    )
+
+
 def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():
     plan = EmergencyPlan(
         plan_id="EP-001",
