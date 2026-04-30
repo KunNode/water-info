@@ -187,10 +187,55 @@ def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():
     }
     graph.ainvoke.assert_awaited_once()
     db_mock.save_emergency_plan.assert_awaited_once()
+    saved_kwargs = db_mock.save_emergency_plan.await_args.kwargs
+    assert "摘要：" in saved_kwargs["trigger_conditions"]
+    assert "来源：人工对话请求" in saved_kwargs["trigger_conditions"]
     db_mock.save_resource_allocations.assert_awaited_once()
     db_mock.save_notifications.assert_awaited_once()
     session_mock.get_history.assert_awaited_once_with("session-001")
     assert db_mock.save_conversation_message.await_count == 2
+
+
+def test_flood_query_does_not_persist_plan_for_non_plan_manual_query():
+    plan = EmergencyPlan(
+        plan_id="EP-RISK-ONLY",
+        plan_name="中间态预案",
+        risk_level=RiskLevel.HIGH,
+        trigger_conditions="模型中间态",
+        actions=[
+            EmergencyAction(
+                action_id="A-001",
+                action_type="monitoring",
+                description="加密监测",
+                priority=2,
+                responsible_dept="监测调度科",
+            )
+        ],
+    )
+    final_state = {
+        "final_response": "当前风险较高，请关注水位变化。",
+        "intent": "risk_assessment",
+        "risk_assessment": RiskAssessment(
+            risk_level=RiskLevel.HIGH,
+            risk_score=72.0,
+            key_risks=["水位持续上涨"],
+        ),
+        "emergency_plan": plan,
+    }
+    graph = StubGraph(final_state=final_state)
+
+    with _patched_client(graph=graph) as (client, db_mock, _session_mock, _graph):
+        response = client.post(
+            "/api/v1/flood/query",
+            json={"query": "当前风险严不严重", "session_id": "session-risk-only"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["plan_id"] == "EP-RISK-ONLY"
+    db_mock.save_conversation_snapshot.assert_awaited_once()
+    db_mock.save_emergency_plan.assert_not_awaited()
+    db_mock.save_resource_allocations.assert_not_awaited()
+    db_mock.save_notifications.assert_not_awaited()
 
 
 def test_flood_query_stream_emits_expected_sse_events():

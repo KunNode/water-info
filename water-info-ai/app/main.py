@@ -41,6 +41,7 @@ from app.models import (
 from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
+from app.services.plan_persistence import SOURCE_MANUAL, build_trigger_conditions, should_persist_plan
 from app.services.platform_client import get_platform_client
 from app.services.risk_scan_scheduler import get_risk_scan_scheduler
 from app.state import RiskAssessment, to_plain_data
@@ -97,12 +98,19 @@ async def _persist_result(session_id: str, graph_state: dict) -> None:
     if not plan:
         return
 
+    decision = should_persist_plan(graph_state, source=SOURCE_MANUAL)
+    if not decision.should_persist:
+        logger.info("[%s] plan persist skipped: %s", session_id, decision.reason)
+        return
+
     try:
+        trigger_conditions = build_trigger_conditions(graph_state, source=SOURCE_MANUAL)
+        plan.trigger_conditions = trigger_conditions
         await db.save_emergency_plan(
-            plan_id=plan.plan_id,
+            plan_id=decision.plan_id or plan.plan_id,
             plan_name=plan.plan_name or "防汛应急预案",
             risk_level=risk_level,
-            trigger_conditions=plan.trigger_conditions,
+            trigger_conditions=trigger_conditions,
             status=plan.status or "draft",
             session_id=session_id,
             summary=(graph_state.get("final_response") or plan.summary or "")[:2000],
@@ -325,6 +333,8 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
     except Exception as exc:
         logger.exception("[%s] graph failed: %s", session_id, exc)
         raise HTTPException(status_code=500, detail=f"处理失败: {exc}") from exc
+    final_state.setdefault("session_id", session_id)
+    final_state.setdefault("user_query", request.query)
 
     # Save assistant response
     response_content = final_state.get("final_response") or "处理完成"
@@ -395,6 +405,8 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
                         accumulated_response = event.get("response", "")
 
             if final_state:
+                final_state.setdefault("session_id", session_id)
+                final_state.setdefault("user_query", request.query)
                 final_response = final_state.get("final_response") or accumulated_response or "处理完成"
                 # Update assistant message to completed
                 await db.update_message_content(assistant_msg_id, final_response, status="completed")
