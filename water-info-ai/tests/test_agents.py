@@ -91,15 +91,18 @@ class TestSupervisorNode:
 class TestAgentNodes:
     @pytest.mark.asyncio
     async def test_data_analyst_node_returns_summary(self):
-        with patch(
-            "app.agents.data_analyst._build_deterministic_bundle",
-            AsyncMock(
-                return_value={
-                    "data_summary": "数据分析完成",
-                    "overview_data": {"stations": [], "active_alarms": [], "station_count": 0, "alarm_count": 0},
-                    "weather_forecast": {"forecast": {"total_precip_24h_mm": 0}},
-                }
+        with (
+            patch(
+                "app.agents.data_analyst._build_deterministic_bundle",
+                AsyncMock(
+                    return_value={
+                        "data_summary": "数据分析完成",
+                        "overview_data": {"stations": [], "active_alarms": [], "station_count": 0, "alarm_count": 0},
+                        "weather_forecast": {"forecast": {"total_precip_24h_mm": 0}},
+                    }
+                ),
             ),
+            patch("app.agents.data_analyst.get_llm", return_value=SimpleNamespace(is_enabled=False)),
         ):
             result = await data_analyst_node(
                 {
