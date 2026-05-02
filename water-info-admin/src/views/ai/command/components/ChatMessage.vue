@@ -32,6 +32,7 @@
         <div v-else class="user-text">{{ message.content }}</div>
         <span v-if="streaming && message.role === 'assistant'" class="caret">|</span>
       </div>
+      <ExecutionTrace v-if="message.role === 'assistant'" :message="message" />
       <div class="time">{{ formattedTime }}</div>
     </template>
   </div>
@@ -42,6 +43,7 @@ import { computed } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { ChatMessageItem } from '@/stores/aiConversation'
+import ExecutionTrace from './ExecutionTrace.vue'
 
 const props = defineProps<{
   message: ChatMessageItem

@@ -225,6 +225,17 @@ def _build_stream_events(agent: str, update: dict) -> list[dict]:
             "items": to_plain_data(update["evidence"]),
         })
 
+    for trace in (update.get("execution_traces") or []):
+        events.append({
+            "type": "trace_update",
+            "phase": trace.get("phase", ""),
+            "status": trace.get("status", "completed"),
+            "title": trace.get("title", ""),
+            "detail": trace.get("detail", ""),
+            "tool_name": trace.get("tool_name"),
+            "metadata": trace.get("metadata", {}),
+        })
+
     events.append({"type": "agent_update", "agent": agent, "status": "done"})
     return events
 
@@ -447,8 +458,14 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
                 final_state.setdefault("session_id", session_id)
                 final_state.setdefault("user_query", request.query)
                 final_response = final_state.get("final_response") or accumulated_response or "处理完成"
+                # Collect execution traces for persistence
+                exec_traces = final_state.get("execution_traces") or []
+                trace_metadata = {"execution_traces": exec_traces} if exec_traces else None
                 # Update assistant message to completed
-                await db.update_message_content(assistant_msg_id, final_response, status="completed")
+                await db.update_message_content(
+                    assistant_msg_id, final_response, status="completed",
+                    metadata=trace_metadata,
+                )
                 # Persist plan and snapshot
                 asyncio.create_task(_persist_result(session_id, final_state))
             yield _event_line({"type": "agent_update", "agent": "__done__", "status": "done"})
@@ -837,6 +854,7 @@ async def get_conversation_messages(
                     content=m["content"],
                     message_type=m.get("message_type", "chat"),
                     status=m.get("status", "completed"),
+                    metadata=m.get("metadata"),
                     created_at=str(m["created_at"]) if m.get("created_at") else None,
                 )
                 for m in msgs

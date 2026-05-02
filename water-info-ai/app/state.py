@@ -116,6 +116,7 @@ class FloodGraphState(TypedDict, total=False):
     rag_skip_reasons: list[str]
     final_response: str
     final_response_draft: str
+    execution_traces: Annotated[list[dict], operator.add]
     error: str
 
 

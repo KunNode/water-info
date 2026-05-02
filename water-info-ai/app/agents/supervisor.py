@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.services.llm import get_llm
 from app.state import RiskLevel
+from app.tools.trace import make_trace
 from app.utils.json_parser import extract_json
 
 _RAG_GROUNDING_RISK = {RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.CRITICAL}
@@ -420,6 +421,20 @@ async def supervisor_node(state: dict) -> dict:
     inferred_focus_station = state.get("focus_station_query") or _infer_focus_station_query(user_query)
     answer_policy = state.get("answer_policy") or _infer_answer_policy(user_query)
 
+    traces: list[dict] = [
+        make_trace(
+            phase="data_query",
+            title=f"意图识别: {inferred_intent}",
+            detail=f"焦点站点: {inferred_focus_station}" if inferred_focus_station else "",
+        ),
+    ]
+
+    if answer_policy.get("data_only"):
+        traces.append(make_trace(
+            phase="data_query",
+            title="检测到纯数据查询，跳过风险评估",
+        ))
+
     # General chat should not be handed back to the workflow planner just because
     # an LLM is available; otherwise simple greetings can drift into analysis.
     if inferred_intent == "general_chat" and not _is_water_domain_query(user_query):
@@ -431,6 +446,7 @@ async def supervisor_node(state: dict) -> dict:
             "focus_station_query": inferred_focus_station,
             "answer_policy": answer_policy,
             "supervisor_reasoning": "general chat hard route",
+            "execution_traces": traces,
         }
 
     llm = get_llm()
@@ -441,6 +457,10 @@ async def supervisor_node(state: dict) -> dict:
         or bool(state.get("resource_plan"))
         or bool(state.get("notifications"))
     ):
+        traces.append(make_trace(
+            phase="final_response",
+            title="工作流完成，准备生成最终回答",
+        ))
         return {
             "next_agent": "__end__",
             "iteration": iteration,
@@ -449,6 +469,7 @@ async def supervisor_node(state: dict) -> dict:
             "focus_station_query": inferred_focus_station,
             "answer_policy": answer_policy,
             "supervisor_reasoning": "deterministic complete",
+            "execution_traces": traces,
         }
 
     # When LLM is unavailable, fall back to deterministic routing immediately.
@@ -468,6 +489,7 @@ async def supervisor_node(state: dict) -> dict:
             "focus_station_query": inferred_focus_station,
             "answer_policy": answer_policy,
             "supervisor_reasoning": "deterministic (no llm)",
+            "execution_traces": traces,
         }
 
     prompt = json.dumps({
@@ -534,6 +556,7 @@ async def supervisor_node(state: dict) -> dict:
         next_agent, state, deterministic, intent, focus_station_query, iteration, reasoning,
     )
     if preempt:
+        preempt["execution_traces"] = traces
         return preempt
 
     return {
@@ -544,4 +567,5 @@ async def supervisor_node(state: dict) -> dict:
         "focus_station_query": focus_station_query,
         "answer_policy": answer_policy,
         "supervisor_reasoning": reasoning,
+        "execution_traces": traces,
     }

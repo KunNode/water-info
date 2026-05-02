@@ -9,6 +9,7 @@ from app.agents.output_validator import validate_final_response
 from app.rag.service import format_evidence_markdown
 from app.services.llm import get_llm
 from app.state import to_plain_data
+from app.tools.trace import make_trace
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,10 @@ def _build_fallback_response(state: dict) -> str:
 
 
 async def final_response_node(state: dict) -> dict:
+    traces: list[dict] = [
+        make_trace(phase="final_response", status="started", title="正在生成最终回答"),
+    ]
+
     focus_station = state.get("focus_station")
     intent = state.get("intent", "overview")
     draft = (state.get("final_response_draft") or "").strip()
@@ -257,10 +262,24 @@ async def final_response_node(state: dict) -> dict:
                 "final_response validation failed, falling back to deterministic text: %s",
                 post_report.issues,
             )
+            traces.append(make_trace(
+                phase="final_response",
+                status="failed",
+                title="回答校验未通过，使用兜底回答",
+                detail="; ".join(post_report.issues[:3]),
+            ))
             final_text = _build_fallback_response(state)
+
+    traces.append(make_trace(
+        phase="final_response",
+        status="completed",
+        title="最终回答生成完成",
+        detail=f"回答长度 {len(final_text)} 字符",
+    ))
 
     return {
         "final_response": final_text,
         "current_agent": "final_response",
         "messages": [{"role": "final_response", "content": final_text}],
+        "execution_traces": traces,
     }

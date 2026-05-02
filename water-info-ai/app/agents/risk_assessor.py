@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.risk import calculate_composite_risk, calculate_rainfall_risk, calculate_water_level_risk
 from app.services.llm import get_llm
 from app.state import RiskAssessment, RiskLevel, to_plain_data
+from app.tools.trace import make_trace
 from app.utils.json_parser import extract_json
 
 
@@ -140,7 +141,18 @@ def _from_structured_data(state: dict) -> RiskAssessment:
 
 
 async def risk_assessor_node(state: dict) -> dict:
+    traces: list[dict] = [
+        make_trace(phase="risk_assessment", status="started", title="开始风险评估"),
+    ]
+
     assessment = _from_structured_data(state) if state.get("overview_data") else RiskAssessment()
+    traces.append(make_trace(
+        phase="risk_assessment",
+        status="completed",
+        title=f"规则基线评估完成: {assessment.risk_level.value}",
+        detail=f"综合评分 {assessment.risk_score}",
+    ))
+
     evidence = list(state.get("evidence_context") or [])
     llm = get_llm()
     station_name = state.get("focus_station", {}).get("name") if state.get("focus_station") else None
@@ -178,6 +190,12 @@ async def risk_assessor_node(state: dict) -> dict:
             if parsed:
                 assessment = _assessment_from_model(parsed, assessment)
                 content = _format_assessment_content(assessment, prefix)
+                traces.append(make_trace(
+                    phase="risk_assessment",
+                    status="completed",
+                    title=f"模型研判修正完成: {assessment.risk_level.value}",
+                    detail=f"综合评分 {assessment.risk_score}",
+                ))
         except Exception:
             content = _format_assessment_content(assessment, prefix)
 
@@ -185,4 +203,5 @@ async def risk_assessor_node(state: dict) -> dict:
         "risk_assessment": assessment,
         "current_agent": "risk_assessor",
         "messages": [{"role": "risk_assessor", "content": content or "风险评估完成"}],
+        "execution_traces": traces,
     }

@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from app.database import get_db_service
 from app.services.llm import get_llm
 from app.state import to_plain_data
+from app.tools.trace import TracedCall, make_trace
 
 _METRIC_LABELS = {
     "WATER_LEVEL": "水位",
@@ -278,18 +279,42 @@ async def _build_deterministic_bundle(_: dict) -> dict:
 
 
 async def data_analyst_node(state: dict) -> dict:
-    bundle = await _build_deterministic_bundle(state)
+    traces: list[dict] = []
+
+    with TracedCall(
+        phase="tool_call",
+        tool_name="get_flood_situation_overview",
+        title="获取全局水情概览",
+    ) as tc:
+        bundle = await _build_deterministic_bundle(state)
+        overview = bundle["overview_data"]
+        tc.complete(
+            output_summary=f"{len(overview.get('stations', []))} 个站点, {len(overview.get('alarms', []))} 条告警",
+        )
+    traces.append(tc.trace)
+
     focus_station = _pick_focus_station(bundle["overview_data"], state)
     intent = str(state.get("intent", "overview"))
     answer_policy = state.get("answer_policy") or {}
     requested_count = int(answer_policy.get("requested_count") or 1)
     metric_type = answer_policy.get("metric_type")
     if answer_policy.get("data_only") and focus_station:
-        rows = await get_db_service().get_recent_observations(
-            station_id=str(focus_station["id"]),
-            metric_type=metric_type,
-            limit=requested_count,
-        )
+        station_name = focus_station.get("name", "")
+        metric_label = _METRIC_LABELS.get(metric_type or "", metric_type or "观测")
+        with TracedCall(
+            phase="tool_call",
+            tool_name="get_recent_observations",
+            title=f"查询{station_name}最新观测数据",
+            input_summary=f"station_id={focus_station['id']}, metric_type={metric_type}, limit={requested_count}",
+        ) as tc:
+            rows = await get_db_service().get_recent_observations(
+                station_id=str(focus_station["id"]),
+                metric_type=metric_type,
+                limit=requested_count,
+            )
+            tc.complete(output_summary=f"获取到 {len(rows)} 条{metric_label}观测记录")
+        traces.append(tc.trace)
+
         summary = _format_recent_observations(
             station=focus_station,
             rows=rows,
@@ -302,6 +327,7 @@ async def data_analyst_node(state: dict) -> dict:
             "data_summary": summary,
             "current_agent": "data_analyst",
             "messages": [{"role": "data_analyst", "content": summary}],
+            "execution_traces": traces,
         }
     deterministic_summary = (
         _summarise_focus_station_answer(focus_station, bundle["overview_data"])
@@ -343,10 +369,18 @@ async def data_analyst_node(state: dict) -> dict:
         except Exception:
             summary = deterministic_summary
 
+    traces.append(make_trace(
+        phase="data_query",
+        status="completed",
+        title="数据分析完成",
+        detail=f"焦点站点: {focus_station['name']}" if focus_station else "全局概览",
+    ))
+
     return {
         **bundle,
         "focus_station": focus_station,
         "data_summary": summary,
         "current_agent": "data_analyst",
         "messages": [{"role": "data_analyst", "content": summary}],
+        "execution_traces": traces,
     }

@@ -415,15 +415,25 @@ class DatabaseService:
             """, session_id, preview)
             return msg_id
 
-    async def update_message_content(self, message_id: int, content: str, status: str = "completed") -> None:
+    async def update_message_content(
+        self, message_id: int, content: str, status: str = "completed",
+        metadata: dict | None = None,
+    ) -> None:
         """Update an existing message's content and status (for streaming completion)."""
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            await conn.execute("""
-                UPDATE conversation_message
-                SET content = $2, status = $3
-                WHERE id = $1
-            """, message_id, content, status)
+            if metadata is not None:
+                await conn.execute("""
+                    UPDATE conversation_message
+                    SET content = $2, status = $3, metadata = $4::jsonb
+                    WHERE id = $1
+                """, message_id, content, status, json.dumps(metadata, ensure_ascii=False))
+            else:
+                await conn.execute("""
+                    UPDATE conversation_message
+                    SET content = $2, status = $3
+                    WHERE id = $1
+                """, message_id, content, status)
             # Also update session's last_message_preview
             row = await conn.fetchrow(
                 "SELECT session_id FROM conversation_message WHERE id = $1", message_id

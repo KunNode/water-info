@@ -402,6 +402,7 @@ export interface ConversationMessage {
   content: string
   message_type?: string
   status?: string
+  metadata?: Record<string, any>
   created_at: string | null
 }
 

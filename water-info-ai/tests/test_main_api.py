@@ -145,6 +145,48 @@ def test_stream_events_suppress_intermediate_agent_messages():
     assert [event for event in events if event["type"] == "agent_message"] == []
 
 
+def test_stream_events_emit_trace_update_when_traces_present():
+    events = _build_stream_events(
+        "data_analyst",
+        {
+            "data_summary": "概览",
+            "messages": [{"role": "data_analyst", "content": "概览"}],
+            "execution_traces": [
+                {
+                    "phase": "tool_call",
+                    "status": "completed",
+                    "title": "获取水情概览",
+                    "detail": "5 个站点",
+                    "tool_name": "get_flood_situation_overview",
+                    "metadata": {"duration_ms": 42},
+                },
+            ],
+        },
+    )
+
+    trace_events = [e for e in events if e["type"] == "trace_update"]
+    assert len(trace_events) == 1
+    assert trace_events[0]["phase"] == "tool_call"
+    assert trace_events[0]["title"] == "获取水情概览"
+    assert trace_events[0]["detail"] == "5 个站点"
+    assert trace_events[0]["tool_name"] == "get_flood_situation_overview"
+    assert trace_events[0]["metadata"]["duration_ms"] == 42
+
+
+def test_stream_events_no_trace_update_when_no_traces():
+    events = _build_stream_events(
+        "data_analyst",
+        {
+            "data_summary": "概览",
+            "messages": [{"role": "data_analyst", "content": "概览"}],
+        },
+    )
+
+    trace_events = [e for e in events if e["type"] == "trace_update"]
+    assert trace_events == []
+
+
+
 def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():
     plan = EmergencyPlan(
         plan_id="EP-001",
