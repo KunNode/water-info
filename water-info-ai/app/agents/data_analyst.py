@@ -8,6 +8,12 @@ from app.database import get_db_service
 from app.services.llm import get_llm
 from app.state import to_plain_data
 
+_METRIC_LABELS = {
+    "WATER_LEVEL": "水位",
+    "RAINFALL": "雨量",
+    "FLOW": "流量",
+}
+
 
 def _normalize(text: str | None) -> str:
     return "".join(ch.lower() for ch in str(text or "") if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
@@ -169,6 +175,48 @@ def _summarise_focus_station_answer(station: dict, overview: dict) -> str:
     return "\n\n".join(parts)
 
 
+def _format_value(value) -> str:
+    try:
+        return f"{float(value):.3f}".rstrip("0").rstrip(".")
+    except Exception:
+        return str(value or "")
+
+
+def _format_recent_observations(
+    *,
+    station: dict,
+    rows: list[dict],
+    requested_count: int,
+    metric_type: str | None,
+) -> str:
+    station_name = station.get("name") or station.get("code") or "该站点"
+    metric_label = _METRIC_LABELS.get(str(metric_type or ""), "观测")
+    title = f"{station_name} 最新 {requested_count} 条{metric_label}数据"
+    if not rows:
+        return f"{title}\n\n当前数据库未查到符合条件的观测记录。"
+
+    lines = [
+        title,
+        "",
+        "| 时间 | 指标 | 数值 | 单位 | 质量 |",
+        "| --- | --- | ---: | --- | --- |",
+    ]
+    for row in rows:
+        row_metric = str(row.get("metric_type") or metric_type or "")
+        lines.append(
+            "| "
+            f"{row.get('observed_at', '---')} | "
+            f"{_METRIC_LABELS.get(row_metric, row_metric or '观测')} | "
+            f"{_format_value(row.get('value'))} | "
+            f"{row.get('unit') or ''} | "
+            f"{row.get('quality_flag') or row.get('quality') or ''} |"
+        )
+    if len(rows) < requested_count:
+        lines.append("")
+        lines.append(f"当前库内仅查到 {len(rows)} 条符合条件的数据。")
+    return "\n".join(lines)
+
+
 def _summarise_grounding_context(overview: dict, weather: dict, intent: str) -> str:
     stations = overview.get("stations", [])
     alarms = overview.get("active_alarms", [])
@@ -233,6 +281,28 @@ async def data_analyst_node(state: dict) -> dict:
     bundle = await _build_deterministic_bundle(state)
     focus_station = _pick_focus_station(bundle["overview_data"], state)
     intent = str(state.get("intent", "overview"))
+    answer_policy = state.get("answer_policy") or {}
+    requested_count = int(answer_policy.get("requested_count") or 1)
+    metric_type = answer_policy.get("metric_type")
+    if answer_policy.get("data_only") and focus_station:
+        rows = await get_db_service().get_recent_observations(
+            station_id=str(focus_station["id"]),
+            metric_type=metric_type,
+            limit=requested_count,
+        )
+        summary = _format_recent_observations(
+            station=focus_station,
+            rows=rows,
+            requested_count=requested_count,
+            metric_type=metric_type,
+        )
+        return {
+            **bundle,
+            "focus_station": focus_station,
+            "data_summary": summary,
+            "current_agent": "data_analyst",
+            "messages": [{"role": "data_analyst", "content": summary}],
+        }
     deterministic_summary = (
         _summarise_focus_station_answer(focus_station, bundle["overview_data"])
         if focus_station
@@ -245,7 +315,7 @@ async def data_analyst_node(state: dict) -> dict:
 
     summary = deterministic_summary
     llm = get_llm()
-    if llm.is_enabled:
+    if llm.is_enabled and not answer_policy.get("data_only"):
         try:
             response = await llm.ainvoke(
                 {

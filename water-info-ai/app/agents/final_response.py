@@ -143,19 +143,22 @@ async def final_response_node(state: dict) -> dict:
     intent = state.get("intent", "overview")
     draft = (state.get("final_response_draft") or "").strip()
     evidence = state.get("evidence") or []
+    answer_policy = state.get("answer_policy") or {}
 
     if draft:
         # Upstream agent (conversation_assistant / knowledge_retriever answer mode) already
         # produced the answer text. Use it as-is, skip the heavy LLM rewrite, but still run
         # validation and unified evidence appending so the heading appears at most once.
         final_text = _append_evidence_if_missing(draft, evidence)
+    elif answer_policy.get("data_only") and state.get("data_summary"):
+        final_text = str(state.get("data_summary") or "").strip()
     else:
         final_text = _build_fallback_response(state)
 
     pre_report = validate_final_response(final_text, state)
 
     llm = get_llm()
-    if llm.is_enabled and not draft:
+    if llm.is_enabled and not draft and not answer_policy.get("data_only"):
         try:
             response_style = "自然、友好的助手对话"
             if intent in {"plan_generation", "resource_dispatch", "notification"}:

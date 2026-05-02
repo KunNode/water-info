@@ -15,6 +15,7 @@ _TURN_RESET = {
     "supervisor_reasoning": "",
     "focus_station_query": "",
     "focus_station": {},
+    "answer_policy": {},
     "data_summary": "",
     "overview_data": {},
     "weather_forecast": {},

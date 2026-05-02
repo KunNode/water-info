@@ -117,6 +117,77 @@ class TestAgentNodes:
         assert result["current_agent"] == "data_analyst"
 
     @pytest.mark.asyncio
+    async def test_data_analyst_data_only_station_query_returns_recent_observation_table(self):
+        db = SimpleNamespace(
+            get_recent_observations=AsyncMock(
+                return_value=[
+                    {
+                        "observed_at": "2026-05-02T12:30:00+08:00",
+                        "metric_type": "WATER_LEVEL",
+                        "value": 4.248,
+                        "unit": "m",
+                        "quality_flag": "GOOD",
+                    },
+                    {
+                        "observed_at": "2026-05-02T12:25:00+08:00",
+                        "metric_type": "WATER_LEVEL",
+                        "value": 4.220,
+                        "unit": "m",
+                        "quality_flag": "GOOD",
+                    },
+                ]
+            )
+        )
+        with (
+            patch(
+                "app.agents.data_analyst._build_deterministic_bundle",
+                AsyncMock(
+                    return_value={
+                        "data_summary": "默认摘要",
+                        "overview_data": {
+                            "stations": [
+                                {
+                                    "id": "station-1",
+                                    "code": "ST_NORTH",
+                                    "name": "北闸站",
+                                    "water_level": 4.248,
+                                }
+                            ],
+                            "active_alarms": [],
+                            "station_count": 1,
+                            "alarm_count": 0,
+                        },
+                        "weather_forecast": {"forecast": {"total_precip_24h_mm": 0}},
+                    }
+                ),
+            ),
+            patch("app.agents.data_analyst.get_llm", return_value=SimpleNamespace(is_enabled=False)),
+            patch("app.agents.data_analyst.get_db_service", return_value=db),
+        ):
+            result = await data_analyst_node(
+                {
+                    "session_id": "test-session",
+                    "user_query": "北闸站最新5条水位数据，无需分析",
+                    "answer_policy": {
+                        "data_only": True,
+                        "requested_count": 5,
+                        "metric_type": "WATER_LEVEL",
+                    },
+                }
+            )
+
+        summary = result["data_summary"]
+        assert "北闸站" in summary
+        assert "| 时间 | 指标 | 数值 | 单位 | 质量 |" in summary
+        assert "4.248" in summary
+        assert "当前库内仅查到 2 条" in summary
+        db.get_recent_observations.assert_awaited_once_with(
+            station_id="station-1",
+            metric_type="WATER_LEVEL",
+            limit=5,
+        )
+
+    @pytest.mark.asyncio
     async def test_data_analyst_node_falls_back_to_llm_when_deterministic_summary_fails(self):
         mock_llm = SimpleNamespace(
             is_enabled=True,

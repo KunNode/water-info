@@ -133,6 +133,18 @@ def test_stream_events_suppress_draft_message_to_avoid_double_send():
     )
 
 
+def test_stream_events_suppress_intermediate_agent_messages():
+    events = _build_stream_events(
+        "data_analyst",
+        {
+            "data_summary": "北闸站最新水位 4.248m。",
+            "messages": [{"role": "data_analyst", "content": "北闸站最新水位 4.248m。"}],
+        },
+    )
+
+    assert [event for event in events if event["type"] == "agent_message"] == []
+
+
 def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():
     plan = EmergencyPlan(
         plan_id="EP-001",

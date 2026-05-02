@@ -30,7 +30,11 @@ async def _fetch_flood_overview(_: dict) -> str:
 async def _fetch_station_observations(payload: dict) -> str:
     station_id = payload.get("station_id")
     if station_id:
-        data = await get_db_service().get_rainfall_stats(station_id)
+        data = await get_db_service().get_recent_observations(
+            station_id=station_id,
+            metric_type=payload.get("metric_type"),
+            limit=int(payload.get("limit") or 5),
+        )
     else:
         data = await get_db_service().get_station_with_latest_data()
     return _dumps(data)

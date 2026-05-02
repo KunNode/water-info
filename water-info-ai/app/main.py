@@ -176,10 +176,19 @@ def _build_stream_events(agent: str, update: dict) -> list[dict]:
     content = _message_content(update)
     final_response = update.get("final_response")
     final_response_draft = update.get("final_response_draft")
+    intermediate_agents = {
+        "data_analyst",
+        "risk_assessor",
+        "plan_generator",
+        "resource_dispatcher",
+        "notification",
+        "execution_monitor",
+        "parallel_dispatch",
+    }
     # Suppress agent_message when this update is a draft destined for final_response_node:
     # the same text would otherwise reach the client twice (once as the upstream agent's
     # message, once as the authoritative final_response).
-    if content and not final_response and not final_response_draft:
+    if content and not final_response and not final_response_draft and agent not in intermediate_agents:
         events.append({"type": "agent_message", "agent": agent, "content": content})
 
     if update.get("risk_assessment"):

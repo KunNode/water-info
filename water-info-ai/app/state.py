@@ -98,6 +98,7 @@ class FloodGraphState(TypedDict, total=False):
     supervisor_reasoning: str
     focus_station_query: str
     focus_station: dict
+    answer_policy: dict
     data_summary: str
     overview_data: dict
     weather_forecast: dict

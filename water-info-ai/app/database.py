@@ -134,6 +134,24 @@ class DatabaseService:
               AND observed_at >= NOW() - INTERVAL '24 hours'
         """, station_id)
 
+    async def get_recent_observations(
+        self,
+        *,
+        station_id: str,
+        metric_type: str | None = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        capped_limit = max(1, min(int(limit), 50))
+        normalized_metric = str(metric_type).upper() if metric_type else None
+        return await self._fetch("""
+            SELECT station_id, metric_type, value, unit, observed_at, quality_flag, source
+            FROM observation
+            WHERE station_id = $1
+              AND ($2::text IS NULL OR metric_type = $2)
+            ORDER BY observed_at DESC
+            LIMIT $3
+        """, station_id, normalized_metric, capped_limit)
+
     # ── Alarms ────────────────────────────────────────────────────────────────
 
     async def get_active_alarms(self, station_id: str | None = None, limit: int = 15) -> list[dict]:
