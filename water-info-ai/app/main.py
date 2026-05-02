@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -266,6 +267,7 @@ async def lifespan(app: FastAPI):
     try:
         await db._get_pool()
         await db.ensure_plan_tables()
+        await db.ensure_conversation_tables()
         await db.ensure_kb_tables()
         logger.info("数据库连接池就绪")
     except Exception as exc:
@@ -690,10 +692,12 @@ async def get_conversation(session_id: str, http_request: Request):
         snapshot_row = await db.get_conversation_snapshot(session_id)
         snapshot = None
         if snapshot_row:
+            plan_info = snapshot_row.get("plan_info")
+            agent_status = snapshot_row.get("agent_status_summary")
             snapshot = ConversationSnapshot(
                 risk_level=snapshot_row.get("risk_level", "none"),
-                plan_info=snapshot_row.get("plan_info"),
-                agent_status_summary=snapshot_row.get("agent_status_summary"),
+                plan_info=json.loads(plan_info) if isinstance(plan_info, str) else plan_info,
+                agent_status_summary=json.loads(agent_status) if isinstance(agent_status, str) else agent_status,
                 query_count=snapshot_row.get("query_count", 0),
             )
 
@@ -748,10 +752,12 @@ async def get_conversation_messages(
         snapshot_row = await db.get_conversation_snapshot(session_id)
         snapshot = None
         if snapshot_row:
+            plan_info = snapshot_row.get("plan_info")
+            agent_status = snapshot_row.get("agent_status_summary")
             snapshot = ConversationSnapshot(
                 risk_level=snapshot_row.get("risk_level", "none"),
-                plan_info=snapshot_row.get("plan_info"),
-                agent_status_summary=snapshot_row.get("agent_status_summary"),
+                plan_info=json.loads(plan_info) if isinstance(plan_info, str) else plan_info,
+                agent_status_summary=json.loads(agent_status) if isinstance(agent_status, str) else agent_status,
                 query_count=snapshot_row.get("query_count", 0),
             )
 

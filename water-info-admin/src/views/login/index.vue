@@ -82,19 +82,6 @@
             </div>
           </div>
 
-          <div class="fm-login__field">
-            <label class="fm-label-sm">验证码</label>
-            <div class="fm-login__captcha">
-              <div class="fm-login__input" :class="{ focused: focusedField === 'captcha' }" style="flex:1">
-                <input v-model="loginForm.captcha" type="text" placeholder="验证码"
-                  @focus="focusedField = 'captcha'" @blur="focusedField = ''"/>
-              </div>
-              <div class="fm-login__captcha-img" @click="refreshCaptcha">
-                {{ captchaText }}
-              </div>
-            </div>
-          </div>
-
           <div class="fm-login__options">
             <label class="fm-login__remember">
               <span class="fm-switch" :class="{ on: remember }" @click="remember = !remember"/>
@@ -134,12 +121,9 @@ const loading = ref(false)
 const remember = ref(false)
 const showPassword = ref(false)
 const focusedField = ref('')
-const captchaText = ref('A8X2')
-
 const loginForm = reactive({
   username: '',
   password: '',
-  captcha: '',
 })
 
 const brandStats = [
@@ -148,11 +132,6 @@ const brandStats = [
   { value: '6', label: '智能体' },
   { value: '4 min', label: '端到端' },
 ]
-
-function refreshCaptcha() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  captchaText.value = Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
-}
 
 async function handleLogin() {
   if (!loginForm.username) {
@@ -199,11 +178,21 @@ async function handleLogin() {
               linear-gradient(180deg, #05101f 0%, #030812 100%);
 }
 
+html:not(.dark) .fm-login__brand {
+  background: radial-gradient(800px 600px at 30% 40%, rgba(29,91,214,0.12), transparent 60%),
+              radial-gradient(600px 500px at 70% 70%, rgba(0,122,255,0.08), transparent 60%),
+              linear-gradient(180deg, #f0f4ff 0%, #e8eeff 100%);
+}
+
 .fm-login__bg {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+html:not(.dark) .fm-login__bg {
+  opacity: 0.35;
 }
 
 .fm-login__brand-content {
@@ -249,6 +238,107 @@ async function handleLogin() {
   font-size: 18px;
   font-weight: 700;
   color: var(--fm-fg);
+}
+
+html:not(.dark) .fm-login__brand-name {
+  color: #1d1d1f;
+}
+
+html:not(.dark) .fm-login__brand-content .fm-label-sm {
+  color: #6e6e73;
+}
+
+html:not(.dark) .fm-login__slogan {
+  color: #1d1d1f;
+}
+
+html:not(.dark) .fm-login__desc {
+  color: #424245;
+}
+
+html:not(.dark) .fm-login__stat .fm-label-sm {
+  color: #6e6e73;
+}
+
+html:not(.dark) .fm-login__brand-footer .fm-label-sm {
+  color: #a1a1a6;
+}
+
+/* Light mode — form-side font refinements */
+html:not(.dark) .fm-login__field .fm-label-sm {
+  color: var(--fm-fg-soft);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+html:not(.dark) .fm-login__input {
+  background: var(--fm-bg-1);
+  border-color: var(--fm-line);
+  font-weight: 450;
+}
+
+html:not(.dark) .fm-login__input input {
+  font-weight: 450;
+  letter-spacing: 0.01em;
+}
+
+html:not(.dark) .fm-login__input input::placeholder {
+  color: var(--fm-fg-dim);
+}
+
+html:not(.dark) .fm-login__options {
+  color: var(--fm-fg-soft);
+  font-weight: 450;
+}
+
+html:not(.dark) .fm-login__remember .fm-soft {
+  color: var(--fm-fg-soft);
+}
+
+html:not(.dark) .fm-login__agreement {
+  color: var(--fm-fg-mute);
+}
+
+html:not(.dark) .fm-login__brand-mark {
+  box-shadow: 0 0 16px rgba(29,91,214,0.35);
+}
+
+html:not(.dark) .fm-switch {
+  background: var(--fm-bg-4);
+  border-color: var(--fm-line-2);
+}
+
+html:not(.dark) .fm-switch::after {
+  background: var(--fm-fg-dim);
+}
+
+html:not(.dark) .fm-switch.on {
+  background-color: var(--fm-brand);
+  border-color: var(--fm-brand);
+}
+
+html:not(.dark) .fm-switch.on::after {
+  background: #fff;
+}
+
+html:not(.dark) .gradient-text {
+  background: linear-gradient(90deg, var(--fm-brand), var(--fm-brand-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+html:not(.dark) .fm-login__forgot {
+  color: var(--fm-brand);
+  font-weight: 500;
+}
+
+html:not(.dark) .fm-login__submit {
+  box-shadow: 0 4px 12px -2px rgba(29,91,214,0.35);
+}
+
+html:not(.dark) .fm-login__brand-mark {
+  font-size: 20px;
 }
 
 .fm-login__brand-body {
@@ -325,10 +415,20 @@ async function handleLogin() {
   margin: 0;
 }
 
+html:not(.dark) .fm-login__form-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
 .fm-login__form-subtitle {
   margin-top: 6px;
   font-size: 13px;
   color: var(--fm-fg-mute);
+}
+
+html:not(.dark) .fm-login__form-subtitle {
+  color: var(--fm-fg-soft);
+  font-size: 13.5px;
 }
 
 .fm-login__fields {
@@ -391,30 +491,6 @@ async function handleLogin() {
   }
 }
 
-.fm-login__captcha {
-  display: flex;
-  gap: 10px;
-}
-
-.fm-login__captcha-img {
-  width: 110px;
-  height: 42px;
-  background: linear-gradient(135deg, #0a1628, #06121f);
-  border: 1px solid var(--fm-line);
-  border-radius: var(--fm-radius-sm);
-  display: grid;
-  place-items: center;
-  font-family: var(--fm-font-mono);
-  font-size: 18px;
-  letter-spacing: 0.2em;
-  color: var(--fm-brand-2);
-  font-weight: 700;
-  text-decoration: line-through;
-  text-decoration-color: rgba(73,225,255,0.3);
-  cursor: pointer;
-  user-select: none;
-}
-
 .fm-login__options {
   display: flex;
   justify-content: space-between;
@@ -432,13 +508,13 @@ async function handleLogin() {
 
 .fm-switch {
   position: relative;
-  width: 28px;
-  height: 16px;
-  border-radius: 8px;
-  background: var(--fm-bg-3);
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--fm-bg-4);
   border: 1px solid var(--fm-line-2);
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background-color 0.25s ease, border-color 0.25s ease;
   flex-shrink: 0;
 
   &::after {
@@ -446,19 +522,19 @@ async function handleLogin() {
     position: absolute;
     top: 2px;
     left: 2px;
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
-    background: var(--fm-fg-soft);
-    transition: all 0.2s;
+    background: var(--fm-fg-dim);
+    transition: transform 0.25s ease, background-color 0.25s ease;
   }
 
   &.on {
-    background: var(--fm-grad-brand);
-    border-color: transparent;
+    background-color: var(--fm-brand);
+    border-color: var(--fm-brand);
 
     &::after {
-      left: 14px;
+      transform: translateX(14px);
       background: #fff;
     }
   }
