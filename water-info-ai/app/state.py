@@ -87,6 +87,8 @@ class EmergencyPlan:
 
 class FloodGraphState(TypedDict, total=False):
     session_id: str
+    user_id: str
+    username: str
     user_query: str
     messages: Annotated[list[dict], operator.add]
     iteration: int
@@ -96,6 +98,7 @@ class FloodGraphState(TypedDict, total=False):
     supervisor_reasoning: str
     focus_station_query: str
     focus_station: dict
+    answer_policy: dict
     data_summary: str
     overview_data: dict
     weather_forecast: dict
@@ -105,11 +108,15 @@ class FloodGraphState(TypedDict, total=False):
     notifications: list[NotificationRecord]
     evidence: list[Evidence]
     evidence_context: list[Evidence]
+    memory_context: dict
+    memory_write_result: dict
     rag_target: str
     rag_call_count: int
     rag_query_cache: dict
     rag_skip_reasons: list[str]
     final_response: str
+    final_response_draft: str
+    execution_traces: Annotated[list[dict], operator.add]
     error: str
 
 

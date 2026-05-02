@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.services.llm import get_llm
 from app.state import RiskLevel
+from app.tools.trace import make_trace
 from app.utils.json_parser import extract_json
 
 _RAG_GROUNDING_RISK = {RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.CRITICAL}
@@ -97,6 +98,8 @@ RISK_KEYWORDS = ["风险", "研判", "评估", "危险吗", "严不严重", "趋
 ALARM_KEYWORDS = ["告警", "预警", "报警", "异常", "超限", "告急"]
 OVERVIEW_KEYWORDS = ["总览", "概况", "整体", "总体", "全局", "态势", "情况怎么样", "现在怎么样", "总体情况"]
 STATION_KEYWORDS = ["站", "站点", "水库", "闸", "泵站", "断面"]
+DATA_ONLY_KEYWORDS = ["无需分析", "不用分析", "不要分析", "无须分析", "只要数据", "只看数据", "数据库数据"]
+DATA_LOOKUP_KEYWORDS = ["最新", "数据", "观测", "记录", "明细"]
 KNOWLEDGE_KEYWORDS = [
     "制度",
     "手册",
@@ -133,6 +136,41 @@ WATER_DOMAIN_KEYWORDS = [
 
 def _contains_any(text: str, keywords: list[str]) -> bool:
     return any(keyword in text for keyword in keywords)
+
+
+def _extract_requested_count(query: str) -> int:
+    for pattern in [r"最新(?:的)?\s*(\d{1,3})\s*条", r"(\d{1,3})\s*条"]:
+        match = re.search(pattern, query)
+        if match:
+            return max(1, min(int(match.group(1)), 50))
+    return 1
+
+
+def _infer_metric_type(query: str) -> str | None:
+    if any(word in query for word in ["水位", "水深"]):
+        return "WATER_LEVEL"
+    if any(word in query for word in ["雨量", "降雨", "雨情"]):
+        return "RAINFALL"
+    if any(word in query for word in ["流量", "流速"]):
+        return "FLOW"
+    return None
+
+
+def _infer_answer_policy(query: str) -> dict:
+    data_only = _contains_any(query, DATA_ONLY_KEYWORDS)
+    data_lookup = data_only or (
+        _contains_any(query, DATA_LOOKUP_KEYWORDS)
+        and ("最新" in query or "数据库" in query or "数据" in query)
+    )
+    requested_count = _extract_requested_count(query)
+    return {
+        "data_only": data_only,
+        "data_lookup": data_lookup,
+        "requested_count": requested_count,
+        "metric_type": _infer_metric_type(query),
+        "suppress_risk": data_only,
+        "suppress_summary": data_only,
+    }
 
 
 def _is_general_chat_query(query: str) -> bool:
@@ -177,6 +215,8 @@ def _infer_intent(query: str) -> str:
     has_station_focus = _infer_focus_station_query(query) is not None or _contains_any(query, STATION_KEYWORDS)
     if _is_general_chat_query(query):
         return "general_chat"
+    if _infer_answer_policy(query)["data_lookup"]:
+        return "station_status" if has_station_focus else "overview"
     if _is_knowledge_query(query):
         return "knowledge_qa"
     if _contains_any(query, EXECUTION_KEYWORDS):
@@ -215,6 +255,7 @@ def _infer_focus_station_query(query: str) -> str | None:
 def _deterministic_route(state: dict) -> str | None:
     query = str(state.get("user_query", ""))
     intent = str(state.get("intent") or _infer_intent(query))
+    answer_policy = state.get("answer_policy") or _infer_answer_policy(query)
     has_data = bool(state.get("data_summary"))
     has_risk = state.get("risk_assessment") is not None
     has_plan = state.get("emergency_plan") is not None
@@ -232,6 +273,8 @@ def _deterministic_route(state: dict) -> str | None:
         if intent == "general_chat":
             return "conversation_assistant"
         return "data_analyst"
+    if answer_policy.get("data_only"):
+        return "__end__"
     if intent == "general_chat":
         return "conversation_assistant"
     if intent == "knowledge_qa":
@@ -376,6 +419,21 @@ async def supervisor_node(state: dict) -> dict:
     user_query = str(state.get("user_query", ""))
     inferred_intent = str(state.get("intent") or _infer_intent(user_query))
     inferred_focus_station = state.get("focus_station_query") or _infer_focus_station_query(user_query)
+    answer_policy = state.get("answer_policy") or _infer_answer_policy(user_query)
+
+    traces: list[dict] = [
+        make_trace(
+            phase="data_query",
+            title=f"意图识别: {inferred_intent}",
+            detail=f"焦点站点: {inferred_focus_station}" if inferred_focus_station else "",
+        ),
+    ]
+
+    if answer_policy.get("data_only"):
+        traces.append(make_trace(
+            phase="data_query",
+            title="检测到纯数据查询，跳过风险评估",
+        ))
 
     # General chat should not be handed back to the workflow planner just because
     # an LLM is available; otherwise simple greetings can drift into analysis.
@@ -386,7 +444,9 @@ async def supervisor_node(state: dict) -> dict:
             "current_agent": "supervisor",
             "intent": inferred_intent,
             "focus_station_query": inferred_focus_station,
+            "answer_policy": answer_policy,
             "supervisor_reasoning": "general chat hard route",
+            "execution_traces": traces,
         }
 
     llm = get_llm()
@@ -397,13 +457,19 @@ async def supervisor_node(state: dict) -> dict:
         or bool(state.get("resource_plan"))
         or bool(state.get("notifications"))
     ):
+        traces.append(make_trace(
+            phase="final_response",
+            title="工作流完成，准备生成最终回答",
+        ))
         return {
             "next_agent": "__end__",
             "iteration": iteration,
             "current_agent": "supervisor",
             "intent": inferred_intent,
             "focus_station_query": inferred_focus_station,
+            "answer_policy": answer_policy,
             "supervisor_reasoning": "deterministic complete",
+            "execution_traces": traces,
         }
 
     # When LLM is unavailable, fall back to deterministic routing immediately.
@@ -421,7 +487,9 @@ async def supervisor_node(state: dict) -> dict:
             "current_agent": "supervisor",
             "intent": inferred_intent,
             "focus_station_query": inferred_focus_station,
+            "answer_policy": answer_policy,
             "supervisor_reasoning": "deterministic (no llm)",
+            "execution_traces": traces,
         }
 
     prompt = json.dumps({
@@ -436,10 +504,14 @@ async def supervisor_node(state: dict) -> dict:
             "resource_plan": bool(state.get("resource_plan")),
             "notifications": bool(state.get("notifications")),
         },
+        "memory_context": state.get("memory_context", {}),
+        "answer_policy": answer_policy,
         "guardrails": [
             "防汛业务问题必须先有 data_analyst 提供监测数据 grounding，除非是闲聊或知识库问答。",
             "预案、资源、通知必须建立在 risk_assessor 的风险评估之后。",
             "资源调度和通知必须建立在 plan_generator 的预案之后。",
+            "涉及刚才、上一轮、前面说的、我叫什么等同会话上下文问题，"
+            "可根据 memory_context.recent_session_messages 选择 conversation_assistant。",
             "无法判断或当前任务已完整时才选择 __end__。",
         ],
     }, ensure_ascii=False)
@@ -484,6 +556,7 @@ async def supervisor_node(state: dict) -> dict:
         next_agent, state, deterministic, intent, focus_station_query, iteration, reasoning,
     )
     if preempt:
+        preempt["execution_traces"] = traces
         return preempt
 
     return {
@@ -492,5 +565,7 @@ async def supervisor_node(state: dict) -> dict:
         "current_agent": "supervisor",
         "intent": intent,
         "focus_station_query": focus_station_query,
+        "answer_policy": answer_policy,
         "supervisor_reasoning": reasoning,
+        "execution_traces": traces,
     }

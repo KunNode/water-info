@@ -1,164 +1,270 @@
 <template>
   <div class="lake-stage">
-    <div class="lake-stage__sky" />
-    <div class="lake-stage__rain" />
-
     <svg
       class="lake-stage__scene"
-      viewBox="0 0 880 800"
+      viewBox="0 0 1200 900"
       preserveAspectRatio="xMidYMid slice"
       aria-hidden="true"
     >
       <defs>
-        <linearGradient id="ls-terrain1" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#1f2d45" />
-          <stop offset="100%" stop-color="#0b1220" />
-        </linearGradient>
-        <linearGradient id="ls-terrain2" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#162133" />
-          <stop offset="100%" stop-color="#070b16" />
-        </linearGradient>
-        <linearGradient id="ls-lake" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#3a8ad6" stop-opacity="0.85" />
-          <stop offset="50%" stop-color="#1d6bc7" stop-opacity="0.78" />
-          <stop offset="100%" stop-color="#0a3b99" stop-opacity="0.55" />
-        </linearGradient>
-        <radialGradient id="ls-lake-hl" cx="50%" cy="40%" r="60%">
-          <stop offset="0%" stop-color="#49e1ff" stop-opacity="0.45" />
-          <stop offset="100%" stop-color="#49e1ff" stop-opacity="0" />
-        </radialGradient>
         <filter id="ls-glow"><feGaussianBlur stdDeviation="3" /></filter>
+        <filter id="ls-soft-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="2" />
+        </filter>
+        <linearGradient id="ls-vignette" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="rgba(6,10,20,0.45)" />
+          <stop offset="40%" stop-color="rgba(6,10,20,0)" />
+          <stop offset="100%" stop-color="rgba(6,10,20,0.35)" />
+        </linearGradient>
+        <marker id="ls-flow-head" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M 0 0 L 12 6 L 0 12 L 3 6 Z" fill="rgba(140,235,255,0.95)" />
+        </marker>
+
+        <!-- Type icons (centred at origin) -->
+        <symbol id="icon-water-level" viewBox="-9 -9 18 18">
+          <path d="M -7 -2 Q -3.5 -6 0 -2 T 7 -2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          <path d="M -7 3 Q -3.5 -1 0 3 T 7 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </symbol>
+        <symbol id="icon-rain-gauge" viewBox="-9 -9 18 18">
+          <path d="M 0 -7 C -4.5 -2 -6 1 -6 3 A 6 6 0 1 0 6 3 C 6 1 4.5 -2 0 -7 Z" fill="currentColor" />
+        </symbol>
+        <symbol id="icon-flow" viewBox="-9 -9 18 18">
+          <path d="M -6 -4 L 0 0 L -6 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M 0 -4 L 6 0 L 0 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </symbol>
+        <symbol id="icon-reservoir" viewBox="-9 -9 18 18">
+          <path d="M -6 5 L -4 -4 L 4 -4 L 6 5 Z" fill="currentColor" opacity="0.85" />
+          <line x1="-6" y1="5" x2="6" y2="5" stroke="currentColor" stroke-width="1.4" />
+          <line x1="-2" y1="-4" x2="-2" y2="5" stroke="rgba(6,10,20,0.6)" stroke-width="1" />
+          <line x1="2" y1="-4" x2="2" y2="5" stroke="rgba(6,10,20,0.6)" stroke-width="1" />
+        </symbol>
+        <symbol id="icon-gate" viewBox="-9 -9 18 18">
+          <rect x="-6" y="-5" width="12" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <line x1="-6" y1="0" x2="6" y2="0" stroke="currentColor" stroke-width="1.4" />
+          <line x1="-2.5" y1="-5" x2="-2.5" y2="5" stroke="currentColor" stroke-width="1.2" />
+          <line x1="2.5" y1="-5" x2="2.5" y2="5" stroke="currentColor" stroke-width="1.2" />
+        </symbol>
+        <symbol id="icon-pump" viewBox="-9 -9 18 18">
+          <circle r="6.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <text x="0" y="3.6" text-anchor="middle" font-size="10" font-weight="700" font-family="JetBrains Mono, monospace" fill="currentColor">P</text>
+        </symbol>
+        <symbol id="icon-station" viewBox="-9 -9 18 18">
+          <circle r="3.5" fill="currentColor" />
+        </symbol>
       </defs>
 
-      <path
-        d="M 0 420 L 80 380 L 160 360 L 240 340 L 340 320 L 440 310 L 540 300 L 640 310 L 740 320 L 820 340 L 880 360 L 880 800 L 0 800 Z"
-        fill="url(#ls-terrain2)"
-        opacity="0.7"
+      <!-- Aerial photo of Cuiping Lake basin -->
+      <image
+        href="/image/backgrand.png"
+        x="0" y="0"
+        width="1200" height="900"
+        preserveAspectRatio="xMidYMid slice"
       />
-      <path
-        d="M 0 480 L 70 460 L 140 430 L 210 420 L 280 410 L 360 405 L 440 400 L 520 405 L 600 410 L 680 425 L 760 445 L 880 470 L 880 800 L 0 800 Z"
-        fill="url(#ls-terrain1)"
-      />
-      <path
-        d="M 0 560 L 80 540 L 160 530 L 240 520 L 320 525 L 400 520 L 480 515 L 560 520 L 640 525 L 720 540 L 800 555 L 880 570 L 880 800 L 0 800 Z"
-        fill="#1f2d45"
-      />
+      <!-- Top/bottom vignette to keep top bar and legend readable -->
+      <rect x="0" y="0" width="1200" height="900" fill="url(#ls-vignette)" />
 
-      <ellipse cx="440" cy="600" rx="320" ry="68" fill="url(#ls-lake-hl)" opacity="0.6" />
-      <ellipse cx="440" cy="610" rx="290" ry="56" fill="url(#ls-lake)" />
-      <ellipse cx="440" cy="600" rx="200" ry="28" fill="none" stroke="rgba(73,225,255,0.35)" stroke-width="0.8" />
-      <ellipse cx="440" cy="608" rx="240" ry="38" fill="none" stroke="rgba(73,225,255,0.25)" stroke-width="0.8" />
-      <ellipse cx="440" cy="616" rx="270" ry="48" fill="none" stroke="rgba(73,225,255,0.18)" stroke-width="0.8" />
-
-      <g opacity="0.4">
-        <polygon points="0,600 100,580 80,800 0,800" fill="#0b1426" />
-        <polygon points="100,580 220,565 200,800 80,800" fill="#0e1a32" />
-        <polygon points="660,560 780,580 800,800 700,800" fill="#0b1426" />
-        <polygon points="780,580 880,610 880,800 800,800" fill="#091020" />
+      <!-- Flow arrows along the basin (upstream → dam → downstream) -->
+      <g v-show="layers.flowArrows" class="lake-stage__flow">
+        <path
+          d="M 540 180 Q 520 300 540 420 Q 560 480 600 530"
+          fill="none"
+          stroke="rgba(140,235,255,0.85)"
+          stroke-width="2.4"
+          stroke-linecap="round"
+          stroke-dasharray="10 16"
+          marker-end="url(#ls-flow-head)"
+          filter="url(#ls-soft-glow)"
+        >
+          <animate attributeName="stroke-dashoffset" from="0" to="-52" dur="2.2s" repeatCount="indefinite" />
+        </path>
+        <path
+          d="M 600 540 Q 660 600 700 650"
+          fill="none"
+          stroke="rgba(140,235,255,0.85)"
+          stroke-width="2.4"
+          stroke-linecap="round"
+          stroke-dasharray="10 16"
+          marker-end="url(#ls-flow-head)"
+          filter="url(#ls-soft-glow)"
+        >
+          <animate attributeName="stroke-dashoffset" from="0" to="-52" dur="2s" repeatCount="indefinite" />
+        </path>
+        <path
+          d="M 720 680 Q 780 730 850 770"
+          fill="none"
+          stroke="rgba(140,235,255,0.95)"
+          stroke-width="2.6"
+          stroke-linecap="round"
+          stroke-dasharray="10 16"
+          marker-end="url(#ls-flow-head)"
+          filter="url(#ls-soft-glow)"
+        >
+          <animate attributeName="stroke-dashoffset" from="0" to="-52" dur="1.7s" repeatCount="indefinite" />
+        </path>
+        <path
+          d="M 920 360 Q 820 420 700 470"
+          fill="none"
+          stroke="rgba(140,235,255,0.65)"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-dasharray="8 14"
+          marker-end="url(#ls-flow-head)"
+          filter="url(#ls-soft-glow)"
+        >
+          <animate attributeName="stroke-dashoffset" from="0" to="-44" dur="2.6s" repeatCount="indefinite" />
+        </path>
+        <path
+          d="M 280 480 Q 380 460 480 470"
+          fill="none"
+          stroke="rgba(140,235,255,0.55)"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-dasharray="8 14"
+          marker-end="url(#ls-flow-head)"
+          filter="url(#ls-soft-glow)"
+        >
+          <animate attributeName="stroke-dashoffset" from="0" to="-44" dur="2.8s" repeatCount="indefinite" />
+        </path>
       </g>
 
-      <g opacity="0.85">
-        <circle cx="640" cy="320" r="2" fill="#49e1ff" filter="url(#ls-glow)">
-          <animate attributeName="cy" values="320;380;460;540;610" dur="2.8s" repeatCount="indefinite" />
-          <animate attributeName="cx" values="640;600;540;480;460" dur="2.8s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0;1;1;0.6;0" dur="2.8s" repeatCount="indefinite" />
-        </circle>
-        <circle cx="680" cy="300" r="1.6" fill="#49e1ff" filter="url(#ls-glow)">
-          <animate attributeName="cy" values="300;370;450;540;610" dur="3.4s" begin="0.5s" repeatCount="indefinite" />
-          <animate attributeName="cx" values="680;640;560;500;480" dur="3.4s" begin="0.5s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0;1;1;0.6;0" dur="3.4s" begin="0.5s" repeatCount="indefinite" />
-        </circle>
-        <circle cx="600" cy="350" r="1.4" fill="#49e1ff" filter="url(#ls-glow)">
-          <animate attributeName="cy" values="350;400;480;560;620" dur="3.0s" begin="1s" repeatCount="indefinite" />
-          <animate attributeName="cx" values="600;560;520;480;460" dur="3.0s" begin="1s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0;1;1;0.6;0" dur="3.0s" begin="1s" repeatCount="indefinite" />
-        </circle>
-        <circle cx="720" cy="280" r="1.8" fill="#49e1ff" filter="url(#ls-glow)">
-          <animate attributeName="cy" values="280;360;450;550;620" dur="3.2s" begin="1.6s" repeatCount="indefinite" />
-          <animate attributeName="cx" values="720;680;600;520;490" dur="3.2s" begin="1.6s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0;1;1;0.6;0" dur="3.2s" begin="1.6s" repeatCount="indefinite" />
-        </circle>
-        <circle cx="560" cy="380" r="1.2" fill="#7aa2ff" filter="url(#ls-glow)">
-          <animate attributeName="cy" values="380;430;500;570;620" dur="2.6s" begin="0.3s" repeatCount="indefinite" />
-          <animate attributeName="cx" values="560;530;500;470;460" dur="2.6s" begin="0.3s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0;1;1;0.6;0" dur="2.6s" begin="0.3s" repeatCount="indefinite" />
-        </circle>
-      </g>
-
+      <!-- Station markers -->
       <g v-for="m in placedMarkers" :key="m.station.id" :transform="`translate(${m.x} ${m.y})`">
+        <!-- Base ripple on water for critical stations -->
         <template v-if="m.severity === 'critical'">
-          <circle r="22" :fill="`rgba(255,90,106,0.18)`">
-            <animate attributeName="r" values="14;28;14" dur="1.6s" repeatCount="indefinite" />
-            <animate attributeName="opacity" values="0.5;0.1;0.5" dur="1.6s" repeatCount="indefinite" />
+          <circle r="22" fill="rgba(255,90,106,0.18)">
+            <animate attributeName="r" values="14;30;14" dur="1.6s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0.55;0.05;0.55" dur="1.6s" repeatCount="indefinite" />
           </circle>
-          <circle r="6" fill="#ff5a6a" filter="url(#ls-glow)" />
-          <circle r="3" fill="#fff" />
-        </template>
-        <template v-else-if="m.severity === 'high'">
-          <circle r="14" fill="rgba(255,181,71,0.18)">
-            <animate attributeName="r" values="10;20;10" dur="2s" repeatCount="indefinite" />
+          <circle r="14" fill="none" stroke="rgba(255,90,106,0.5)" stroke-width="1">
+            <animate attributeName="r" values="8;20;8" dur="1.6s" begin="0.4s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0.6;0;0.6" dur="1.6s" begin="0.4s" repeatCount="indefinite" />
           </circle>
-          <circle r="5" fill="#ffb547" filter="url(#ls-glow)" />
-        </template>
-        <template v-else-if="m.severity === 'medium'">
-          <circle r="12" fill="rgba(122,162,255,0.16)" />
-          <circle r="4" fill="#7aa2ff" filter="url(#ls-glow)" />
-        </template>
-        <template v-else>
-          <circle r="3.5" :fill="m.unavailable ? '#6a7590' : '#2bd99f'" />
         </template>
 
-        <g v-if="m.severity !== 'normal'" :transform="m.severity === 'critical' ? 'translate(0 -52)' : 'translate(14 0)'">
-          <text
-            v-if="m.severity === 'critical'"
-            text-anchor="middle"
-            :fill="severityColor(m.severity)"
-            font-family="var(--fm-font-mono)"
-            font-size="10"
-            font-weight="700"
-            letter-spacing="1"
-          >
-            {{ severityLabel(m.severity) }} · {{ m.station.name }}
-          </text>
-          <text
-            v-else
-            x="0"
-            y="-2"
-            :fill="severityColor(m.severity)"
-            font-family="var(--fm-font-mono)"
-            font-size="10"
-            font-weight="700"
-          >
+        <!-- Anchor dot at the station's geographical point -->
+        <circle r="3.6" :fill="markerAccent(m)" />
+        <circle r="6" fill="none" :stroke="markerAccent(m)" stroke-opacity="0.45" stroke-width="1" />
+
+        <!-- Vertical connector to pin head -->
+        <line
+          x1="0"
+          y1="-4"
+          x2="0"
+          y2="-30"
+          :stroke="markerAccent(m)"
+          stroke-width="1.4"
+          stroke-dasharray="2 2"
+          stroke-opacity="0.75"
+        />
+
+        <!-- Pin head with type icon -->
+        <g :transform="`translate(0 ${m.severity === 'critical' ? -46 : -42})`">
+          <circle
+            :r="m.severity === 'critical' ? 16 : 13"
+            fill="rgba(11,18,32,0.88)"
+            :stroke="markerAccent(m)"
+            stroke-width="1.6"
+          />
+          <use
+            :href="`#icon-${typeIcon(m.station.type)}`"
+            :width="m.severity === 'critical' ? 22 : 18"
+            :height="m.severity === 'critical' ? 22 : 18"
+            :x="m.severity === 'critical' ? -11 : -9"
+            :y="m.severity === 'critical' ? -11 : -9"
+            :style="{ color: markerAccent(m) }"
+          />
+        </g>
+
+        <!-- Critical: stacked badge + station name + value -->
+        <template v-if="m.severity === 'critical'">
+          <!-- CRIT badge -->
+          <g transform="translate(0 -76)">
+            <rect x="-26" y="-10" width="52" height="18" rx="3"
+                  fill="rgba(255,90,106,0.18)" stroke="#ff5a6a" stroke-width="1" />
+            <text x="0" y="3.5" text-anchor="middle" fill="#ff5a6a"
+                  font-size="11" font-weight="700" letter-spacing="2"
+                  font-family="JetBrains Mono, monospace">CRIT</text>
+          </g>
+          <!-- Station name above badge -->
+          <text x="0" y="-100" text-anchor="middle" fill="#ffffff"
+                font-size="13" font-weight="700"
+                stroke="rgba(6,10,20,0.85)" stroke-width="3" paint-order="stroke fill">
             {{ m.station.name }}
           </text>
-          <text
-            v-if="m.latestValue != null"
-            :x="m.severity === 'critical' ? 0 : 0"
-            :y="m.severity === 'critical' ? -38 : 12"
-            :text-anchor="m.severity === 'critical' ? 'middle' : 'start'"
-            fill="#ffffff"
-            font-family="var(--fm-font-mono)"
-            font-size="11"
-            font-weight="700"
-          >
+          <!-- Value below pin -->
+          <text v-if="m.latestValue != null" x="0" y="14" text-anchor="middle"
+                fill="#ffffff" font-size="15" font-weight="700"
+                font-family="JetBrains Mono, monospace"
+                stroke="rgba(6,10,20,0.85)" stroke-width="3" paint-order="stroke fill">
+            {{ formatValue(m.latestValue) }}<tspan font-size="11" fill="#a9b3c6">{{ ' ' + (m.unit ?? '') }}</tspan>
+          </text>
+        </template>
+
+        <!-- High / medium: name to side, value below -->
+        <template v-else-if="m.severity !== 'normal'">
+          <text x="20" y="-46" :fill="severityColor(m.severity)"
+                font-size="11" font-weight="700"
+                font-family="JetBrains Mono, monospace"
+                stroke="rgba(6,10,20,0.85)" stroke-width="3" paint-order="stroke fill">
+            {{ severityLabel(m.severity) }}
+          </text>
+          <text x="20" y="-32" fill="#ffffff" font-size="12" font-weight="600"
+                stroke="rgba(6,10,20,0.85)" stroke-width="3" paint-order="stroke fill">
+            {{ m.station.name }}
+          </text>
+          <text v-if="m.latestValue != null" x="20" y="-18"
+                fill="#dbe4f5" font-size="11" font-weight="700"
+                font-family="JetBrains Mono, monospace"
+                stroke="rgba(6,10,20,0.85)" stroke-width="3" paint-order="stroke fill">
             {{ formatValue(m.latestValue) }}<tspan font-size="9" fill="#8693af">{{ ' ' + (m.unit ?? '') }}</tspan>
           </text>
-        </g>
-        <text
-          v-else
-          x="8"
-          y="3"
-          fill="#8693af"
-          font-family="var(--fm-font-mono)"
-          font-size="9"
-        >
-          {{ m.station.name }}
-        </text>
+        </template>
+
+        <!-- Normal: just the station name to the right of pin head -->
+        <template v-else>
+          <text x="20" y="-38" fill="#dbe4f5" font-size="11" font-weight="600"
+                stroke="rgba(6,10,20,0.85)" stroke-width="3" paint-order="stroke fill">
+            {{ m.station.name }}
+          </text>
+          <text v-if="m.latestValue != null" x="20" y="-24"
+                fill="#a9b3c6" font-size="10"
+                font-family="JetBrains Mono, monospace"
+                stroke="rgba(6,10,20,0.85)" stroke-width="3" paint-order="stroke fill">
+            {{ formatValue(m.latestValue) }}<tspan font-size="8">{{ ' ' + (m.unit ?? '') }}</tspan>
+          </text>
+        </template>
       </g>
     </svg>
 
+    <!-- Legend / data layer panel -->
+    <div class="lake-stage__legend">
+      <div class="legend-block">
+        <div class="legend-block__title">图例 <span>LEGEND</span></div>
+        <div class="legend-grid">
+          <div v-for="t in legendTypes" :key="t.key" class="legend-item">
+            <span class="legend-item__icon" :style="{ color: t.color }">
+              <svg viewBox="-9 -9 18 18" width="14" height="14">
+                <use :href="`#icon-${t.icon}`" />
+              </svg>
+            </span>
+            <span class="legend-item__name">{{ t.label }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="legend-block">
+        <div class="legend-block__title">数据图层 <span>LAYERS</span></div>
+        <div class="legend-toggles">
+          <label v-for="l in layerOptions" :key="l.key" class="legend-toggle">
+            <input type="checkbox" v-model="layers[l.key]" />
+            <span class="legend-toggle__box"></span>
+            <span class="legend-toggle__name">{{ l.label }}</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
     <div class="lake-stage__corner">
-      CENTRAL · <b>THREE.JS · FLUID PARTICLE FIELD</b> · 占位中
+      CENTRAL · <b>CUIPING LAKE · AERIAL VIEW</b> · 实景底图
     </div>
     <div class="lake-stage__axes">
       <span>N ↑</span><span>SCALE 1 : 5,000</span><span>WGS84</span>
@@ -167,25 +273,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, reactive } from 'vue'
 import type { StationMarker } from '@/composables/useLakeMap'
+import type { Station } from '@/types'
 
 const props = defineProps<{
   markers: StationMarker[]
 }>()
 
-// Placement in the new 880×800 fluid scene viewBox.
-// When the real Three.js scene replaces this, these stay as the source of truth
-// for label overlay positioning.
+// Placement in the 1200×900 viewBox aligned with public/image/backgrand.png.
+// Coordinates correspond to recognisable features in the aerial photo.
 const STATION_POSITIONS_3D: Record<string, [number, number]> = {
-  ST_RAIN_CP_01: [220, 240],
-  ST_RAIN_CP_02: [680, 200],
-  ST_WL_CP_01: [420, 600],
-  ST_WL_CP_02: [510, 580],
-  ST_FLOW_CP_01: [540, 700],
-  ST_RES_CP_01: [400, 590],
-  ST_GATE_CP_01: [620, 670],
-  ST_PUMP_CP_01: [320, 200],
+  ST_RAIN_CP_01: [220, 230],   // 北溪雨量站 — 西北山脊
+  ST_RAIN_CP_02: [1010, 290],  // 南溪雨量站 — 东北山脊
+  ST_RES_CP_01:  [240, 540],   // 水库站 — 西侧库湾
+  ST_WL_CP_02:   [560, 250],   // 北岸水位站 — 入湖口
+  ST_WL_CP_01:   [560, 460],   // 湖心水位站 — 湖中心
+  ST_GATE_CP_01: [700, 660],   // 闸站 — 大坝闸门
+  ST_FLOW_CP_01: [820, 740],   // 出湖流量站 — 大坝下游断面
+  ST_PUMP_CP_01: [1020, 800],  // 城区泵站 — 东南前景
 }
 
 type Severity = 'critical' | 'high' | 'medium' | 'normal'
@@ -195,6 +301,28 @@ interface PlacedMarker extends StationMarker {
   y: number
   severity: Severity
   unavailable: boolean
+}
+
+const TYPE_ICON: Record<Station['type'], string> = {
+  WATER_LEVEL: 'water-level',
+  RAIN_GAUGE: 'rain-gauge',
+  FLOW: 'flow',
+  RESERVOIR: 'reservoir',
+  GATE: 'gate',
+  PUMP_STATION: 'pump',
+}
+
+const TYPE_COLOR: Record<Station['type'], string> = {
+  WATER_LEVEL: '#49e1ff',
+  RAIN_GAUGE: '#7aa2ff',
+  FLOW: '#2bd99f',
+  RESERVOIR: '#ffb547',
+  GATE: '#ff8da3',
+  PUMP_STATION: '#c79bff',
+}
+
+function typeIcon(type: Station['type']): string {
+  return TYPE_ICON[type] ?? 'station'
 }
 
 function severityFromAlarmLevel(level?: string): Severity {
@@ -218,6 +346,14 @@ function severityLabel(s: Severity) {
   return s === 'critical' ? 'CRIT' : s === 'high' ? 'HIGH' : 'MED'
 }
 
+function markerAccent(m: PlacedMarker) {
+  if (m.severity === 'critical') return '#ff5a6a'
+  if (m.severity === 'high') return '#ffb547'
+  if (m.severity === 'medium') return '#7aa2ff'
+  if (m.unavailable) return '#6a7590'
+  return TYPE_COLOR[m.station.type] ?? '#49e1ff'
+}
+
 function formatValue(v: number | null | undefined) {
   if (v == null) return '—'
   return v >= 100 ? Math.round(v).toString() : v.toFixed(2)
@@ -239,6 +375,33 @@ const placedMarkers = computed<PlacedMarker[]>(() => {
     })
     .filter((m): m is PlacedMarker => m !== null)
 })
+
+// === Legend / layer state ===
+
+const legendTypes: { key: string; label: string; icon: string; color: string }[] = [
+  { key: 'rain', label: '雨量站', icon: 'rain-gauge', color: TYPE_COLOR.RAIN_GAUGE },
+  { key: 'wl', label: '水位站', icon: 'water-level', color: TYPE_COLOR.WATER_LEVEL },
+  { key: 'flow', label: '流量站', icon: 'flow', color: TYPE_COLOR.FLOW },
+  { key: 'res', label: '水库站', icon: 'reservoir', color: TYPE_COLOR.RESERVOIR },
+  { key: 'gate', label: '闸门站', icon: 'gate', color: TYPE_COLOR.GATE },
+  { key: 'pump', label: '泵站', icon: 'pump', color: TYPE_COLOR.PUMP_STATION },
+]
+
+type LayerKey = 'waterLevel' | 'flowArrows' | 'rainfall' | 'basin'
+
+const layers = reactive<Record<LayerKey, boolean>>({
+  waterLevel: true,
+  flowArrows: true,
+  rainfall: false,
+  basin: false,
+})
+
+const layerOptions: { key: LayerKey; label: string }[] = [
+  { key: 'waterLevel', label: '水位等值线' },
+  { key: 'flowArrows', label: '流向箭头' },
+  { key: 'rainfall', label: '降雨强度' },
+  { key: 'basin', label: '流域边界' },
+]
 </script>
 
 <style scoped lang="scss">
@@ -249,32 +412,7 @@ const placedMarkers = computed<PlacedMarker[]>(() => {
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid rgba(73, 225, 255, 0.10);
-  background: radial-gradient(120% 90% at 50% 50%, rgba(47, 123, 255, 0.10) 0%, rgba(6, 10, 20, 0) 60%);
-}
-
-.lake-stage__sky {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(80% 60% at 50% 100%, rgba(47, 123, 255, 0.22), transparent 60%),
-    radial-gradient(40% 40% at 30% 110%, rgba(73, 225, 255, 0.18), transparent 60%);
-  pointer-events: none;
-}
-
-.lake-stage__rain {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(170deg, transparent 49.6%, rgba(73, 225, 255, 0.18) 49.7%, rgba(73, 225, 255, 0.18) 50.0%, transparent 50.1%);
-  background-size: 5px 80px;
-  opacity: 0.35;
-  animation: ls-rain 1.4s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes ls-rain {
-  0% { background-position: 0 0; }
-  100% { background-position: 30px 80px; }
+  background: #060a14;
 }
 
 .lake-stage__scene {
@@ -289,10 +427,10 @@ const placedMarkers = computed<PlacedMarker[]>(() => {
 .lake-stage__axes {
   position: absolute;
   bottom: 12px;
-  font-family: var(--fm-font-mono);
+  font-family: var(--fm-font-mono, 'JetBrains Mono', monospace);
   font-size: 10px;
   letter-spacing: 0.16em;
-  color: var(--fm-fg-mute);
+  color: var(--fm-fg-mute, #8693af);
   z-index: 4;
 }
 
@@ -300,7 +438,7 @@ const placedMarkers = computed<PlacedMarker[]>(() => {
   left: 14px;
 
   b {
-    color: var(--fm-brand-2);
+    color: var(--fm-brand-2, #49e1ff);
     font-weight: 600;
   }
 }
@@ -309,5 +447,113 @@ const placedMarkers = computed<PlacedMarker[]>(() => {
   right: 14px;
   display: flex;
   gap: 14px;
+}
+
+/* ============== Legend / layer panel ============== */
+.lake-stage__legend {
+  position: absolute;
+  left: 14px;
+  bottom: 38px;
+  display: flex;
+  gap: 20px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(11, 18, 32, 0.66);
+  border: 1px solid rgba(73, 225, 255, 0.18);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  z-index: 5;
+  pointer-events: auto;
+  font-family: var(--fm-font-mono, 'JetBrains Mono', monospace);
+}
+
+.legend-block__title {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #ffffff;
+  font-weight: 600;
+  margin-bottom: 8px;
+
+  span {
+    color: #6a7590;
+    font-weight: 500;
+    margin-left: 6px;
+    letter-spacing: 0.18em;
+  }
+}
+
+.legend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  column-gap: 16px;
+  row-gap: 5px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #c1cbe0;
+
+  &__icon {
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
+  }
+
+  &__name {
+    letter-spacing: 0.04em;
+  }
+}
+
+.legend-toggles {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  column-gap: 16px;
+  row-gap: 5px;
+}
+
+.legend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #c1cbe0;
+  cursor: pointer;
+  user-select: none;
+
+  input {
+    display: none;
+  }
+
+  &__box {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1px solid rgba(73, 225, 255, 0.45);
+    background: rgba(11, 18, 32, 0.6);
+    display: grid;
+    place-items: center;
+    transition: background 0.15s ease, border-color 0.15s ease;
+
+    &::after {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 1px;
+      background: #49e1ff;
+      transform: scale(0);
+      transition: transform 0.15s ease;
+    }
+  }
+
+  input:checked + &__box {
+    border-color: #49e1ff;
+    background: rgba(73, 225, 255, 0.18);
+
+    &::after { transform: scale(1); }
+  }
 }
 </style>

@@ -19,6 +19,15 @@ export type SSEEventType =
         score?: number
       }>
     }
+  | {
+      type: 'trace_update'
+      phase: string
+      status: string
+      title: string
+      detail?: string
+      tool_name?: string
+      metadata?: Record<string, unknown>
+    }
 
 export function useSSE() {
   const MAX_CHUNKS = 100

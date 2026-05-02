@@ -160,6 +160,7 @@ async def plan_generator_node(state: dict) -> dict:
                     "risk_assessment": to_plain_data(assessment),
                     "data_summary": state.get("data_summary", ""),
                     "evidence": to_plain_data(evidence),
+                    "memory_context": to_plain_data(state.get("memory_context", {})),
                     "template_reference": template,
                     "fallback_plan": to_plain_data(plan),
                 }, ensure_ascii=False, indent=2),
@@ -167,6 +168,7 @@ async def plan_generator_node(state: dict) -> dict:
                     "你是防汛应急预案生成智能体。"
                     "LLM 是本节点的主生成者；template_reference 是业务边界和最低兜底，不要只改写模板措辞。"
                     "若 evidence 非空，请尽量依据 evidence 生成措施，并在 summary 或 citations 中体现 [1][2] 引用。"
+                    "memory_context 可用于延续用户偏好、历史处置经验和已知业务约束，但不得替代当前风险评估。"
                     "若 evidence 为空，必须保持保守，不得编造制度来源。"
                     "请基于风险评估和模板参考，输出严格 JSON。"
                     "字段必须包含：plan_name, trigger_conditions, summary, actions, resources, "

@@ -39,6 +39,24 @@ class TestSupervisorDecision:
 
         assert result["next_agent"] == "knowledge_retriever"
 
+    @pytest.mark.asyncio
+    async def test_data_only_station_query_does_not_route_to_risk_after_data(self):
+        mock_llm = SimpleNamespace(is_enabled=False, ainvoke=AsyncMock())
+        state = {
+            "user_query": "北闸站最新水位数据，无需分析，只要数据",
+            "messages": [],
+            "iteration": 0,
+            "data_summary": "已有数据表",
+            "focus_station": {"id": "station-1", "name": "北闸站"},
+        }
+
+        with patch("app.agents.supervisor.get_llm", return_value=mock_llm):
+            result = await supervisor_node(state)
+
+        assert result["next_agent"] == "__end__"
+        assert result["answer_policy"]["data_only"] is True
+        assert result["answer_policy"]["requested_count"] == 1
+
 
 class TestSupervisorNode:
     @pytest.mark.asyncio

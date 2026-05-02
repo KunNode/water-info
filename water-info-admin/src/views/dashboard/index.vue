@@ -9,9 +9,10 @@
         <el-icon><Bell /></el-icon>
         <span>查看全部告警</span>
       </router-link>
-      <router-link to="/bigscreen" class="fm-btn fm-btn--primary">
+      <router-link to="/bigscreen" class="fm-btn fm-dash__bigscreen">
         <el-icon><Monitor /></el-icon>
         <span>进入大屏</span>
+        <span class="fm-dash__bigscreen-sheen" aria-hidden="true" />
       </router-link>
     </div>
 
@@ -562,5 +563,65 @@ onUnmounted(() => {
 :deep(.fm-card__head .fm-btn) {
   text-decoration: none;
   color: inherit;
+}
+
+/* "进入大屏" — cyan→emerald command-mode accent, distinct from generic primary */
+.fm-dash__bigscreen {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  background:
+    linear-gradient(135deg, rgba(59, 130, 246, 0.10) 0%, rgba(20, 184, 166, 0.08) 100%),
+    rgba(255, 255, 255, 0.72);
+  color: #1d4ed8;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 4px 12px -8px rgba(59, 130, 246, 0.28);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+
+  .el-icon {
+    color: #2563eb;
+    filter: none;
+  }
+
+  &:hover {
+    transform: translateY(-1px);
+    background:
+      linear-gradient(135deg, rgba(59, 130, 246, 0.14) 0%, rgba(20, 184, 166, 0.10) 100%),
+      rgba(255, 255, 255, 0.88);
+    box-shadow:
+      0 2px 4px rgba(15, 23, 42, 0.06),
+      0 8px 18px -12px rgba(59, 130, 246, 0.36);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+.fm-dash__bigscreen-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.18) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  animation: fm-dash-bigscreen-sheen 3.6s ease-in-out infinite;
+}
+
+@keyframes fm-dash-bigscreen-sheen {
+  0%   { transform: translateX(-120%); }
+  55%  { transform: translateX(120%); }
+  100% { transform: translateX(120%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fm-dash__bigscreen-sheen { animation: none; }
 }
 </style>

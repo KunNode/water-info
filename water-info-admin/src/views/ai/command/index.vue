@@ -26,8 +26,8 @@
           <strong>{{ store.queryCount }}</strong>
         </div>
         <div class="tb-metric">
-          <span>智能体</span>
-          <strong>{{ doneAgentCount }}/{{ totalAgentCount }}{{ activeAgentCount ? ` · ${activeAgentCount}↑` : '' }}</strong>
+          <span>执行步骤</span>
+          <strong>{{ traceCount }}{{ activeTraceCount ? ` · ${activeTraceCount}↑` : '' }}</strong>
         </div>
         <div class="tb-metric">
           <span>风险态势</span>
@@ -65,8 +65,7 @@
       />
 
       <div class="fm-ai-grid__side">
-        <AgentTimeline :agentStatus="store.agentStatus" />
-        <RiskPanel :riskLevel="store.riskLevel" />
+        <RiskPanel />
         <PlanStatus :planInfo="store.planInfo" />
         <ActiveAlerts />
         <SessionInfo
@@ -96,10 +95,10 @@ import { useSSE } from '@/composables/useSSE'
 import type { SSEEventType } from '@/composables/useSSE'
 import { getStreamUrl } from '@/api/flood'
 import { useAiConversationStore } from '@/stores/aiConversation'
+import { useSituationStore } from '@/stores/situation'
 
 // Sub-components
 import ChatPanel from './components/ChatPanel.vue'
-import AgentTimeline from './components/AgentTimeline.vue'
 import RiskPanel from './components/RiskPanel.vue'
 import PlanStatus from './components/PlanStatus.vue'
 import ActiveAlerts from './components/ActiveAlerts.vue'
@@ -109,6 +108,7 @@ import SessionDrawer from './components/SessionDrawer.vue'
 const router = useRouter()
 const route = useRoute()
 const store = useAiConversationStore()
+const situationStore = useSituationStore()
 const { fullText, loading, error, start, stop, reset, onStructuredEvent } = useSSE()
 
 // True once the current query receives at least one agent_message structured event.
@@ -176,12 +176,9 @@ const riskTagClass = computed(() => riskMap[store.riskLevel]?.tag ?? '')
 const riskToneClass = computed(() => (store.riskLevel === 'none' ? 'tone-ok' : riskTagClass.value.replace('fm-tag--', 'tone-')))
 const sessionShort = computed(() => store.currentSessionId ? store.currentSessionId.slice(0, 8).toUpperCase() : 'DRAFT')
 const sessionModeLabel = computed(() => store.currentSessionId ? '已接管历史会话' : '草稿会话')
-const totalAgentCount = computed(() => Object.keys(store.agentStatus).length)
-const doneAgentCount = computed(() =>
-  Object.values(store.agentStatus).filter((status) => status === 'done').length,
-)
-const activeAgentCount = computed(() =>
-  Object.values(store.agentStatus).filter((status) => status === 'active').length,
+const traceCount = computed(() => store.pendingTraces.length)
+const activeTraceCount = computed(() =>
+  store.pendingTraces.filter((trace) => trace.status === 'started' || trace.status === 'active' || trace.status === 'running').length,
 )
 const planProgressLabel = computed(() => {
   const plan = store.planInfo
@@ -224,6 +221,23 @@ function enqueueAgentMessage(agent: string, content: string) {
   })
   typewriterQueue.value.push({ agent, fullContent: content })
   if (!isTyping.value) processTypewriterQueue()
+}
+
+function enqueueFinalResponse(content: string) {
+  removeThinkingBubble()
+
+  const last = store.messages[store.messages.length - 1]
+  if (last?.role === 'assistant') {
+    last.content = content
+    store.attachTracesToLastAssistant()
+    return
+  }
+
+  store.addMessage({
+    role: 'assistant',
+    content,
+    timestamp: new Date(),
+  })
 }
 
 async function processTypewriterQueue() {
@@ -286,6 +300,8 @@ onMounted(async () => {
     startTime.value = new Date().toLocaleTimeString()
   }
 
+  situationStore.connectAssessmentStream()
+
   onStructuredEvent((event: SSEEventType) => {
     if (event.type === 'session_init') {
       if (!store.currentSessionId) {
@@ -315,9 +331,25 @@ onMounted(async () => {
       })
     } else if (event.type === 'agent_message') {
       hasAgentMessages.value = true
-      enqueueAgentMessage(event.agent, event.content)
+      if (event.agent === 'final_response') {
+        enqueueFinalResponse(event.content)
+      } else {
+        enqueueAgentMessage(event.agent, event.content)
+      }
+    } else if (event.type === 'trace_update') {
+      store.addTrace({
+        phase: event.phase,
+        status: event.status,
+        title: event.title,
+        detail: event.detail,
+        tool_name: event.tool_name,
+        metadata: event.metadata,
+        timestamp: new Date(),
+      })
     }
   })
+
+  void situationStore.ensureFresh()
 })
 
 watch(fullText, (val) => {
@@ -337,6 +369,7 @@ watch(loading, (isLoading) => {
     if (!hasActive) store.setAgentStatus('supervisor', 'active')
   } else {
     store.finalizeAgentStatuses()
+    store.attachTracesToLastAssistant()
   }
 })
 
@@ -344,6 +377,7 @@ async function sendQuery(queryText: string) {
   if (!queryText.trim() || loading.value) return
 
   store.resetAgentStatus()
+  store.resetTraces()
 
   hasAgentMessages.value = false
   typewriterQueue.value = []

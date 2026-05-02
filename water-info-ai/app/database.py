@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from typing import Any
 
@@ -132,6 +133,24 @@ class DatabaseService:
             WHERE station_id = $1 AND metric_type = 'RAINFALL'
               AND observed_at >= NOW() - INTERVAL '24 hours'
         """, station_id)
+
+    async def get_recent_observations(
+        self,
+        *,
+        station_id: str,
+        metric_type: str | None = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        capped_limit = max(1, min(int(limit), 50))
+        normalized_metric = str(metric_type).upper() if metric_type else None
+        return await self._fetch("""
+            SELECT station_id, metric_type, value, unit, observed_at, quality_flag, source
+            FROM observation
+            WHERE station_id = $1
+              AND ($2::text IS NULL OR metric_type = $2)
+            ORDER BY observed_at DESC
+            LIMIT $3
+        """, station_id, normalized_metric, capped_limit)
 
     # ── Alarms ────────────────────────────────────────────────────────────────
 
@@ -300,16 +319,53 @@ class DatabaseService:
                     id          BIGSERIAL PRIMARY KEY,
                     session_id  VARCHAR(128) NOT NULL
                                     REFERENCES conversation_session(session_id) ON DELETE CASCADE,
+                    namespace   TEXT NOT NULL DEFAULT '',
+                    memory_key  VARCHAR(128) NOT NULL DEFAULT '',
+                    source_session_id VARCHAR(128) NOT NULL DEFAULT '',
+                    content_hash VARCHAR(64) NOT NULL DEFAULT '',
                     item_type   VARCHAR(32) NOT NULL DEFAULT 'fact',
                     content     TEXT NOT NULL DEFAULT '',
                     importance  FLOAT NOT NULL DEFAULT 0.5,
+                    confidence  FLOAT NOT NULL DEFAULT 0.5,
+                    status      VARCHAR(32) NOT NULL DEFAULT 'active',
                     metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    embedding_model VARCHAR(128) NOT NULL DEFAULT '',
+                    embedding_dimensions INT NOT NULL DEFAULT 0,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    expires_at  TIMESTAMPTZ
                 )
+            """)
+            await conn.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS namespace TEXT NOT NULL DEFAULT '';
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS memory_key VARCHAR(128) NOT NULL DEFAULT '';
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS source_session_id VARCHAR(128) NOT NULL DEFAULT '';
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64) NOT NULL DEFAULT '';
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS confidence FLOAT NOT NULL DEFAULT 0.5;
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'active';
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(128) NOT NULL DEFAULT '';
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS embedding_dimensions INT NOT NULL DEFAULT 0;
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+                EXCEPTION WHEN others THEN NULL;
+                END $$;
             """)
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_memory_item_session
                     ON memory_item(session_id, item_type, created_at DESC)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memory_item_namespace
+                    ON memory_item(namespace, item_type, importance DESC, updated_at DESC)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memory_item_hash
+                    ON memory_item(namespace, content_hash)
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memory_item_search
+                    ON memory_item USING gin (to_tsvector('simple', content))
             """)
 
     # ── Conversation write ────────────────────────────────────────────────────
@@ -359,15 +415,25 @@ class DatabaseService:
             """, session_id, preview)
             return msg_id
 
-    async def update_message_content(self, message_id: int, content: str, status: str = "completed") -> None:
+    async def update_message_content(
+        self, message_id: int, content: str, status: str = "completed",
+        metadata: dict | None = None,
+    ) -> None:
         """Update an existing message's content and status (for streaming completion)."""
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            await conn.execute("""
-                UPDATE conversation_message
-                SET content = $2, status = $3
-                WHERE id = $1
-            """, message_id, content, status)
+            if metadata is not None:
+                await conn.execute("""
+                    UPDATE conversation_message
+                    SET content = $2, status = $3, metadata = $4::jsonb
+                    WHERE id = $1
+                """, message_id, content, status, json.dumps(metadata, ensure_ascii=False))
+            else:
+                await conn.execute("""
+                    UPDATE conversation_message
+                    SET content = $2, status = $3
+                    WHERE id = $1
+                """, message_id, content, status)
             # Also update session's last_message_preview
             row = await conn.fetchrow(
                 "SELECT session_id FROM conversation_message WHERE id = $1", message_id
@@ -485,6 +551,253 @@ class DatabaseService:
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING id
             """, session_id, item_type, content, importance, json.dumps(metadata or {}))
+
+    async def upsert_memory_item(
+        self,
+        *,
+        namespace: str,
+        session_id: str,
+        item_type: str,
+        content: str,
+        importance: float = 0.5,
+        confidence: float = 0.5,
+        metadata: dict | None = None,
+        memory_key: str | None = None,
+        source_session_id: str | None = None,
+        embedding: list[float] | None = None,
+        embedding_model: str = "",
+    ) -> int:
+        """Insert or update a long-term memory item, deduped within a namespace."""
+        content_hash = hashlib.sha256(f"{item_type}:{content.strip()}".encode("utf-8")).hexdigest()
+        key = memory_key or content_hash[:32]
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            existing_id = await conn.fetchval(
+                """
+                SELECT id
+                FROM memory_item
+                WHERE namespace = $1
+                  AND (content_hash = $2 OR memory_key = $3)
+                  AND status = 'active'
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                namespace,
+                content_hash,
+                key,
+            )
+            if existing_id:
+                await conn.execute(
+                    """
+                    UPDATE memory_item
+                    SET session_id = $2,
+                        source_session_id = $3,
+                        item_type = $4,
+                        content = $5,
+                        importance = GREATEST(importance, $6),
+                        confidence = GREATEST(confidence, $7),
+                        metadata = metadata || $8::jsonb,
+                        content_hash = $9,
+                        memory_key = $10,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    existing_id,
+                    session_id,
+                    source_session_id or session_id,
+                    item_type,
+                    content,
+                    importance,
+                    confidence,
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                    content_hash,
+                    key,
+                )
+                memory_id = int(existing_id)
+            else:
+                memory_id = int(await conn.fetchval(
+                    """
+                    INSERT INTO memory_item (
+                        session_id, namespace, memory_key, source_session_id, content_hash,
+                        item_type, content, importance, confidence, metadata
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+                    RETURNING id
+                    """,
+                    session_id,
+                    namespace,
+                    key,
+                    source_session_id or session_id,
+                    content_hash,
+                    item_type,
+                    content,
+                    importance,
+                    confidence,
+                    json.dumps(metadata or {}, ensure_ascii=False),
+                ))
+
+            if embedding:
+                try:
+                    await conn.execute(
+                        """
+                        UPDATE memory_item
+                        SET embedding = $2::vector,
+                            embedding_model = $3,
+                            embedding_dimensions = $4,
+                            updated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        memory_id,
+                        self._vector_literal(embedding),
+                        embedding_model,
+                        len(embedding),
+                    )
+                except Exception:
+                    pass
+            return memory_id
+
+    async def search_memory_items(
+        self,
+        *,
+        namespaces: list[str],
+        query: str = "",
+        embedding: list[float] | None = None,
+        top_n: int = 6,
+        item_types: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search active long-term memories by vector when available, else keyword/relevance."""
+        if not namespaces:
+            return []
+        if embedding:
+            try:
+                rows = await self._fetch(
+                    """
+                    SELECT id, namespace, item_type, content, importance, confidence, metadata,
+                           source_session_id, updated_at,
+                           (1 - (embedding <=> $1::vector)) AS score
+                    FROM memory_item
+                    WHERE namespace = ANY($2)
+                      AND status = 'active'
+                      AND embedding IS NOT NULL
+                      AND ($3::text[] IS NULL OR item_type = ANY($3))
+                    ORDER BY embedding <=> $1::vector, importance DESC
+                    LIMIT $4
+                    """,
+                    self._vector_literal(embedding),
+                    namespaces,
+                    item_types,
+                    top_n,
+                )
+                if rows:
+                    return [self._normalize_memory_row(row) for row in rows]
+            except Exception:
+                pass
+
+        if query.strip():
+            rows = await self._fetch(
+                """
+                SELECT id, namespace, item_type, content, importance, confidence, metadata,
+                       source_session_id, updated_at,
+                       ts_rank_cd(to_tsvector('simple', content), plainto_tsquery('simple', $1)) AS score
+                FROM memory_item
+                WHERE namespace = ANY($2)
+                  AND status = 'active'
+                  AND ($3::text[] IS NULL OR item_type = ANY($3))
+                  AND (
+                    to_tsvector('simple', content) @@ plainto_tsquery('simple', $1)
+                    OR content ILIKE '%' || $1 || '%'
+                  )
+                ORDER BY score DESC NULLS LAST, importance DESC, updated_at DESC
+                LIMIT $4
+                """,
+                query,
+                namespaces,
+                item_types,
+                top_n,
+            )
+        else:
+            rows = await self._fetch(
+                """
+                SELECT id, namespace, item_type, content, importance, confidence, metadata,
+                       source_session_id, updated_at, importance AS score
+                FROM memory_item
+                WHERE namespace = ANY($1)
+                  AND status = 'active'
+                  AND ($2::text[] IS NULL OR item_type = ANY($2))
+                ORDER BY importance DESC, updated_at DESC
+                LIMIT $3
+                """,
+                namespaces,
+                item_types,
+                top_n,
+            )
+        return [self._normalize_memory_row(row) for row in rows]
+
+    async def list_memory_items(
+        self,
+        *,
+        namespaces: list[str],
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        rows = await self._fetch(
+            """
+            SELECT id, namespace, item_type, content, importance, confidence, metadata,
+                   source_session_id, updated_at, importance AS score
+            FROM memory_item
+            WHERE namespace = ANY($1)
+              AND status = 'active'
+            ORDER BY importance DESC, updated_at DESC
+            LIMIT $2 OFFSET $3
+            """,
+            namespaces,
+            limit,
+            offset,
+        )
+        return [self._normalize_memory_row(row) for row in rows]
+
+    async def delete_memory_item(self, memory_id: int, namespaces: list[str] | None = None) -> bool:
+        if namespaces:
+            result = await self._fetchval(
+                """
+                UPDATE memory_item
+                SET status = 'deleted', updated_at = NOW()
+                WHERE id = $1 AND namespace = ANY($2)
+                RETURNING id
+                """,
+                memory_id,
+                namespaces,
+            )
+        else:
+            result = await self._fetchval(
+                """
+                UPDATE memory_item
+                SET status = 'deleted', updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+                """,
+                memory_id,
+            )
+        return bool(result)
+
+    async def get_latest_conversation_summary(self, session_id: str) -> dict[str, Any] | None:
+        return await self._fetchrow(
+            """
+            SELECT id, session_id, summary, start_turn, end_turn, created_at
+            FROM conversation_summary
+            WHERE session_id = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            session_id,
+        )
+
+    def _normalize_memory_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(row)
+        normalized["metadata"] = self._decode_json_field(normalized.get("metadata")) or {}
+        if normalized.get("updated_at") is not None:
+            normalized["updated_at"] = str(normalized["updated_at"])
+        return normalized
 
     # ── Conversation read ─────────────────────────────────────────────────────
 
@@ -778,6 +1091,26 @@ class DatabaseService:
             FROM emergency_plan WHERE session_id = $1 ORDER BY created_at DESC
         """, session_id)
 
+    async def find_recent_event_plan(
+        self,
+        *,
+        station_id: str,
+        metric_type: str,
+        risk_level: str,
+        since_minutes: int = 30,
+    ) -> dict | None:
+        session_prefix = f"risk-event:{station_id}:{metric_type}:"
+        return await self._fetchrow("""
+            SELECT plan_id, plan_name, risk_level, status, session_id, created_at
+            FROM emergency_plan
+            WHERE session_id LIKE $1
+              AND risk_level = $2
+              AND status IN ('draft', 'executing')
+              AND created_at >= NOW() - ($3::int * INTERVAL '1 minute')
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, f"{session_prefix}%", risk_level, since_minutes)
+
     async def get_sessions(self, limit: int = 20, offset: int = 0) -> list[dict]:
         return await self._fetch("""
             SELECT session_id, MAX(created_at) AS created_at
@@ -796,6 +1129,14 @@ class DatabaseService:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
             embedding_dim = int(self._settings.embedding_dim or 1024)
+            await conn.execute(f"""
+                DO $$ BEGIN
+                    ALTER TABLE memory_item ADD COLUMN IF NOT EXISTS embedding vector({embedding_dim});
+                    CREATE INDEX IF NOT EXISTS idx_memory_item_embedding_hnsw
+                        ON memory_item USING hnsw (embedding vector_cosine_ops);
+                EXCEPTION WHEN undefined_table THEN NULL;
+                END $$;
+            """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS kb_document (
                     id              VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::text,

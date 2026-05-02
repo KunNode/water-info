@@ -30,6 +30,7 @@ def _build_db_mock():
     return SimpleNamespace(
         _get_pool=AsyncMock(return_value=object()),
         ensure_plan_tables=AsyncMock(),
+        ensure_conversation_tables=AsyncMock(),
         ensure_kb_tables=AsyncMock(),
         close=AsyncMock(),
         ensure_or_create_session=AsyncMock(),
@@ -50,6 +51,8 @@ def _build_db_mock():
             "model_distribution": {},
         }),
         create_kb_ingest_job=AsyncMock(return_value="job-001"),
+        list_memory_items=AsyncMock(return_value=[]),
+        delete_memory_item=AsyncMock(return_value=True),
     )
 
 
@@ -110,6 +113,78 @@ def test_stream_events_do_not_duplicate_final_response_content():
             "response": "你好，我是防汛智能助手。",
         }
     ]
+
+
+def test_stream_events_suppress_draft_message_to_avoid_double_send():
+    events = _build_stream_events(
+        "conversation_assistant",
+        {
+            "final_response_draft": "你好，我是防汛智能助手。",
+            "messages": [{"role": "conversation_assistant", "content": "你好，我是防汛智能助手。"}],
+        },
+    )
+
+    message_events = [event for event in events if event["type"] == "agent_message"]
+    assert message_events == []
+    # Activity signals (active/done) should still be emitted so the UI shows progress.
+    assert any(
+        event["type"] == "agent_update" and event["status"] == "active"
+        for event in events
+    )
+
+
+def test_stream_events_suppress_intermediate_agent_messages():
+    events = _build_stream_events(
+        "data_analyst",
+        {
+            "data_summary": "北闸站最新水位 4.248m。",
+            "messages": [{"role": "data_analyst", "content": "北闸站最新水位 4.248m。"}],
+        },
+    )
+
+    assert [event for event in events if event["type"] == "agent_message"] == []
+
+
+def test_stream_events_emit_trace_update_when_traces_present():
+    events = _build_stream_events(
+        "data_analyst",
+        {
+            "data_summary": "概览",
+            "messages": [{"role": "data_analyst", "content": "概览"}],
+            "execution_traces": [
+                {
+                    "phase": "tool_call",
+                    "status": "completed",
+                    "title": "获取水情概览",
+                    "detail": "5 个站点",
+                    "tool_name": "get_flood_situation_overview",
+                    "metadata": {"duration_ms": 42},
+                },
+            ],
+        },
+    )
+
+    trace_events = [e for e in events if e["type"] == "trace_update"]
+    assert len(trace_events) == 1
+    assert trace_events[0]["phase"] == "tool_call"
+    assert trace_events[0]["title"] == "获取水情概览"
+    assert trace_events[0]["detail"] == "5 个站点"
+    assert trace_events[0]["tool_name"] == "get_flood_situation_overview"
+    assert trace_events[0]["metadata"]["duration_ms"] == 42
+
+
+def test_stream_events_no_trace_update_when_no_traces():
+    events = _build_stream_events(
+        "data_analyst",
+        {
+            "data_summary": "概览",
+            "messages": [{"role": "data_analyst", "content": "概览"}],
+        },
+    )
+
+    trace_events = [e for e in events if e["type"] == "trace_update"]
+    assert trace_events == []
+
 
 
 def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():
@@ -187,10 +262,55 @@ def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():
     }
     graph.ainvoke.assert_awaited_once()
     db_mock.save_emergency_plan.assert_awaited_once()
+    saved_kwargs = db_mock.save_emergency_plan.await_args.kwargs
+    assert "摘要：" in saved_kwargs["trigger_conditions"]
+    assert "来源：人工对话请求" in saved_kwargs["trigger_conditions"]
     db_mock.save_resource_allocations.assert_awaited_once()
     db_mock.save_notifications.assert_awaited_once()
     session_mock.get_history.assert_awaited_once_with("session-001")
     assert db_mock.save_conversation_message.await_count == 2
+
+
+def test_flood_query_does_not_persist_plan_for_non_plan_manual_query():
+    plan = EmergencyPlan(
+        plan_id="EP-RISK-ONLY",
+        plan_name="中间态预案",
+        risk_level=RiskLevel.HIGH,
+        trigger_conditions="模型中间态",
+        actions=[
+            EmergencyAction(
+                action_id="A-001",
+                action_type="monitoring",
+                description="加密监测",
+                priority=2,
+                responsible_dept="监测调度科",
+            )
+        ],
+    )
+    final_state = {
+        "final_response": "当前风险较高，请关注水位变化。",
+        "intent": "risk_assessment",
+        "risk_assessment": RiskAssessment(
+            risk_level=RiskLevel.HIGH,
+            risk_score=72.0,
+            key_risks=["水位持续上涨"],
+        ),
+        "emergency_plan": plan,
+    }
+    graph = StubGraph(final_state=final_state)
+
+    with _patched_client(graph=graph) as (client, db_mock, _session_mock, _graph):
+        response = client.post(
+            "/api/v1/flood/query",
+            json={"query": "当前风险严不严重", "session_id": "session-risk-only"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["plan_id"] == "EP-RISK-ONLY"
+    db_mock.save_conversation_snapshot.assert_awaited_once()
+    db_mock.save_emergency_plan.assert_not_awaited()
+    db_mock.save_resource_allocations.assert_not_awaited()
+    db_mock.save_notifications.assert_not_awaited()
 
 
 def test_flood_query_stream_emits_expected_sse_events():
@@ -316,3 +436,36 @@ def test_kb_search_endpoint_returns_serialized_hits():
     assert response.status_code == 200
     assert response.json()[0]["document_title"] == "防汛值班手册"
     service.search.assert_awaited_once()
+
+
+def test_memory_endpoint_lists_visible_memories():
+    db_mock = _build_db_mock()
+    db_mock.list_memory_items = AsyncMock(return_value=[
+        {
+            "id": 7,
+            "namespace": "user:u-1:flood_assistant",
+            "item_type": "preference",
+            "content": "用户偏好先看翠屏湖站点。",
+            "importance": 0.8,
+            "confidence": 0.9,
+            "metadata": {"reason": "test"},
+            "source_session_id": "session-001",
+            "updated_at": "2026-05-02T00:00:00+00:00",
+        }
+    ])
+    with _patched_client(db_mock=db_mock) as (client, _db_mock, _session_mock, _graph):
+        response = client.get("/api/v1/memory?session_id=session-001", headers={"X-User-Id": "u-1"})
+
+    assert response.status_code == 200
+    assert response.json()[0]["content"] == "用户偏好先看翠屏湖站点。"
+    db_mock.list_memory_items.assert_awaited_once()
+
+
+def test_memory_endpoint_deletes_visible_memory():
+    db_mock = _build_db_mock()
+    with _patched_client(db_mock=db_mock) as (client, _db_mock, _session_mock, _graph):
+        response = client.delete("/api/v1/memory/7?session_id=session-001", headers={"X-User-Id": "u-1"})
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+    db_mock.delete_memory_item.assert_awaited_once()

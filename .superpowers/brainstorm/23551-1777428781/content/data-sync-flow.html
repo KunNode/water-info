@@ -1,0 +1,48 @@
+<h2>Latest Assessment Sync Flow</h2>
+<p class="subtitle">Every page resolves the same latest persisted AI assessment before display</p>
+
+<div class="mockup">
+  <div class="mockup-header">Frontend Read Path</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+      <div class="placeholder" style="min-height:150px">
+        <div class="label">Page Mount</div>
+        <h3>Bigscreen / Command</h3>
+        <p>Calls situationStore.ensureFresh() before rendering the AI risk block.</p>
+      </div>
+      <div class="placeholder" style="min-height:150px;background:rgba(73,225,255,.08);border-color:rgba(73,225,255,.35)">
+        <div class="label">Authority Query</div>
+        <h3>GET latest persisted assessment</h3>
+        <p>Request limit=1, normalize level, calculate freshness, update canonical state.</p>
+      </div>
+      <div class="placeholder" style="min-height:150px">
+        <div class="label">Display</div>
+        <h3>Consistent Risk UI</h3>
+        <p>Both pages read canonicalRiskLevel, summary, source, assessedAt and stale status.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">Realtime Update Path</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+      <div class="placeholder" style="min-height:132px">
+        <div class="label">New Assessment</div>
+        <h3>DB upsert succeeds</h3>
+        <p>Backend broadcasts AI_ASSESSMENT_UPDATED with id/assessedAt or full payload.</p>
+      </div>
+      <div class="placeholder" style="min-height:132px">
+        <div class="label">Store Receives</div>
+        <h3>Refresh or apply</h3>
+        <p>If payload is complete, apply it; otherwise refetch latest persisted record.</p>
+      </div>
+      <div class="placeholder" style="min-height:132px">
+        <div class="label">Pages Update</div>
+        <h3>Reactive render</h3>
+        <p>Bigscreen and command console update from the same store snapshot.</p>
+      </div>
+    </div>
+  </div>
+</div>

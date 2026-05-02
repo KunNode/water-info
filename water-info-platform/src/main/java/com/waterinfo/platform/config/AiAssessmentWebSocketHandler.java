@@ -14,10 +14,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class AiAssessmentWebSocketHandler extends TextWebSocketHandler {
 
+    public static final String TYPE_AI_ASSESSMENT_UPDATED = "AI_ASSESSMENT_UPDATED";
+    public static final String TYPE_PONG = "PONG";
+    public static final String TYPE_ERROR = "ERROR";
+
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    public static final String TYPE_AI_ASSESSMENT = "AI_ASSESSMENT";
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
@@ -33,15 +35,26 @@ public class AiAssessmentWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        if ("ping".equals(message.getPayload())) {
-            session.sendMessage(new TextMessage("pong"));
+        if ("ping".equalsIgnoreCase(message.getPayload())) {
+            send(session, Map.of(
+                    "type", TYPE_PONG,
+                    "timestamp", System.currentTimeMillis()
+            ));
         }
     }
 
     public void broadcastAssessment(Map<String, Object> assessmentData) {
         broadcast(Map.of(
-                "type", TYPE_AI_ASSESSMENT,
+                "type", TYPE_AI_ASSESSMENT_UPDATED,
                 "data", assessmentData,
+                "timestamp", System.currentTimeMillis()
+        ));
+    }
+
+    public void broadcastError(String message) {
+        broadcast(Map.of(
+                "type", TYPE_ERROR,
+                "message", message,
                 "timestamp", System.currentTimeMillis()
         ));
     }
@@ -50,22 +63,18 @@ public class AiAssessmentWebSocketHandler extends TextWebSocketHandler {
         if (sessions.isEmpty()) {
             return;
         }
-        String json;
-        try {
-            json = objectMapper.writeValueAsString(message);
-        } catch (IOException e) {
-            log.error("Failed to serialize AI assessment message: {}", e.getMessage());
+        sessions.values().forEach(session -> send(session, message));
+    }
+
+    private void send(WebSocketSession session, Map<String, Object> message) {
+        if (!session.isOpen()) {
             return;
         }
-        TextMessage textMessage = new TextMessage(json);
-        sessions.values().forEach(session -> {
-            try {
-                if (session.isOpen()) {
-                    session.sendMessage(textMessage);
-                }
-            } catch (IOException e) {
-                log.error("Failed to send AI assessment message to session {}: {}", session.getId(), e.getMessage());
-            }
-        });
+        try {
+            String json = objectMapper.writeValueAsString(message);
+            session.sendMessage(new TextMessage(json));
+        } catch (IOException e) {
+            log.error("Failed to send AI assessment message to session {}: {}", session.getId(), e.getMessage());
+        }
     }
 }

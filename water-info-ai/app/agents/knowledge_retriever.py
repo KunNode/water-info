@@ -12,7 +12,7 @@ import hashlib
 import json
 
 from app.config import get_settings
-from app.rag.service import build_evidence, format_evidence_markdown, search_knowledge_base
+from app.rag.service import build_evidence, search_knowledge_base
 from app.services.llm import get_llm
 
 
@@ -72,9 +72,11 @@ async def knowledge_retriever_node(state: dict) -> dict:
         return update
 
     # Answer mode: synthesize a final reply with citations.
+    # The evidence markdown block is appended later by final_response_node so the heading
+    # appears at most once across the whole response.
     reply = "未命中知识库，我暂时没有找到可直接引用的制度、手册或资料。"
     if evidence:
-        reply = f"我先从知识库里找到了几段最相关的依据。\n\n{format_evidence_markdown(evidence)}"
+        reply = "我先从知识库里找到了几段最相关的依据，可以围绕它们来回答。"
 
     llm = get_llm()
     if llm.is_enabled:
@@ -103,6 +105,6 @@ async def knowledge_retriever_node(state: dict) -> dict:
         except Exception:
             pass
 
-    update["final_response"] = reply
+    update["final_response_draft"] = reply
     update["messages"] = [{"role": "knowledge_retriever", "content": reply}]
     return update

@@ -147,6 +147,18 @@ class CreateConversationResponse(BaseModel):
     created_at: str
 
 
+class MemoryItemResponse(BaseModel):
+    id: int
+    namespace: str
+    item_type: str
+    content: str
+    importance: float = 0.5
+    confidence: float = 0.5
+    metadata: dict | None = None
+    source_session_id: str | None = None
+    updated_at: str | None = None
+
+
 class KBDocumentUploadResponse(BaseModel):
     document_id: str
     job_id: str

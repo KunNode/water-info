@@ -3,10 +3,28 @@
 from __future__ import annotations
 
 import json
+import logging
 
+from app.agents.output_validator import validate_final_response
 from app.rag.service import format_evidence_markdown
 from app.services.llm import get_llm
 from app.state import to_plain_data
+from app.tools.trace import make_trace
+
+logger = logging.getLogger(__name__)
+
+_EVIDENCE_HEADING = "## 证据片段"
+
+
+def _append_evidence_if_missing(text: str, evidence) -> str:
+    if not evidence:
+        return text
+    if _EVIDENCE_HEADING in text:
+        return text
+    block = format_evidence_markdown(evidence)
+    if not block:
+        return text
+    return f"{text}\n\n{block}".strip()
 
 
 def _risk_level_text(assessment) -> str:
@@ -111,19 +129,41 @@ def _build_fallback_response(state: dict) -> str:
 
     if plan and intent in {"plan_generation", "resource_dispatch", "notification"}:
         sections.append(f"已形成预案《{plan.plan_name}》，可继续展开措施、资源和通知安排。")
-    if evidence:
-        sections.append(format_evidence_markdown(evidence))
+    merged = "\n\n".join(sections).strip()
+    if evidence and _EVIDENCE_HEADING not in merged:
+        block = format_evidence_markdown(evidence)
+        if block:
+            merged = f"{merged}\n\n{block}".strip() if merged else block
     if error:
-        sections.append(f"本次处理还捕获到一个异常：{error}")
-    return "\n\n".join(sections).strip() or "综合研判已完成。"
+        merged = f"{merged}\n\n本次处理还捕获到一个异常：{error}".strip()
+    return merged or "综合研判已完成。"
 
 
 async def final_response_node(state: dict) -> dict:
+    traces: list[dict] = [
+        make_trace(phase="final_response", status="started", title="正在生成最终回答"),
+    ]
+
     focus_station = state.get("focus_station")
     intent = state.get("intent", "overview")
-    final_text = _build_fallback_response(state)
+    draft = (state.get("final_response_draft") or "").strip()
+    evidence = state.get("evidence") or []
+    answer_policy = state.get("answer_policy") or {}
+
+    if draft:
+        # Upstream agent (conversation_assistant / knowledge_retriever answer mode) already
+        # produced the answer text. Use it as-is, skip the heavy LLM rewrite, but still run
+        # validation and unified evidence appending so the heading appears at most once.
+        final_text = _append_evidence_if_missing(draft, evidence)
+    elif answer_policy.get("data_only") and state.get("data_summary"):
+        final_text = str(state.get("data_summary") or "").strip()
+    else:
+        final_text = _build_fallback_response(state)
+
+    pre_report = validate_final_response(final_text, state)
+
     llm = get_llm()
-    if llm.is_enabled:
+    if llm.is_enabled and not draft and not answer_policy.get("data_only"):
         try:
             response_style = "自然、友好的助手对话"
             if intent in {"plan_generation", "resource_dispatch", "notification"}:
@@ -134,6 +174,13 @@ async def final_response_node(state: dict) -> dict:
                 response_style = "清楚说明告警数量、分布和重点告警的态势简报"
             elif intent == "overview":
                 response_style = "完整但不冗长的态势研判简报"
+
+            must_satisfy = list(pre_report.issues)
+            consistency_clause = (
+                "请确保叙述与结构化字段一致：风险等级、预案名、措施/资源/通知的数量都要对得上。"
+            )
+            if must_satisfy:
+                consistency_clause += f"特别注意修正以下问题：{'；'.join(must_satisfy)}。"
 
             response = await llm.ainvoke(
                 json.dumps({
@@ -146,8 +193,10 @@ async def final_response_node(state: dict) -> dict:
                     "emergency_plan": to_plain_data(state.get("emergency_plan")),
                     "resource_plan": to_plain_data(state.get("resource_plan", [])),
                     "notifications": to_plain_data(state.get("notifications", [])),
-                    "evidence": to_plain_data(state.get("evidence", [])),
+                    "evidence": to_plain_data(evidence),
+                    "memory_context": to_plain_data(state.get("memory_context", {})),
                     "error": state.get("error"),
+                    "must_satisfy": must_satisfy,
                     "llm_context": {
                         "final_response_generated_by_llm": True,
                         "grounding_sources": ["structured_monitoring_data", "risk_rules", "rag_evidence_if_available"],
@@ -161,10 +210,14 @@ async def final_response_node(state: dict) -> dict:
                     "如果用户问的是某个站点，就围绕该站点回答，不要退回到全局总览。"
                     "如果 should_include_summary 为 false，就不要先铺垫整体总览，只保留与当前问题直接相关的分析与结论。"
                     "若 evidence 非空，请优先使用 evidence 中的内容，并保留 [1][2] 这类引用。"
+                    "memory_context.recent_session_messages 可用于回答同一会话内的刚才/上一轮/代词指代问题。"
+                    "memory_context.long_term_memories 可用于用户长期偏好；不要向用户暴露内部记忆机制。"
                     "若 evidence 为空，不要编造外部制度来源。"
+                    f"{consistency_clause}"
                     "如果用户询问是否使用模型研判，请说明当前回答由大模型结合结构化监测数据、规则基线"
                     "和可用 RAG 证据生成；不要声称未使用模型。"
                     "只有在确实需要时再使用分节标题；不要把内部工作流痕迹暴露给用户。"
+                    "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
                     "若存在异常信息，需要在结尾单独提醒。"
                     "输出 Markdown。"
                 ),
@@ -172,12 +225,61 @@ async def final_response_node(state: dict) -> dict:
             )
             content = getattr(response, "content", "").strip()
             if content:
-                final_text = content
+                final_text = _append_evidence_if_missing(content, evidence)
         except Exception:
             pass
+
+    post_report = validate_final_response(final_text, state)
+    if not post_report.ok:
+        if llm.is_enabled:
+            try:
+                repair = await llm.ainvoke(
+                    json.dumps({
+                        "current_text": final_text,
+                        "issues": post_report.issues,
+                        "risk_assessment": to_plain_data(state.get("risk_assessment")),
+                        "emergency_plan": to_plain_data(state.get("emergency_plan")),
+                        "resource_plan": to_plain_data(state.get("resource_plan", [])),
+                        "notifications": to_plain_data(state.get("notifications", [])),
+                    }, ensure_ascii=False, indent=2),
+                    system_prompt=(
+                        "请仅修正以下叙述中与结构化字段不一致的部分："
+                        "风险等级、预案名以及措施/资源/通知的数量。"
+                        "保留原有 Markdown 风格和 [1][2] 引用，不要新增 ## 证据片段。"
+                        "输出修正后的完整文本。"
+                    ),
+                    temperature=0.0,
+                )
+                repaired = getattr(repair, "content", "").strip()
+                if repaired:
+                    candidate = _append_evidence_if_missing(repaired, evidence)
+                    if validate_final_response(candidate, state).ok:
+                        final_text = candidate
+            except Exception:
+                pass
+        if not validate_final_response(final_text, state).ok:
+            logger.warning(
+                "final_response validation failed, falling back to deterministic text: %s",
+                post_report.issues,
+            )
+            traces.append(make_trace(
+                phase="final_response",
+                status="failed",
+                title="回答校验未通过，使用兜底回答",
+                detail="; ".join(post_report.issues[:3]),
+            ))
+            final_text = _build_fallback_response(state)
+
+    traces.append(make_trace(
+        phase="final_response",
+        status="completed",
+        title="最终回答生成完成",
+        detail=f"回答长度 {len(final_text)} 字符",
+    ))
 
     return {
         "final_response": final_text,
         "current_agent": "final_response",
         "messages": [{"role": "final_response", "content": final_text}],
+        "execution_traces": traces,
     }

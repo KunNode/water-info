@@ -16,6 +16,16 @@ import {
   renameConversation as apiRenameConversation,
 } from '@/api/flood'
 
+export interface ExecutionTrace {
+  phase: string
+  status: string
+  title: string
+  detail?: string
+  tool_name?: string
+  metadata?: Record<string, unknown>
+  timestamp?: Date
+}
+
 export interface ChatMessageItem {
   id?: number
   role: 'user' | 'assistant' | 'thinking' | 'agent'
@@ -23,6 +33,7 @@ export interface ChatMessageItem {
   timestamp: Date
   agent?: string
   agentStatus?: 'typing' | 'done' | 'pending'
+  traces?: ExecutionTrace[]
 }
 
 export interface PlanInfo {
@@ -54,6 +65,9 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
   // ── Transient UI state (persisted to localStorage) ────────────────
   const inputDraft = ref('')
   const drawerOpen = ref(false)
+
+  // ── Execution trace accumulator (transient, attached to visible responses) ──
+  const pendingTraces = ref<ExecutionTrace[]>([])
 
   // ── Agent timeline state (transient, not persisted) ───────────────
   const agentStatus = ref<Record<string, string>>({
@@ -142,6 +156,10 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
         role: m.role as 'user' | 'assistant',
         content: m.content,
         timestamp: m.created_at ? new Date(m.created_at) : new Date(),
+        traces: m.metadata?.execution_traces?.map((t: Record<string, unknown>) => ({
+          ...t,
+          timestamp: new Date(),
+        } as ExecutionTrace)) ?? undefined,
       }))
 
       persistToLocalStorage()
@@ -159,6 +177,7 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
     sessionTitle.value = ''
     messages.value = []
     snapshot.value = null
+    pendingTraces.value = []
     resetAgentStatus()
     persistToLocalStorage()
   }
@@ -169,6 +188,7 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
     sessionTitle.value = ''
     messages.value = []
     snapshot.value = null
+    pendingTraces.value = []
     resetAgentStatus()
     persistToLocalStorage()
   }
@@ -217,6 +237,29 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
   // ── Message management ────────────────────────────────────────────
   function addMessage(message: ChatMessageItem) {
     messages.value.push(message)
+    attachTracesToLastAssistant()
+  }
+
+  // ── Execution trace management ─────────────────────────────────
+  function addTrace(trace: ExecutionTrace) {
+    pendingTraces.value.push(trace)
+    attachTracesToLastAssistant()
+  }
+
+  function attachTracesToLastAssistant() {
+    if (!pendingTraces.value.length) return
+
+    for (let idx = messages.value.length - 1; idx >= 0; idx -= 1) {
+      const last = messages.value[idx]
+      if (last.role === 'assistant') {
+        last.traces = [...pendingTraces.value]
+        return
+      }
+    }
+  }
+
+  function resetTraces() {
+    pendingTraces.value = []
   }
 
   function updateLastAssistantMessage(content: string) {
@@ -295,6 +338,7 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
     inputDraft,
     drawerOpen,
     agentStatus,
+    pendingTraces,
 
     // Computed
     riskLevel,
@@ -317,6 +361,9 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
     addMessage,
     updateLastAssistantMessage,
     removeThinkingMessage,
+    addTrace,
+    attachTracesToLastAssistant,
+    resetTraces,
     deleteSession,
     renameSession,
     setInputDraft,

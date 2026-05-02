@@ -1,0 +1,50 @@
+<h2>Unified Situation Fact Source</h2>
+<p class="subtitle">All pages read the same risk truth instead of deriving separate answers</p>
+
+<div class="mockup">
+  <div class="mockup-header">Architecture Boundary</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:1.15fr 1fr 1.15fr;gap:16px;align-items:center">
+      <div>
+        <div class="placeholder" style="min-height:96px">
+          <div class="label">Backend REST</div>
+          <h3>/api/v1/ai-assessments</h3>
+          <p>Initial load, reconnect recovery, manual refresh fallback.</p>
+        </div>
+        <div class="placeholder" style="min-height:96px;margin-top:12px">
+          <div class="label">Backend WS</div>
+          <h3>/ws/ai-assessments</h3>
+          <p>Live updates, heartbeat, error and reconnect metadata.</p>
+        </div>
+      </div>
+
+      <div class="placeholder" style="min-height:238px;background:rgba(73,225,255,.08);border-color:rgba(73,225,255,.35)">
+        <div class="label">Frontend Store</div>
+        <h3>Situation Store</h3>
+        <p><strong>latestAssessment</strong></p>
+        <p><strong>canonicalRiskLevel</strong></p>
+        <p><strong>connectionState</strong></p>
+        <p><strong>freshness / stale reason</strong></p>
+        <p><strong>last successful sync</strong></p>
+      </div>
+
+      <div>
+        <div class="placeholder" style="min-height:96px">
+          <div class="label">Consumer</div>
+          <h3>Bigscreen</h3>
+          <p>Displays the canonical assessment, never derives risk from alarms.</p>
+        </div>
+        <div class="placeholder" style="min-height:96px;margin-top:12px">
+          <div class="label">Consumer</div>
+          <h3>AI Command</h3>
+          <p>Reads the same risk and assessment as the bigscreen.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Rule</h3>
+  <p>Page-level components may format, label and route users, but they do not independently calculate the current risk level when an AI assessment exists.</p>
+</div>

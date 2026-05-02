@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -15,7 +16,9 @@ from fastapi.responses import StreamingResponse
 from app.api.risk_scan import router as risk_scan_router
 from app.config import get_settings
 from app.database import get_db_service
-from app.graph import flood_response_graph
+from app.graph import build_flood_response_graph, flood_response_graph
+from app.langgraph_persistence import get_langgraph_persistence
+from app.memory.service import build_memory_namespaces
 from app.models import (
     ConversationDetailResponse,
     ConversationFullResponse,
@@ -33,6 +36,7 @@ from app.models import (
     KBSearchHit,
     KBSearchRequest,
     KBStatsResponse,
+    MemoryItemResponse,
     PlanDetailResponse,
     PlanExecuteRequest,
     PlanExecuteResponse,
@@ -41,6 +45,7 @@ from app.models import (
 from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
+from app.services.plan_persistence import SOURCE_MANUAL, build_trigger_conditions, should_persist_plan
 from app.services.platform_client import get_platform_client
 from app.services.risk_scan_scheduler import get_risk_scan_scheduler
 from app.state import RiskAssessment, to_plain_data
@@ -97,12 +102,19 @@ async def _persist_result(session_id: str, graph_state: dict) -> None:
     if not plan:
         return
 
+    decision = should_persist_plan(graph_state, source=SOURCE_MANUAL)
+    if not decision.should_persist:
+        logger.info("[%s] plan persist skipped: %s", session_id, decision.reason)
+        return
+
     try:
+        trigger_conditions = build_trigger_conditions(graph_state, source=SOURCE_MANUAL)
+        plan.trigger_conditions = trigger_conditions
         await db.save_emergency_plan(
-            plan_id=plan.plan_id,
+            plan_id=decision.plan_id or plan.plan_id,
             plan_name=plan.plan_name or "防汛应急预案",
             risk_level=risk_level,
-            trigger_conditions=plan.trigger_conditions,
+            trigger_conditions=trigger_conditions,
             status=plan.status or "draft",
             session_id=session_id,
             summary=(graph_state.get("final_response") or plan.summary or "")[:2000],
@@ -124,9 +136,18 @@ def _risk_level_value(assessment: RiskAssessment | None) -> str:
     return assessment.risk_level.value
 
 
-def _build_initial_state(session_id: str, query: str, history: list[dict]) -> dict:
+def _build_initial_state(
+    session_id: str,
+    query: str,
+    history: list[dict],
+    *,
+    user_id: str = "",
+    username: str = "",
+) -> dict:
     return {
         "session_id": session_id,
+        "user_id": user_id,
+        "username": username,
         "user_query": query,
         "messages": history + [{"role": "user", "content": query}],
         "iteration": 0,
@@ -154,7 +175,20 @@ def _build_stream_events(agent: str, update: dict) -> list[dict]:
 
     content = _message_content(update)
     final_response = update.get("final_response")
-    if content and not final_response:
+    final_response_draft = update.get("final_response_draft")
+    intermediate_agents = {
+        "data_analyst",
+        "risk_assessor",
+        "plan_generator",
+        "resource_dispatcher",
+        "notification",
+        "execution_monitor",
+        "parallel_dispatch",
+    }
+    # Suppress agent_message when this update is a draft destined for final_response_node:
+    # the same text would otherwise reach the client twice (once as the upstream agent's
+    # message, once as the authoritative final_response).
+    if content and not final_response and not final_response_draft and agent not in intermediate_agents:
         events.append({"type": "agent_message", "agent": agent, "content": content})
 
     if update.get("risk_assessment"):
@@ -189,6 +223,17 @@ def _build_stream_events(agent: str, update: dict) -> list[dict]:
             "type": "evidence_update",
             "agent": agent,
             "items": to_plain_data(update["evidence"]),
+        })
+
+    for trace in (update.get("execution_traces") or []):
+        events.append({
+            "type": "trace_update",
+            "phase": trace.get("phase", ""),
+            "status": trace.get("status", "completed"),
+            "title": trace.get("title", ""),
+            "detail": trace.get("detail", ""),
+            "tool_name": trace.get("tool_name"),
+            "metadata": trace.get("metadata", {}),
         })
 
     events.append({"type": "agent_update", "agent": agent, "status": "done"})
@@ -248,19 +293,28 @@ async def _do_execute_plan(plan_id: str, actions: list[dict]) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global flood_response_graph
     logger.info("启动水务AI多 Agent 应急服务")
     db = get_db_service()
     sessions = session_service.get_session_service()
+    persistence = get_langgraph_persistence()
     try:
         await db._get_pool()
         await db.ensure_plan_tables()
+        await db.ensure_conversation_tables()
         await db.ensure_kb_tables()
         logger.info("数据库连接池就绪")
+        if await persistence.start():
+            flood_response_graph = build_flood_response_graph(
+                checkpointer=persistence.checkpointer,
+                store=persistence.store,
+            )
     except Exception as exc:
         logger.warning("数据库预热失败（服务仍可启动）: %s", exc)
     await get_risk_scan_scheduler().start()
     yield
     await get_risk_scan_scheduler().stop()
+    await persistence.aclose()
     await db.close()
     await sessions.close()
     await get_platform_client().close()
@@ -321,10 +375,15 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
     await db.save_conversation_message(session_id, "user", request.query, message_type="chat", status="completed")
 
     try:
-        final_state = await flood_response_graph.ainvoke(_build_initial_state(session_id, request.query, history))
+        final_state = await flood_response_graph.ainvoke(
+            _build_initial_state(session_id, request.query, history, user_id=user_id, username=username),
+            {"configurable": {"thread_id": session_id}},
+        )
     except Exception as exc:
         logger.exception("[%s] graph failed: %s", session_id, exc)
         raise HTTPException(status_code=500, detail=f"处理失败: {exc}") from exc
+    final_state.setdefault("session_id", session_id)
+    final_state.setdefault("user_query", request.query)
 
     # Save assistant response
     response_content = final_state.get("final_response") or "处理完成"
@@ -383,7 +442,8 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
         try:
             yield _event_line({"type": "session_init", "sessionId": session_id})
             async for update in flood_response_graph.astream(
-                _build_initial_state(session_id, request.query, history),
+                _build_initial_state(session_id, request.query, history, user_id=user_id, username=username),
+                {"configurable": {"thread_id": session_id}},
                 stream_mode="updates",
             ):
                 node_name, node_update = next(iter(update.items()))
@@ -395,9 +455,17 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
                         accumulated_response = event.get("response", "")
 
             if final_state:
+                final_state.setdefault("session_id", session_id)
+                final_state.setdefault("user_query", request.query)
                 final_response = final_state.get("final_response") or accumulated_response or "处理完成"
+                # Collect execution traces for persistence
+                exec_traces = final_state.get("execution_traces") or []
+                trace_metadata = {"execution_traces": exec_traces} if exec_traces else None
                 # Update assistant message to completed
-                await db.update_message_content(assistant_msg_id, final_response, status="completed")
+                await db.update_message_content(
+                    assistant_msg_id, final_response, status="completed",
+                    metadata=trace_metadata,
+                )
                 # Persist plan and snapshot
                 asyncio.create_task(_persist_result(session_id, final_state))
             yield _event_line({"type": "agent_update", "agent": "__done__", "status": "done"})
@@ -674,10 +742,12 @@ async def get_conversation(session_id: str, http_request: Request):
         snapshot_row = await db.get_conversation_snapshot(session_id)
         snapshot = None
         if snapshot_row:
+            plan_info = snapshot_row.get("plan_info")
+            agent_status = snapshot_row.get("agent_status_summary")
             snapshot = ConversationSnapshot(
                 risk_level=snapshot_row.get("risk_level", "none"),
-                plan_info=snapshot_row.get("plan_info"),
-                agent_status_summary=snapshot_row.get("agent_status_summary"),
+                plan_info=json.loads(plan_info) if isinstance(plan_info, str) else plan_info,
+                agent_status_summary=json.loads(agent_status) if isinstance(agent_status, str) else agent_status,
                 query_count=snapshot_row.get("query_count", 0),
             )
 
@@ -708,6 +778,39 @@ async def get_conversation(session_id: str, http_request: Request):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.get("/api/v1/memory", response_model=list[MemoryItemResponse])
+async def list_memory(http_request: Request, session_id: str | None = None, limit: int = 50, offset: int = 0):
+    """List active long-term memory items visible to the current user/session."""
+    user_id, _ = _get_user_from_request(http_request)
+    namespaces = build_memory_namespaces(user_id, session_id or "")
+    rows = await get_db_service().list_memory_items(namespaces=namespaces, limit=limit, offset=offset)
+    return [
+        MemoryItemResponse(
+            id=int(row["id"]),
+            namespace=str(row.get("namespace") or ""),
+            item_type=str(row.get("item_type") or "fact"),
+            content=str(row.get("content") or ""),
+            importance=float(row.get("importance") or 0.5),
+            confidence=float(row.get("confidence") or 0.5),
+            metadata=row.get("metadata") or {},
+            source_session_id=str(row.get("source_session_id") or "") or None,
+            updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
+        )
+        for row in rows
+    ]
+
+
+@app.delete("/api/v1/memory/{memory_id}")
+async def delete_memory(memory_id: int, http_request: Request, session_id: str | None = None):
+    """Soft-delete a memory item in the current user's visible namespace."""
+    user_id, _ = _get_user_from_request(http_request)
+    namespaces = build_memory_namespaces(user_id, session_id or "")
+    deleted = await get_db_service().delete_memory_item(memory_id, namespaces=namespaces)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="记忆不存在")
+    return {"deleted": True}
+
+
 @app.get("/api/v1/conversations/{session_id}/messages", response_model=ConversationDetailResponse)
 async def get_conversation_messages(
     session_id: str,
@@ -732,10 +835,12 @@ async def get_conversation_messages(
         snapshot_row = await db.get_conversation_snapshot(session_id)
         snapshot = None
         if snapshot_row:
+            plan_info = snapshot_row.get("plan_info")
+            agent_status = snapshot_row.get("agent_status_summary")
             snapshot = ConversationSnapshot(
                 risk_level=snapshot_row.get("risk_level", "none"),
-                plan_info=snapshot_row.get("plan_info"),
-                agent_status_summary=snapshot_row.get("agent_status_summary"),
+                plan_info=json.loads(plan_info) if isinstance(plan_info, str) else plan_info,
+                agent_status_summary=json.loads(agent_status) if isinstance(agent_status, str) else agent_status,
                 query_count=snapshot_row.get("query_count", 0),
             )
 
@@ -749,6 +854,7 @@ async def get_conversation_messages(
                     content=m["content"],
                     message_type=m.get("message_type", "chat"),
                     status=m.get("status", "completed"),
+                    metadata=m.get("metadata"),
                     created_at=str(m["created_at"]) if m.get("created_at") else None,
                 )
                 for m in msgs
