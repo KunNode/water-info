@@ -30,6 +30,7 @@ def _build_db_mock():
     return SimpleNamespace(
         _get_pool=AsyncMock(return_value=object()),
         ensure_plan_tables=AsyncMock(),
+        ensure_conversation_tables=AsyncMock(),
         ensure_kb_tables=AsyncMock(),
         close=AsyncMock(),
         ensure_or_create_session=AsyncMock(),
@@ -50,6 +51,8 @@ def _build_db_mock():
             "model_distribution": {},
         }),
         create_kb_ingest_job=AsyncMock(return_value="job-001"),
+        list_memory_items=AsyncMock(return_value=[]),
+        delete_memory_item=AsyncMock(return_value=True),
     )
 
 
@@ -379,3 +382,36 @@ def test_kb_search_endpoint_returns_serialized_hits():
     assert response.status_code == 200
     assert response.json()[0]["document_title"] == "防汛值班手册"
     service.search.assert_awaited_once()
+
+
+def test_memory_endpoint_lists_visible_memories():
+    db_mock = _build_db_mock()
+    db_mock.list_memory_items = AsyncMock(return_value=[
+        {
+            "id": 7,
+            "namespace": "user:u-1:flood_assistant",
+            "item_type": "preference",
+            "content": "用户偏好先看翠屏湖站点。",
+            "importance": 0.8,
+            "confidence": 0.9,
+            "metadata": {"reason": "test"},
+            "source_session_id": "session-001",
+            "updated_at": "2026-05-02T00:00:00+00:00",
+        }
+    ])
+    with _patched_client(db_mock=db_mock) as (client, _db_mock, _session_mock, _graph):
+        response = client.get("/api/v1/memory?session_id=session-001", headers={"X-User-Id": "u-1"})
+
+    assert response.status_code == 200
+    assert response.json()[0]["content"] == "用户偏好先看翠屏湖站点。"
+    db_mock.list_memory_items.assert_awaited_once()
+
+
+def test_memory_endpoint_deletes_visible_memory():
+    db_mock = _build_db_mock()
+    with _patched_client(db_mock=db_mock) as (client, _db_mock, _session_mock, _graph):
+        response = client.delete("/api/v1/memory/7?session_id=session-001", headers={"X-User-Id": "u-1"})
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+    db_mock.delete_memory_item.assert_awaited_once()

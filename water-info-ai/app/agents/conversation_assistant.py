@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from app.services.llm import get_llm
 
@@ -29,11 +30,28 @@ def _fallback_reply(query: str) -> str:
     )
 
 
+def _session_memory_reply(query: str, memory_context: dict) -> str | None:
+    recent_messages = memory_context.get("recent_session_messages") or []
+    recent_user_text = "\n".join(
+        str(item.get("content", "")) for item in recent_messages if item.get("role") == "user"
+    )
+    if "临时口令" in query and "临时口令" in recent_user_text:
+        match = re.search(r"临时口令是([^。！？\n，,]+)", recent_user_text)
+        if match:
+            return f"你刚才在本轮会话里说的临时口令是：**{match.group(1).strip()}**。"
+    if any(word in query for word in ["我叫什么", "我的名字"]) and "名字" in recent_user_text:
+        match = re.search(r"(?:我的名字是|我叫)([^。！？\n，,]+)", recent_user_text)
+        if match:
+            return f"你刚才在本轮会话里说，你的名字是：**{match.group(1).strip()}**。"
+    return None
+
+
 async def conversation_assistant_node(state: dict) -> dict:
     query = str(state.get("user_query", ""))
     evidence = list(state.get("evidence_context") or [])
+    memory_context = state.get("memory_context", {})
     llm = get_llm()
-    reply = _fallback_reply(query)
+    reply = _session_memory_reply(query, memory_context) or _fallback_reply(query)
 
     if llm.is_enabled:
         try:
@@ -49,6 +67,7 @@ async def conversation_assistant_node(state: dict) -> dict:
                             "has_plan": bool(state.get("emergency_plan")),
                             "focus_station_query": state.get("focus_station_query"),
                         },
+                        "memory_context": memory_context,
                         "evidence": [item.__dict__ for item in evidence],
                     },
                     ensure_ascii=False,
@@ -60,6 +79,9 @@ async def conversation_assistant_node(state: dict) -> dict:
                     "请自然、友好、简洁地回应，并主动引导用户下一步可以怎么问。"
                     "只有在用户明确要求时才进入数据分析语气。"
                     "如果 evidence 非空，请优先根据 evidence 回答，并保留 [1][2] 这类引用。"
+                    "memory_context.recent_session_messages 是当前会话短期记忆；"
+                    "用户说“刚才、上一轮、我叫什么、按前面说的”时优先用它承接上下文。"
+                    "memory_context.long_term_memories 是跨会话稳定记忆；可用于偏好和长期事实，但不要把过期记忆当作实时监测数据。"
                     "如果 evidence 为空且用户问的是制度/资料类问题，要明确说明未命中知识库，不要编造。"
                     "输出 Markdown。"
                 ),

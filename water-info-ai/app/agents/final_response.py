@@ -186,6 +186,7 @@ async def final_response_node(state: dict) -> dict:
                     "resource_plan": to_plain_data(state.get("resource_plan", [])),
                     "notifications": to_plain_data(state.get("notifications", [])),
                     "evidence": to_plain_data(evidence),
+                    "memory_context": to_plain_data(state.get("memory_context", {})),
                     "error": state.get("error"),
                     "must_satisfy": must_satisfy,
                     "llm_context": {
@@ -201,6 +202,8 @@ async def final_response_node(state: dict) -> dict:
                     "如果用户问的是某个站点，就围绕该站点回答，不要退回到全局总览。"
                     "如果 should_include_summary 为 false，就不要先铺垫整体总览，只保留与当前问题直接相关的分析与结论。"
                     "若 evidence 非空，请优先使用 evidence 中的内容，并保留 [1][2] 这类引用。"
+                    "memory_context.recent_session_messages 可用于回答同一会话内的刚才/上一轮/代词指代问题。"
+                    "memory_context.long_term_memories 可用于用户长期偏好；不要向用户暴露内部记忆机制。"
                     "若 evidence 为空，不要编造外部制度来源。"
                     f"{consistency_clause}"
                     "如果用户询问是否使用模型研判，请说明当前回答由大模型结合结构化监测数据、规则基线"

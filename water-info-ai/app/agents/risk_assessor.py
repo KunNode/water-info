@@ -157,12 +157,14 @@ async def risk_assessor_node(state: dict) -> dict:
                     "overview_data": to_plain_data(state.get("overview_data")),
                     "weather_forecast": to_plain_data(state.get("weather_forecast")),
                     "evidence": to_plain_data(evidence),
+                    "memory_context": to_plain_data(state.get("memory_context", {})),
                     "deterministic_baseline": to_plain_data(assessment),
                 }, ensure_ascii=False, indent=2),
                 system_prompt=(
                     "你是防汛风险评估智能体。"
                     "如果用户问的是某个具体站点，就优先评估该站点的风险，而不是泛泛地评估全局。"
                     "如果 evidence 非空，请把可引用的专业依据融入 reasoning，并保留 [1][2] 编号。"
+                    "memory_context 只能用于了解历史偏好、既往处置和会话摘要；当前风险等级必须以实时监测数据和规则基线为准。"
                     "如果 evidence 为空，不要编造制度或规范。"
                     "请结合监测数据和规则基线，输出严格 JSON。"
                     "字段必须包含：risk_level, risk_score, affected_stations, key_risks, "

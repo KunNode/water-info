@@ -30,6 +30,25 @@ async def test_conversation_assistant_writes_only_draft():
 
 
 @pytest.mark.asyncio
+async def test_conversation_assistant_uses_recent_session_memory_without_llm():
+    with patch(
+        "app.agents.conversation_assistant.get_llm",
+        return_value=SimpleNamespace(is_enabled=False),
+    ):
+        result = await conversation_assistant_node({
+            "user_query": "刚才这轮会话里我的临时口令是什么？",
+            "memory_context": {
+                "recent_session_messages": [
+                    {"role": "user", "content": "这轮会话里，我的临时口令是蓝色水位线。"},
+                    {"role": "assistant", "content": "好的。"},
+                ]
+            },
+        })
+
+    assert "蓝色水位线" in result["final_response_draft"]
+
+
+@pytest.mark.asyncio
 async def test_knowledge_retriever_answer_mode_writes_draft():
     with patch(
         "app.agents.knowledge_retriever.search_knowledge_base", return_value=[]

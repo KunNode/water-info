@@ -436,10 +436,13 @@ async def supervisor_node(state: dict) -> dict:
             "resource_plan": bool(state.get("resource_plan")),
             "notifications": bool(state.get("notifications")),
         },
+        "memory_context": state.get("memory_context", {}),
         "guardrails": [
             "防汛业务问题必须先有 data_analyst 提供监测数据 grounding，除非是闲聊或知识库问答。",
             "预案、资源、通知必须建立在 risk_assessor 的风险评估之后。",
             "资源调度和通知必须建立在 plan_generator 的预案之后。",
+            "涉及刚才、上一轮、前面说的、我叫什么等同会话上下文问题，"
+            "可根据 memory_context.recent_session_messages 选择 conversation_assistant。",
             "无法判断或当前任务已完整时才选择 __end__。",
         ],
     }, ensure_ascii=False)

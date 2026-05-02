@@ -55,6 +55,7 @@ class Settings:
     risk_scan_periodic_minutes: int = 15
     risk_scan_periodic_enabled: bool = True
     risk_scan_event_debounce_seconds: int = 60
+    langgraph_postgres_enabled: bool = False
 
 
 @lru_cache(maxsize=1)
@@ -93,4 +94,5 @@ def get_settings() -> Settings:
         risk_scan_periodic_minutes=int(os.environ.get("RISK_SCAN_PERIODIC_MINUTES", "15")),
         risk_scan_periodic_enabled=os.environ.get("RISK_SCAN_PERIODIC_ENABLED", "true").lower() == "true",
         risk_scan_event_debounce_seconds=int(os.environ.get("RISK_SCAN_EVENT_DEBOUNCE_SECONDS", "60")),
+        langgraph_postgres_enabled=os.environ.get("LANGGRAPH_POSTGRES_ENABLED", "false").lower() == "true",
     )

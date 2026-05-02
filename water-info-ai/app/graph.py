@@ -9,6 +9,7 @@ from app.agents.data_analyst import data_analyst_node
 from app.agents.execution_monitor import execution_monitor_node
 from app.agents.final_response import final_response_node
 from app.agents.knowledge_retriever import knowledge_retriever_node
+from app.agents.memory import memory_loader_node, memory_writer_node
 from app.agents.notification import notification_node
 from app.agents.parallel_dispatch import parallel_dispatch_node
 from app.agents.plan_generator import plan_generator_node
@@ -25,8 +26,9 @@ def _route_from_supervisor(state: dict) -> str:
     return str(next_agent)
 
 
-def build_flood_response_graph():
+def build_flood_response_graph(*, checkpointer=None, store=None):
     graph = StateGraph(FloodGraphState)
+    graph.add_node("memory_loader", memory_loader_node)
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("conversation_assistant", conversation_assistant_node)
     graph.add_node("data_analyst", data_analyst_node)
@@ -38,8 +40,10 @@ def build_flood_response_graph():
     graph.add_node("parallel_dispatch", parallel_dispatch_node)
     graph.add_node("knowledge_retriever", knowledge_retriever_node)
     graph.add_node("final_response", final_response_node)
+    graph.add_node("memory_writer", memory_writer_node)
 
-    graph.add_edge(START, "supervisor")
+    graph.add_edge(START, "memory_loader")
+    graph.add_edge("memory_loader", "supervisor")
     graph.add_conditional_edges(
         "supervisor",
         _route_from_supervisor,
@@ -69,8 +73,9 @@ def build_flood_response_graph():
         lambda s: "final_response" if s.get("rag_target", "answer") == "answer" else "supervisor",
         {"final_response": "final_response", "supervisor": "supervisor"},
     )
-    graph.add_edge("final_response", END)
-    return graph.compile()
+    graph.add_edge("final_response", "memory_writer")
+    graph.add_edge("memory_writer", END)
+    return graph.compile(checkpointer=checkpointer, store=store)
 
 
 flood_response_graph = build_flood_response_graph()

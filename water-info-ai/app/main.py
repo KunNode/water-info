@@ -16,7 +16,9 @@ from fastapi.responses import StreamingResponse
 from app.api.risk_scan import router as risk_scan_router
 from app.config import get_settings
 from app.database import get_db_service
-from app.graph import flood_response_graph
+from app.graph import build_flood_response_graph, flood_response_graph
+from app.langgraph_persistence import get_langgraph_persistence
+from app.memory.service import build_memory_namespaces
 from app.models import (
     ConversationDetailResponse,
     ConversationFullResponse,
@@ -34,6 +36,7 @@ from app.models import (
     KBSearchHit,
     KBSearchRequest,
     KBStatsResponse,
+    MemoryItemResponse,
     PlanDetailResponse,
     PlanExecuteRequest,
     PlanExecuteResponse,
@@ -133,9 +136,18 @@ def _risk_level_value(assessment: RiskAssessment | None) -> str:
     return assessment.risk_level.value
 
 
-def _build_initial_state(session_id: str, query: str, history: list[dict]) -> dict:
+def _build_initial_state(
+    session_id: str,
+    query: str,
+    history: list[dict],
+    *,
+    user_id: str = "",
+    username: str = "",
+) -> dict:
     return {
         "session_id": session_id,
+        "user_id": user_id,
+        "username": username,
         "user_query": query,
         "messages": history + [{"role": "user", "content": query}],
         "iteration": 0,
@@ -261,20 +273,28 @@ async def _do_execute_plan(plan_id: str, actions: list[dict]) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global flood_response_graph
     logger.info("启动水务AI多 Agent 应急服务")
     db = get_db_service()
     sessions = session_service.get_session_service()
+    persistence = get_langgraph_persistence()
     try:
         await db._get_pool()
         await db.ensure_plan_tables()
         await db.ensure_conversation_tables()
         await db.ensure_kb_tables()
         logger.info("数据库连接池就绪")
+        if await persistence.start():
+            flood_response_graph = build_flood_response_graph(
+                checkpointer=persistence.checkpointer,
+                store=persistence.store,
+            )
     except Exception as exc:
         logger.warning("数据库预热失败（服务仍可启动）: %s", exc)
     await get_risk_scan_scheduler().start()
     yield
     await get_risk_scan_scheduler().stop()
+    await persistence.aclose()
     await db.close()
     await sessions.close()
     await get_platform_client().close()
@@ -335,7 +355,10 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
     await db.save_conversation_message(session_id, "user", request.query, message_type="chat", status="completed")
 
     try:
-        final_state = await flood_response_graph.ainvoke(_build_initial_state(session_id, request.query, history))
+        final_state = await flood_response_graph.ainvoke(
+            _build_initial_state(session_id, request.query, history, user_id=user_id, username=username),
+            {"configurable": {"thread_id": session_id}},
+        )
     except Exception as exc:
         logger.exception("[%s] graph failed: %s", session_id, exc)
         raise HTTPException(status_code=500, detail=f"处理失败: {exc}") from exc
@@ -399,7 +422,8 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
         try:
             yield _event_line({"type": "session_init", "sessionId": session_id})
             async for update in flood_response_graph.astream(
-                _build_initial_state(session_id, request.query, history),
+                _build_initial_state(session_id, request.query, history, user_id=user_id, username=username),
+                {"configurable": {"thread_id": session_id}},
                 stream_mode="updates",
             ):
                 node_name, node_update = next(iter(update.items()))
@@ -726,6 +750,39 @@ async def get_conversation(session_id: str, http_request: Request):
     except Exception as exc:
         logger.exception("get conversation %s: %s", session_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/memory", response_model=list[MemoryItemResponse])
+async def list_memory(http_request: Request, session_id: str | None = None, limit: int = 50, offset: int = 0):
+    """List active long-term memory items visible to the current user/session."""
+    user_id, _ = _get_user_from_request(http_request)
+    namespaces = build_memory_namespaces(user_id, session_id or "")
+    rows = await get_db_service().list_memory_items(namespaces=namespaces, limit=limit, offset=offset)
+    return [
+        MemoryItemResponse(
+            id=int(row["id"]),
+            namespace=str(row.get("namespace") or ""),
+            item_type=str(row.get("item_type") or "fact"),
+            content=str(row.get("content") or ""),
+            importance=float(row.get("importance") or 0.5),
+            confidence=float(row.get("confidence") or 0.5),
+            metadata=row.get("metadata") or {},
+            source_session_id=str(row.get("source_session_id") or "") or None,
+            updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
+        )
+        for row in rows
+    ]
+
+
+@app.delete("/api/v1/memory/{memory_id}")
+async def delete_memory(memory_id: int, http_request: Request, session_id: str | None = None):
+    """Soft-delete a memory item in the current user's visible namespace."""
+    user_id, _ = _get_user_from_request(http_request)
+    namespaces = build_memory_namespaces(user_id, session_id or "")
+    deleted = await get_db_service().delete_memory_item(memory_id, namespaces=namespaces)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="记忆不存在")
+    return {"deleted": True}
 
 
 @app.get("/api/v1/conversations/{session_id}/messages", response_model=ConversationDetailResponse)
