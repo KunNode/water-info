@@ -1,0 +1,49 @@
+{
+  "notes": [
+    {
+      "category": "test",
+      "content": "water-info-admin: `npm run build` passes after FloodMind frontend refactor. `npx eslint ...` cannot run because the package has no ESLint configuration; npm script uses --fix but still requires config.",
+      "timestamp": "2026-04-24T06:05:29.717Z"
+    },
+    {
+      "category": "test",
+      "content": "water-info-admin AI command UI refactor: `npm run build` passes. Visual checked with Playwright CLI screenshots at 1440x1000 and 390x900 via dev server http://localhost:5173/ai/command. ESLint still cannot run because project lacks an ESLint config.",
+      "timestamp": "2026-04-24T12:09:42.495Z"
+    },
+    {
+      "category": "test",
+      "content": "scheduled-risk-monitoring implementation: platform `mvn -q -DskipTests compile` passes; frontend `npm run build` passes; AI `OPENAI_API_KEY= EMBEDDING_API_KEY= uv run pytest -q tests` passes (67 passed, 3 skipped). Platform `mvn test`/single ObservationServiceTest hung with no output and was stopped/timeout; AI root `uv run pytest -q` still hits stale top-level test_db.py importing app.services.database.",
+      "timestamp": "2026-04-25T02:51:33.929Z"
+    },
+    {
+      "category": "test",
+      "content": "unified-ai-assessment-situation: platform `mvn -q -Dtest=AiAssessmentWebSocketHandlerTest test` passes; platform `mvn -q -DskipTests compile` passes; admin `npm run build` passes; admin `npx playwright test --project=situation` passes with self-owned localhost:5174 webServer. Legacy `AI_ASSESSMENT` event and stale AI command backup view removed.",
+      "timestamp": "2026-04-30T02:27:44.513Z"
+    },
+    {
+      "category": "test",
+      "content": "water-info-ai memory feature: `uv run ruff check app tests` passes; `OPENAI_API_KEY= EMBEDDING_API_KEY= uv run pytest -q tests` passes (107 passed, 3 skipped).",
+      "timestamp": "2026-05-02T03:42:14.403Z"
+    },
+    {
+      "category": "test",
+      "content": "water-info-ai live memory verification after docker compose up -d --build ai: /health 200, ai healthy, explicit memory write persisted one preference row for user:codex-memory-dedupe-user, new session recalled 北闸站/三条要点 preference. Local verification: `uv run ruff check app tests` passes; `OPENAI_API_KEY= EMBEDDING_API_KEY= uv run pytest -q tests` passes (108 passed, 3 skipped).",
+      "timestamp": "2026-05-02T04:00:42.516Z"
+    },
+    {
+      "category": "test",
+      "content": "water-info-ai memory phase 2: added langgraph-checkpoint-postgres + psycopg, optional LANGGRAPH_POSTGRES_ENABLED. Docker compose AI enables it; live logs show `LangGraph Postgres checkpointer/store ready`. Postgres created checkpoint/store tables; test sessions codex-phase2-session-1/2 each wrote 7 checkpoints; store has one user:codex-phase2-user row; cross-session recall returned 东泵站/两条要点. Local `uv run ruff check app tests` passes; `OPENAI_API_KEY= EMBEDDING_API_KEY= uv run pytest -q tests` passes (111 passed, 3 skipped).",
+      "timestamp": "2026-05-02T04:13:40.085Z"
+    },
+    {
+      "category": "test",
+      "content": "water-info-ai same-session memory: added `recent_session_messages` in memory_context, memory_loader resets per-turn transient graph fields for checkpointed threads, and temp-session markers skip long-term memory extraction. Live Docker test `codex-session-memory-live-3`: first turn set temporary code 红色闸门, second turn same session recalled it; memory_item namespace user:codex-session-memory-user-3 had 0 rows; checkpoints count 14. Local `uv run ruff check app tests` passes; `OPENAI_API_KEY= EMBEDDING_API_KEY= uv run pytest -q tests` passes (115 passed, 3 skipped).",
+      "timestamp": "2026-05-02T04:23:00.722Z"
+    },
+    {
+      "category": "test",
+      "content": "water-info-admin execution trace UI: removed AI command AgentTimeline card, added inline assistant execution-trace/thought-summary display for SSE trace_update events, final_response renders as assistant message. `npm run build` passes; `npx eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts` passes.",
+      "timestamp": "2026-05-02T15:45:56.668Z"
+    }
+  ]
+}

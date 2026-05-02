@@ -1,0 +1,6 @@
+{
+  "last_turn_at": "2026-05-02T04:23:10.737Z",
+  "turn_count": 6,
+  "last_progress_at": "2026-05-02T04:23:10.737Z",
+  "last_agent_output": "补上了“单次会话记忆”，并实测通过。\n\n这次修了两件关键事：\n\n- `memory_context` 现在包含 `recent_session_messages`，同一个 `session_id` 内"
+}
