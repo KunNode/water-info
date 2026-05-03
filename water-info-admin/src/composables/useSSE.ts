@@ -162,9 +162,8 @@ export function useSSE() {
 
       if (!reader) throw new Error('No readable stream')
 
-      // Keep incomplete fragments between reads so structured SSE blocks can
-      // span network chunks, while still allowing raw text streams to render
-      // incrementally even when the backend does not emit newline delimiters.
+      // Keep incomplete fragments between reads and process complete lines
+      // immediately so UI can react as soon as bytes arrive.
       let buffer = ''
 
       let streamDone = false
@@ -175,12 +174,15 @@ export function useSSE() {
 
         buffer += decoder.decode(value, { stream: true })
 
-        let blockEnd = buffer.search(/\r?\n\r?\n/)
-        while (blockEnd >= 0) {
-          const block = buffer.slice(0, blockEnd)
-          flushChunk(block)
-          buffer = buffer.slice(blockEnd).replace(/^\r?\n\r?\n/, '')
-          blockEnd = buffer.search(/\r?\n\r?\n/)
+        let lineBreak = buffer.search(/\r?\n/)
+        while (lineBreak >= 0) {
+          const line = buffer.slice(0, lineBreak).trimEnd()
+          buffer = buffer.slice(lineBreak).replace(/^\r?\n/, '')
+
+          // Blank lines are SSE event separators; dispatching per data-line
+          // already gives lower latency, so separators can be skipped.
+          if (line.length > 0) flushChunk(line)
+          lineBreak = buffer.search(/\r?\n/)
         }
 
         if (buffer && !looksLikeStructuredFragment(buffer)) {

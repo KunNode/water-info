@@ -27,12 +27,12 @@
 
     <!-- User / assistant bubble -->
     <template v-else-if="message.role === 'user' || message.role === 'assistant'">
+      <ExecutionTrace v-if="message.role === 'assistant'" :message="message" />
       <div class="fm-msg__bubble">
         <div v-if="message.role === 'assistant'" class="markdown" v-html="renderedContent" />
         <div v-else class="user-text">{{ message.content }}</div>
         <span v-if="streaming && message.role === 'assistant'" class="caret">|</span>
       </div>
-      <ExecutionTrace v-if="message.role === 'assistant'" :message="message" />
       <div class="time">{{ formattedTime }}</div>
     </template>
   </div>
