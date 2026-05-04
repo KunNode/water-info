@@ -284,11 +284,11 @@ def _deterministic_route(state: dict) -> str | None:
             return "risk_assessor"
         return "__end__"
     if intent == "overview":
-        if mentions_risk and not has_risk:
+        if not has_risk:
             return "risk_assessor"
         return "__end__"
     if intent == "alarm_overview":
-        if mentions_risk and not has_risk:
+        if not has_risk:
             return "risk_assessor"
         return "__end__"
     if intent == "risk_assessment":

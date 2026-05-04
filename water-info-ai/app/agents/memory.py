@@ -70,7 +70,7 @@ async def memory_loader_node(state: dict, runtime=None) -> dict:
         }
     except Exception as exc:
         logger.debug("[%s] memory loader skipped: %s", session_id, exc)
-        return {"memory_context": {}}
+        return {**_TURN_RESET, "memory_context": {}}
 
 
 async def memory_writer_node(state: dict, runtime=None) -> dict:

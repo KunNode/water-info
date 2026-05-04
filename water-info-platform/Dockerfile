@@ -1,18 +1,19 @@
+ARG DOCKER_REGISTRY_PREFIX=docker.m.daocloud.io/library/
+
 # ---- Build Stage ----
-FROM eclipse-temurin:17-jdk-alpine AS builder
+FROM ${DOCKER_REGISTRY_PREFIX}maven:3.9-eclipse-temurin-17 AS builder
 WORKDIR /build
 
 COPY pom.xml .
-COPY .mvn .mvn
-COPY mvnw .
-RUN chmod +x mvnw && ./mvnw dependency:go-offline -B
+COPY settings.xml /root/.m2/settings.xml
+RUN mvn dependency:go-offline -B
 
 COPY src src
-RUN ./mvnw package -DskipTests -B && \
+RUN mvn package -DskipTests -B && \
     java -Djarmode=layertools -jar target/*.jar extract --destination extracted
 
 # ---- Runtime Stage ----
-FROM eclipse-temurin:17-jre-alpine
+FROM ${DOCKER_REGISTRY_PREFIX}eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

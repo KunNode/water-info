@@ -54,6 +54,8 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
     private boolean shouldSkip(HttpServletRequest request) {
         String uri = request.getRequestURI();
         return uri.startsWith("/actuator")
+                || uri.equals("/api/v1/flood/query/stream")
+                || uri.startsWith("/ws/")
                 || uri.startsWith("/swagger")
                 || uri.startsWith("/v3/api-docs")
                 || uri.startsWith("/doc.html")

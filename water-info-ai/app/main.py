@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 # Header names for user identity forwarding
 HEADER_USER_ID = "X-User-Id"
 HEADER_USERNAME = "X-Username"
+STREAM_KEEPALIVE_INTERVAL = 15
 
 
 def _get_user_from_request(request: Request) -> tuple[str, str]:
@@ -441,11 +442,23 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
 
         try:
             yield _event_line({"type": "session_init", "sessionId": session_id})
-            async for update in flood_response_graph.astream(
+            graph_iter = flood_response_graph.astream(
                 _build_initial_state(session_id, request.query, history, user_id=user_id, username=username),
                 {"configurable": {"thread_id": session_id}},
                 stream_mode="updates",
-            ):
+            ).__aiter__()
+            pending_update = asyncio.create_task(graph_iter.__anext__())
+            while True:
+                try:
+                    update = await asyncio.wait_for(
+                        asyncio.shield(pending_update),
+                        timeout=STREAM_KEEPALIVE_INTERVAL,
+                    )
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    yield ":keepalive\n\n"
+                    continue
                 node_name, node_update = next(iter(update.items()))
                 final_state = {**(final_state or {}), **node_update}
                 for event in _build_stream_events(node_name, node_update):
@@ -453,6 +466,7 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
                     # Track final response for persistence
                     if event.get("type") == "agent_message" and event.get("agent") == "final_response":
                         accumulated_response = event.get("response", "")
+                pending_update = asyncio.create_task(graph_iter.__anext__())
 
             if final_state:
                 final_state.setdefault("session_id", session_id)
@@ -854,7 +868,7 @@ async def get_conversation_messages(
                     content=m["content"],
                     message_type=m.get("message_type", "chat"),
                     status=m.get("status", "completed"),
-                    metadata=m.get("metadata"),
+                    metadata=json.loads(m["metadata"]) if isinstance(m.get("metadata"), str) else m.get("metadata"),
                     created_at=str(m["created_at"]) if m.get("created_at") else None,
                 )
                 for m in msgs

@@ -8,6 +8,9 @@ spring:
     name: water-info-platform
   profiles:
     active: dev
+  mvc:
+    async:
+      request-timeout: 600000  # 10 min — must exceed AI workflow + LLM latency
 
   # Redis Configuration
   data:

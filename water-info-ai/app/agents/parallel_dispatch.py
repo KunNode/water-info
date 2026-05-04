@@ -9,7 +9,7 @@ import asyncio
 
 from loguru import logger
 
-from app.agents.notification_agent import notification_node
+from app.agents.notification import notification_node
 from app.agents.resource_dispatcher import resource_dispatcher_node
 from app.state import FloodResponseState
 from app.utils.timeout import with_timeout

@@ -17,9 +17,13 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -49,11 +53,14 @@ public class FloodAiController {
     @Operation(summary = "洪水应急查询(流式)", description = "向AI发送洪水应急相关查询，获取SSE流式响应")
     @PostMapping(value = "/flood/query/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Flux<String> queryFloodStream(@Valid @RequestBody FloodQueryRequest request) {
+    public ResponseEntity<StreamingResponseBody> queryFloodStream(@Valid @RequestBody FloodQueryRequest request) {
         log.info("Flood stream query request: {}", request.getQuery());
-        // Spring WebFlux automatically prepends "data:" when serialising Flux<String>
-        // as text/event-stream — do NOT add the prefix here to avoid doubling it.
-        return aiServiceClient.queryFloodStream(request);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .cacheControl(CacheControl.noCache())
+                .header(HttpHeaders.CONNECTION, "keep-alive")
+                .header("X-Accel-Buffering", "no")
+                .body(aiServiceClient.streamFloodQuery(request));
     }
 
     @Operation(summary = "获取应急预案列表", description = "分页获取AI生成的应急预案列表")
@@ -99,11 +106,11 @@ public class FloodAiController {
     @Operation(summary = "会话列表", description = "获取所有会话列表（含最近消息预览）")
     @GetMapping("/conversations")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
-    public Mono<ApiResponse<java.util.List<ConversationItem>>> listConversations(
+    public ApiResponse<java.util.List<ConversationItem>> listConversations(
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(defaultValue = "0") int offset) {
-        return aiServiceClient.listConversations(limit, offset)
-                .map(ApiResponse::success);
+        java.util.List<ConversationItem> conversations = aiServiceClient.listConversations(limit, offset).block();
+        return ApiResponse.success(conversations == null ? java.util.List.of() : conversations);
     }
 
     @Operation(summary = "获取会话详情", description = "获取会话元数据和业务快照（不含消息）")

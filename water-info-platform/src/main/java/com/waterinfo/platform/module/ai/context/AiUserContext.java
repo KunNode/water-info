@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -21,6 +22,16 @@ public class AiUserContext {
                 .filter(auth -> auth != null && auth.isAuthenticated())
                 .map(this::extractUserInfo)
                 .defaultIfEmpty(UserInfo.anonymous());
+    }
+
+    public UserInfo getCurrentServletUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            return UserInfo.anonymous();
+        }
+
+        UserInfo user = extractUserInfo(auth);
+        return user.isAuthenticated() ? user : UserInfo.anonymous();
     }
 
     private UserInfo extractUserInfo(Authentication auth) {

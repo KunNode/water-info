@@ -33,6 +33,10 @@ class Settings:
     pg_password: str = "postgres"
     db_command_timeout: float = 30.0
 
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+    redis_password: str = ""
+
     # Weather (和风天气, optional)
     weather_api_key: str = ""
     default_weather_location: str = "101010100"
@@ -77,6 +81,8 @@ def get_settings() -> Settings:
         pg_user=os.environ.get("PG_USER", "postgres"),
         pg_password=os.environ.get("PG_PASSWORD", "postgres"),
         db_command_timeout=float(os.environ.get("DB_COMMAND_TIMEOUT", "30")),
+        redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+        redis_password=os.environ.get("REDIS_PASSWORD", ""),
         weather_api_key=os.environ.get("WEATHER_API_KEY", ""),
         default_weather_location=os.environ.get("DEFAULT_WEATHER_LOCATION", "101010100"),
         water_platform_base_url=os.environ.get("WATER_PLATFORM_BASE_URL", "http://localhost:8080"),

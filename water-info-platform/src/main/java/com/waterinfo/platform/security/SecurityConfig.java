@@ -3,6 +3,7 @@ package com.waterinfo.platform.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.waterinfo.platform.common.api.ApiResponse;
 import com.waterinfo.platform.common.exception.ErrorCode;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +50,9 @@ public class SecurityConfig {
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Async controller responses are authenticated on the initial REQUEST dispatch.
+                        // Let the follow-up ASYNC/ERROR dispatch complete without losing the JWT context.
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         // Public endpoints
                         .requestMatchers("/api/v1/auth/login").permitAll()
                         .requestMatchers("/api/v1/auth/refresh").permitAll()

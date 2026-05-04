@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -24,6 +25,20 @@ class StubGraph:
     async def astream(self, *_args, **_kwargs):
         for event in self._stream_events:
             yield event
+
+
+class SlowStreamGraph:
+    def __init__(self) -> None:
+        self.ainvoke = AsyncMock(return_value={})
+
+    async def astream(self, *_args, **_kwargs):
+        await asyncio.sleep(0.03)
+        yield {
+            "final_response": {
+                "final_response": "延迟完成。",
+                "messages": [{"role": "final_response", "content": "延迟完成。"}],
+            }
+        }
 
 
 def _build_db_mock():
@@ -366,6 +381,24 @@ def test_flood_query_stream_emits_expected_sse_events():
     assert '"type": "evidence_update"' in body
     assert '"level": "moderate"' in body
     assert '"response": "综合研判已完成。"' in body
+    assert '"agent": "__done__", "status": "done"' in body
+
+
+def test_flood_query_stream_keepalive_does_not_cancel_graph_iteration():
+    with (
+        patch("app.main.STREAM_KEEPALIVE_INTERVAL", 0.01),
+        _patched_client(graph=SlowStreamGraph()) as (client, _db_mock, _session_mock, _graph),
+    ):
+        with client.stream(
+            "POST",
+            "/api/v1/flood/query/stream",
+            json={"query": "当前总体水情怎么样", "session_id": "stream-slow-001"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert ":keepalive" in body
+    assert '"response": "延迟完成。"' in body
     assert '"agent": "__done__", "status": "done"' in body
 
 

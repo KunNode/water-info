@@ -99,6 +99,16 @@ export function useSSE() {
   function flushChunk(chunk: string) {
     const trimmed = chunk.trim()
     if (!trimmed) return
+    if (
+      chunk
+        .split(/\r?\n/)
+        .every(line => {
+          const normalized = line.trimStart()
+          return !normalized || normalized.startsWith(':')
+        })
+    ) {
+      return
+    }
 
     const dataLines = chunk
       .split(/\r?\n/)
@@ -126,6 +136,7 @@ export function useSSE() {
     return (
       trimmed.startsWith('data:') ||
       trimmed.startsWith('event:') ||
+      trimmed.startsWith(':') ||
       trimmed.startsWith('{') ||
       trimmed.startsWith('[') ||
       trimmed.startsWith('"')

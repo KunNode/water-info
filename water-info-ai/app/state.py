@@ -61,6 +61,17 @@ class NotificationRecord:
 
 
 @dataclass
+class ExecutionProgress:
+    total_actions: int = 0
+    completed_actions: int = 0
+    in_progress_actions: int = 0
+    failed_actions: int = 0
+    progress_pct: float = 0.0
+    issues: list[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Evidence:
     citation_id: str
     content: str
@@ -108,6 +119,7 @@ class FloodGraphState(TypedDict, total=False):
     notifications: list[NotificationRecord]
     evidence: list[Evidence]
     evidence_context: list[Evidence]
+    execution_progress: ExecutionProgress
     memory_context: dict
     memory_write_result: dict
     rag_target: str
@@ -118,6 +130,9 @@ class FloodGraphState(TypedDict, total=False):
     final_response_draft: str
     execution_traces: Annotated[list[dict], operator.add]
     error: str
+
+
+FloodResponseState = FloodGraphState
 
 
 def to_plain_data(value):

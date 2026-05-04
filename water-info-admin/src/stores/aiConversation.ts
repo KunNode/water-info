@@ -8,6 +8,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ConversationItem, ConversationMessage, ConversationSnapshot } from '@/types'
+import type { AgentMessageStatus, AssistantAnswerState, ReasoningState, ReasoningStep } from '@/types/agentStream'
 import {
   listConversations,
   getConversation,
@@ -27,10 +28,14 @@ export interface ExecutionTrace {
 }
 
 export interface ChatMessageItem {
-  id?: number
+  id?: number | string
   role: 'user' | 'assistant' | 'thinking' | 'agent'
   content: string
   timestamp: Date
+  status?: AgentMessageStatus
+  reasoning?: ReasoningState
+  answer?: AssistantAnswerState
+  error?: string
   agent?: string
   agentStatus?: 'typing' | 'done' | 'pending'
   traces?: ExecutionTrace[]
@@ -240,6 +245,165 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
     attachTracesToLastAssistant()
   }
 
+  function createAssistantMessage(messageId?: string) {
+    const now = Date.now()
+    const message: ChatMessageItem = {
+      id: messageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(now),
+      status: 'thinking',
+      reasoning: {
+        status: 'thinking',
+        title: '思考中...',
+        expanded: true,
+        startedAt: now,
+        steps: [],
+      },
+      answer: {
+        status: 'idle',
+        content: '',
+      },
+    }
+    messages.value.push(message)
+    attachTracesToLastAssistant()
+    return message
+  }
+
+  function getLastAssistantMessage() {
+    for (let idx = messages.value.length - 1; idx >= 0; idx -= 1) {
+      const message = messages.value[idx]
+      if (message.role === 'assistant') return message
+    }
+    return null
+  }
+
+  function ensureAssistantMessage(messageId?: string) {
+    const last = getLastAssistantMessage()
+    if (last) {
+      if (messageId && !last.id) last.id = messageId
+      if (!last.reasoning) {
+        last.reasoning = {
+          status: last.status ?? 'thinking',
+          title: '思考中...',
+          expanded: true,
+          startedAt: Date.now(),
+          steps: [],
+        }
+      }
+      if (!last.answer) {
+        last.answer = {
+          status: last.content ? 'done' : 'idle',
+          content: last.content,
+        }
+      }
+      return last
+    }
+    return createAssistantMessage(messageId)
+  }
+
+  function updateAssistantStatus(status: AgentMessageStatus) {
+    const message = ensureAssistantMessage()
+    message.status = status
+    if (message.reasoning) {
+      message.reasoning.status = status
+      if (status === 'thinking') message.reasoning.title = '思考中...'
+      if (status === 'tool_running') message.reasoning.title = '正在调用工具...'
+      if (status === 'answering') message.reasoning.title = '正在生成最终回答...'
+      if (status === 'error') message.reasoning.title = '分析过程遇到问题'
+      if (status === 'done') {
+        const endedAt = Date.now()
+        message.reasoning.endedAt = message.reasoning.endedAt ?? endedAt
+        message.reasoning.elapsedMs = message.reasoning.elapsedMs ?? (message.reasoning.endedAt - message.reasoning.startedAt)
+        message.reasoning.title = `已思考（用时 ${formatElapsedSeconds(message.reasoning.elapsedMs)} 秒）`
+      }
+    }
+  }
+
+  function addReasoningStep(step: ReasoningStep) {
+    const message = ensureAssistantMessage()
+    const reasoning = message.reasoning!
+    const idx = reasoning.steps.findIndex(item => item.id === step.id)
+    if (idx >= 0) {
+      reasoning.steps[idx] = { ...reasoning.steps[idx], ...step }
+    } else {
+      reasoning.steps.push(step)
+    }
+  }
+
+  function updateReasoningStep(stepId: string, patch: Partial<ReasoningStep>) {
+    const message = ensureAssistantMessage()
+    const reasoning = message.reasoning!
+    const step = reasoning.steps.find(item => item.id === stepId)
+    if (step) Object.assign(step, patch)
+  }
+
+  function appendReasoningContent(stepId: string, delta: string) {
+    if (!delta) return
+    const message = ensureAssistantMessage()
+    const step = message.reasoning?.steps.find(item => item.id === stepId)
+    if (step) step.content += delta
+  }
+
+  function startAnswer() {
+    const message = ensureAssistantMessage()
+    message.status = 'answering'
+    if (message.reasoning) {
+      message.reasoning.status = 'answering'
+      message.reasoning.title = '正在生成最终回答...'
+    }
+    message.answer = {
+      status: 'answering',
+      content: message.answer?.content ?? message.content ?? '',
+      startedAt: message.answer?.startedAt ?? Date.now(),
+    }
+  }
+
+  function appendAnswerContent(delta: string) {
+    if (!delta) return
+    const message = ensureAssistantMessage()
+    if (!message.answer) startAnswer()
+    message.answer!.content += delta
+    message.content = message.answer!.content
+  }
+
+  function finishAnswer() {
+    const message = ensureAssistantMessage()
+    const endedAt = Date.now()
+    if (!message.answer) {
+      message.answer = {
+        status: 'done',
+        content: message.content,
+      }
+    }
+    message.answer.status = 'done'
+    message.answer.endedAt = endedAt
+    message.content = message.answer.content
+    message.status = 'done'
+    if (message.reasoning) {
+      message.reasoning.status = 'done'
+      message.reasoning.endedAt = message.reasoning.endedAt ?? endedAt
+      message.reasoning.elapsedMs = message.reasoning.elapsedMs ?? (message.reasoning.endedAt - message.reasoning.startedAt)
+      message.reasoning.title = `已思考（用时 ${formatElapsedSeconds(message.reasoning.elapsedMs)} 秒）`
+    }
+  }
+
+  function failAssistant(messageText: string, recoverable = true) {
+    const message = ensureAssistantMessage()
+    message.error = messageText
+    if (!recoverable) {
+      message.status = 'error'
+      if (message.answer) {
+        message.answer.status = 'error'
+        message.answer.error = messageText
+      }
+    }
+    if (message.reasoning) {
+      message.reasoning.status = recoverable ? message.status ?? 'thinking' : 'error'
+      if (!recoverable) message.reasoning.title = '分析过程遇到问题'
+    }
+  }
+
   // ── Execution trace management ─────────────────────────────────
   function addTrace(trace: ExecutionTrace) {
     pendingTraces.value.push(trace)
@@ -360,6 +524,16 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
     finalizeAgentStatuses,
     addMessage,
     updateLastAssistantMessage,
+    createAssistantMessage,
+    ensureAssistantMessage,
+    updateAssistantStatus,
+    addReasoningStep,
+    updateReasoningStep,
+    appendReasoningContent,
+    startAnswer,
+    appendAnswerContent,
+    finishAnswer,
+    failAssistant,
     removeThinkingMessage,
     addTrace,
     attachTracesToLastAssistant,
@@ -371,3 +545,7 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
     setDrawerOpen,
   }
 })
+
+function formatElapsedSeconds(ms: number) {
+  return Math.max(1, Math.ceil(ms / 1000))
+}

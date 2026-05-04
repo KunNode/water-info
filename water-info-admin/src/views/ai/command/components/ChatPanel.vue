@@ -24,7 +24,7 @@
         <p>多智能体研判、证据命中与预案状态会在这里同步展开。</p>
       </div>
       <template v-else>
-        <ChatMessage
+        <AgentMessage
           v-for="(msg, idx) in messages"
           :key="idx"
           :message="msg"
@@ -61,7 +61,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
 import { ChatDotRound, Position } from '@element-plus/icons-vue'
-import ChatMessage from './ChatMessage.vue'
+import AgentMessage from './AgentMessage.vue'
 import QuickCommands from './QuickCommands.vue'
 import type { ChatMessageItem } from '@/stores/aiConversation'
 import { useAiConversationStore } from '@/stores/aiConversation'

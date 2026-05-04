@@ -1,6 +1,7 @@
 package com.waterinfo.platform.module.ai.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.waterinfo.platform.module.ai.config.AiServiceProperties;
 import com.waterinfo.platform.module.ai.context.AiUserContext;
 import com.waterinfo.platform.module.ai.context.AiUserContext.UserInfo;
@@ -22,11 +23,19 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,13 +51,19 @@ public class AiServiceClient {
 
     private final AiServiceProperties properties;
     private final AiUserContext userContext;
+    private final ObjectMapper objectMapper;
     private WebClient webClient;
+    private HttpClient httpClient;
 
     @PostConstruct
     public void init() {
         this.webClient = WebClient.builder()
                 .baseUrl(properties.getUrl())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .build();
+        this.httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(properties.getConnectTimeoutSeconds()))
                 .build();
     }
 
@@ -84,6 +99,41 @@ public class AiServiceClient {
                         .retrieve()
                         .bodyToFlux(String.class)
                         .doOnError(error -> log.error("Error calling AI service stream: {}", error.getMessage())));
+    }
+
+    public StreamingResponseBody streamFloodQuery(FloodQueryRequest request) {
+        UserInfo user = userContext.getCurrentServletUser();
+
+        return outputStream -> {
+            log.debug("Streaming flood query to AI service: {}", request.getQuery());
+
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .version(HttpClient.Version.HTTP_1_1)
+                    .uri(URI.create(properties.getUrl() + "/api/v1/flood/query/stream"))
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
+                    .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            objectMapper.writeValueAsString(request),
+                            StandardCharsets.UTF_8));
+
+            addUserHeaders(builder, user);
+
+            HttpResponse<InputStream> response;
+            try {
+                response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new java.io.IOException("Interrupted while streaming AI response", e);
+            }
+            if (response.statusCode() >= 400) {
+                throw new IllegalStateException("AI service stream failed with status " + response.statusCode());
+            }
+
+            try (InputStream inputStream = response.body()) {
+                copyStream(inputStream, outputStream);
+            }
+        };
     }
 
     /**
@@ -384,6 +434,22 @@ public class AiServiceClient {
         if (user != null && user.isAuthenticated()) {
             headers.set(AiUserContext.HEADER_USER_ID, user.userId());
             headers.set(AiUserContext.HEADER_USERNAME, user.username());
+        }
+    }
+
+    private void addUserHeaders(HttpRequest.Builder builder, UserInfo user) {
+        if (user != null && user.isAuthenticated()) {
+            builder.header(AiUserContext.HEADER_USER_ID, user.userId());
+            builder.header(AiUserContext.HEADER_USERNAME, user.username());
+        }
+    }
+
+    private void copyStream(InputStream inputStream, OutputStream outputStream) throws java.io.IOException {
+        byte[] buffer = new byte[1024];
+        int read;
+        while ((read = inputStream.read(buffer)) != -1) {
+            outputStream.write(buffer, 0, read);
+            outputStream.flush();
         }
     }
 

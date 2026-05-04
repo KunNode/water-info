@@ -91,11 +91,12 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Back, Plus, ChatLineRound } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { useSSE } from '@/composables/useSSE'
-import type { SSEEventType } from '@/composables/useSSE'
+import { useAgentStream } from '@/composables/useAgentStream'
 import { getStreamUrl } from '@/api/flood'
 import { useAiConversationStore } from '@/stores/aiConversation'
 import { useSituationStore } from '@/stores/situation'
+import type { AgentStreamEvent, ReasoningStep, ReasoningStepStatus } from '@/types/agentStream'
+import { mapToolCallTitle, redactSensitive, summarizeToolResult } from '@/utils/agentToolCopy'
 
 // Sub-components
 import ChatPanel from './components/ChatPanel.vue'
@@ -109,10 +110,7 @@ const router = useRouter()
 const route = useRoute()
 const store = useAiConversationStore()
 const situationStore = useSituationStore()
-const { fullText, loading, error, start, stop, reset, onStructuredEvent } = useSSE()
-
-// True once the current query receives at least one agent_message structured event.
-const hasAgentMessages = ref(false)
+const { loading, error, start, stop, reset, onEvent, onText } = useAgentStream()
 
 // ── Session drawer ──────────────────────────────────────────────
 const sessionDrawerRef = ref<InstanceType<typeof SessionDrawer> | null>(null)
@@ -123,11 +121,7 @@ async function handleSessionSelect(newSessionId: string) {
 
   await store.loadSession(newSessionId)
   startTime.value = new Date().toLocaleTimeString()
-
-  typewriterQueue.value = []
-  isTyping.value = false
-  currentQueryBubbleIdx.clear()
-  agentLatestContent.clear()
+  resetStreamBuffers()
   reset()
 
   router.replace({ name: 'AICommandSession', params: { sessionId: newSessionId } })
@@ -136,10 +130,7 @@ async function handleSessionSelect(newSessionId: string) {
 function handleNewSession() {
   store.startNewSession()
   startTime.value = ''
-  typewriterQueue.value = []
-  isTyping.value = false
-  currentQueryBubbleIdx.clear()
-  agentLatestContent.clear()
+  resetStreamBuffers()
   reset()
 
   router.replace({ name: 'AICommand' })
@@ -149,19 +140,16 @@ function toggleDrawer() {
   store.drawerOpen = !store.drawerOpen
 }
 
-// ── Typewriter queue ─────────────────────────────────────────────
-interface TypewriterTask {
-  agent: string
-  fullContent: string
-}
-
-const typewriterQueue = ref<TypewriterTask[]>([])
-const isTyping = ref(false)
-const CHARS_PER_TICK = 4
-const TICK_MS = 16
-
-const currentQueryBubbleIdx = new Map<string, number>()
-const agentLatestContent = new Map<string, string>()
+// ── Stream buffers: RAF-batched reasoning, typewriter answer ─────
+const activeToolNames = new Map<string, string>()
+const reasoningBuffers = new Map<string, string>()
+const legacyAgentStepIds = new Map<string, string>()
+let reasoningRaf = 0
+let answerRaf = 0
+let answerBuffer = ''
+let finishAnswerWhenBufferEmpty = false
+let lastLegacyFinal = ''
+const ANSWER_CHARS_PER_FRAME = 5
 
 // ── Risk state ────────────────────────────────────────
 const riskMap: Record<string, { label: string; tag: string }> = {
@@ -175,11 +163,12 @@ const riskLabel = computed(() => riskMap[store.riskLevel]?.label ?? '正常')
 const riskTagClass = computed(() => riskMap[store.riskLevel]?.tag ?? '')
 const riskToneClass = computed(() => (store.riskLevel === 'none' ? 'tone-ok' : riskTagClass.value.replace('fm-tag--', 'tone-')))
 const sessionShort = computed(() => store.currentSessionId ? store.currentSessionId.slice(0, 8).toUpperCase() : 'DRAFT')
-const sessionModeLabel = computed(() => store.currentSessionId ? '已接管历史会话' : '草稿会话')
-const traceCount = computed(() => store.pendingTraces.length)
+const traceCount = computed(() => store.pendingTraces.length + currentReasoningSteps.value.length)
 const activeTraceCount = computed(() =>
-  store.pendingTraces.filter((trace) => trace.status === 'started' || trace.status === 'active' || trace.status === 'running').length,
+  store.pendingTraces.filter((trace) => trace.status === 'started' || trace.status === 'active' || trace.status === 'running').length +
+  currentReasoningSteps.value.filter((step) => step.status === 'running' || step.status === 'pending').length,
 )
+const currentReasoningSteps = computed(() => store.messages.flatMap((message) => message.reasoning?.steps ?? []))
 const planProgressLabel = computed(() => {
   const plan = store.planInfo
   if (!plan) return '待生成'
@@ -187,85 +176,64 @@ const planProgressLabel = computed(() => {
   return `${Math.round((plan.completed / plan.total) * 100)}%`
 })
 
-// ── Message helpers ─────────────────────────────────────────────
-function removeThinkingBubble() {
-  const idx = store.messages.findIndex((m) => m.role === 'thinking')
-  if (idx >= 0) {
-    store.messages.splice(idx, 1)
-    for (const [k, v] of currentQueryBubbleIdx.entries()) {
-      if (v > idx) currentQueryBubbleIdx.set(k, v - 1)
-    }
+function resetStreamBuffers() {
+  if (reasoningRaf) cancelAnimationFrame(reasoningRaf)
+  if (answerRaf) cancelAnimationFrame(answerRaf)
+  reasoningRaf = 0
+  answerRaf = 0
+  answerBuffer = ''
+  finishAnswerWhenBufferEmpty = false
+  lastLegacyFinal = ''
+  activeToolNames.clear()
+  reasoningBuffers.clear()
+  legacyAgentStepIds.clear()
+}
+
+function appendReasoningDelta(stepId: string, delta: string) {
+  if (!delta) return
+  reasoningBuffers.set(stepId, `${reasoningBuffers.get(stepId) ?? ''}${delta}`)
+  if (!reasoningRaf) reasoningRaf = requestAnimationFrame(flushReasoningBuffers)
+}
+
+function flushReasoningBuffers() {
+  reasoningRaf = 0
+  for (const [stepId, delta] of reasoningBuffers.entries()) {
+    store.appendReasoningContent(stepId, delta)
+  }
+  reasoningBuffers.clear()
+}
+
+function appendAnswerDelta(delta: string) {
+  if (!delta) return
+  store.startAnswer()
+  answerBuffer += delta
+  if (!answerRaf) answerRaf = requestAnimationFrame(flushAnswerBuffer)
+}
+
+function flushAnswerBuffer() {
+  answerRaf = 0
+  const chunk = answerBuffer.slice(0, ANSWER_CHARS_PER_FRAME)
+  answerBuffer = answerBuffer.slice(ANSWER_CHARS_PER_FRAME)
+  if (chunk) store.appendAnswerContent(chunk)
+
+  if (answerBuffer) {
+    answerRaf = requestAnimationFrame(flushAnswerBuffer)
+    return
+  }
+
+  if (finishAnswerWhenBufferEmpty) {
+    finishAnswerWhenBufferEmpty = false
+    store.finishAnswer()
   }
 }
 
-function enqueueAgentMessage(agent: string, content: string) {
-  removeThinkingBubble()
-  agentLatestContent.set(agent, content)
-
-  const existingIdx = currentQueryBubbleIdx.get(agent) ?? -1
-  if (existingIdx >= 0) {
-    const existing = store.messages[existingIdx]
-    if (existing.agentStatus === 'typing') return
-    existing.content = content
-    return
+function finishAnswerAfterTypewriter() {
+  if (answerBuffer) {
+    finishAnswerWhenBufferEmpty = true
+    if (!answerRaf) answerRaf = requestAnimationFrame(flushAnswerBuffer)
+  } else {
+    store.finishAnswer()
   }
-
-  const idx = store.messages.length
-  currentQueryBubbleIdx.set(agent, idx)
-  store.addMessage({
-    role: 'agent',
-    content: '',
-    timestamp: new Date(),
-    agent,
-    agentStatus: 'typing',
-  })
-  typewriterQueue.value.push({ agent, fullContent: content })
-  if (!isTyping.value) processTypewriterQueue()
-}
-
-function enqueueFinalResponse(content: string) {
-  removeThinkingBubble()
-
-  const last = store.messages[store.messages.length - 1]
-  if (last?.role === 'assistant') {
-    last.content = content
-    store.attachTracesToLastAssistant()
-    return
-  }
-
-  store.addMessage({
-    role: 'assistant',
-    content,
-    timestamp: new Date(),
-  })
-}
-
-async function processTypewriterQueue() {
-  if (typewriterQueue.value.length === 0) {
-    isTyping.value = false
-    return
-  }
-  isTyping.value = true
-  const task = typewriterQueue.value.shift()!
-
-  const actualIdx = currentQueryBubbleIdx.get(task.agent) ?? -1
-  if (actualIdx < 0) {
-    processTypewriterQueue()
-    return
-  }
-
-  let pos = store.messages[actualIdx].content.length
-  let full = agentLatestContent.get(task.agent) ?? task.fullContent
-  while (pos < full.length) {
-    pos = Math.min(pos + CHARS_PER_TICK, full.length)
-    store.messages[actualIdx].content = full.slice(0, pos)
-    await nextTick()
-    await new Promise<void>((r) => setTimeout(r, TICK_MS))
-    full = agentLatestContent.get(task.agent) ?? task.fullContent
-  }
-
-  store.messages[actualIdx].agentStatus = 'done'
-  processTypewriterQueue()
 }
 
 function formatEvidenceUpdate(items: Array<{
@@ -302,65 +270,10 @@ onMounted(async () => {
 
   situationStore.connectAssessmentStream()
 
-  onStructuredEvent((event: SSEEventType) => {
-    if (event.type === 'session_init') {
-      if (!store.currentSessionId) {
-        store.setSessionId(event.sessionId)
-        startTime.value = new Date().toLocaleTimeString()
-        router.replace({ name: 'AICommandSession', params: { sessionId: event.sessionId } })
-      }
-    } else if (event.type === 'agent_update') {
-      store.setAgentStatus(event.agent, event.status)
-    } else if (event.type === 'risk_update') {
-      store.updateSnapshot({ risk_level: event.level })
-    } else if (event.type === 'plan_update') {
-      store.updateSnapshot({
-        plan_info: {
-          plan_name: event.name,
-          status: event.status,
-          actions_count: event.total,
-        },
-      })
-    } else if (event.type === 'evidence_update' && event.items?.length) {
-      store.addMessage({
-        role: 'agent',
-        agent: event.agent,
-        content: formatEvidenceUpdate(event.items),
-        timestamp: new Date(),
-        agentStatus: 'done',
-      })
-    } else if (event.type === 'agent_message') {
-      hasAgentMessages.value = true
-      if (event.agent === 'final_response') {
-        enqueueFinalResponse(event.content)
-      } else {
-        enqueueAgentMessage(event.agent, event.content)
-      }
-    } else if (event.type === 'trace_update') {
-      store.addTrace({
-        phase: event.phase,
-        status: event.status,
-        title: event.title,
-        detail: event.detail,
-        tool_name: event.tool_name,
-        metadata: event.metadata,
-        timestamp: new Date(),
-      })
-    }
-  })
+  onEvent(handleStreamEvent)
+  onText(appendAnswerDelta)
 
   void situationStore.ensureFresh()
-})
-
-watch(fullText, (val) => {
-  if (!val || hasAgentMessages.value) return
-  removeThinkingBubble()
-  const last = store.messages[store.messages.length - 1]
-  if (last?.role === 'assistant') {
-    last.content = val
-  } else {
-    store.addMessage({ role: 'assistant', content: val, timestamp: new Date() })
-  }
 })
 
 watch(loading, (isLoading) => {
@@ -368,25 +281,271 @@ watch(loading, (isLoading) => {
     const hasActive = Object.values(store.agentStatus).some((s) => s === 'active' || s === 'done')
     if (!hasActive) store.setAgentStatus('supervisor', 'active')
   } else {
+    if (reasoningRaf) flushReasoningBuffers()
+    if (answerBuffer || store.ensureAssistantMessage().answer?.status === 'answering') finishAnswerAfterTypewriter()
     store.finalizeAgentStatuses()
     store.attachTracesToLastAssistant()
   }
 })
+
+function handleStreamEvent(event: AgentStreamEvent) {
+  switch (event.type) {
+    case 'session_init':
+      bindSession(event.sessionId)
+      break
+    case 'message_start':
+      store.ensureAssistantMessage(event.messageId)
+      if (event.sessionId) bindSession(event.sessionId)
+      break
+    case 'thought_start':
+      startThoughtStep(event.id ?? event.thoughtId ?? createId('thought'), event.title ?? '正在分析问题', event.content)
+      break
+    case 'thought_delta':
+      appendReasoningDelta(event.id ?? event.thoughtId ?? getFallbackStepId('thought'), event.delta)
+      break
+    case 'thought_end':
+      finishReasoningStep(event.id ?? event.thoughtId ?? getFallbackStepId('thought'), 'success', event.durationMs)
+      break
+    case 'tool_start':
+      startToolStep(event)
+      break
+    case 'tool_delta':
+      appendReasoningDelta(event.id ?? event.toolCallId ?? getFallbackStepId('tool'), event.delta)
+      break
+    case 'tool_result':
+      applyToolResult(event.id ?? event.toolCallId ?? getFallbackStepId('tool'), event)
+      break
+    case 'tool_end':
+      finishToolStep(event.id ?? event.toolCallId ?? getFallbackStepId('tool'), event.status === 'error' ? 'error' : 'success', event.durationMs, event.error)
+      break
+    case 'answer_start':
+      store.startAnswer()
+      break
+    case 'answer_delta':
+      appendAnswerDelta(event.delta)
+      break
+    case 'answer_end':
+      finishAnswerAfterTypewriter()
+      break
+    case 'error':
+      handleRecoverableError(event.message, event.recoverable !== false)
+      break
+    case 'agent_update':
+      store.setAgentStatus(event.agent, event.status)
+      break
+    case 'risk_update':
+      store.updateSnapshot({ risk_level: event.level })
+      break
+    case 'plan_update':
+      store.updateSnapshot({
+        plan_info: {
+          plan_name: event.name,
+          status: event.status,
+          actions_count: event.total,
+        },
+      })
+      break
+    case 'evidence_update':
+      if (event.items?.length) upsertLegacyStep(event.agent, '命中知识库证据', formatEvidenceUpdate(event.items), 'success')
+      break
+    case 'agent_message':
+      handleLegacyAgentMessage(event.agent, event.content)
+      break
+    case 'trace_update':
+      handleLegacyTrace(event)
+      break
+  }
+}
+
+function bindSession(sessionId: string) {
+  if (!store.currentSessionId) {
+    store.setSessionId(sessionId)
+    startTime.value = new Date().toLocaleTimeString()
+    router.replace({ name: 'AICommandSession', params: { sessionId } })
+  }
+}
+
+function startThoughtStep(stepId: string, title: string, content = '') {
+  store.updateAssistantStatus('thinking')
+  addStep({
+    id: stepId,
+    kind: 'thought',
+    title,
+    content,
+    status: 'running',
+    startedAt: Date.now(),
+  })
+}
+
+function startToolStep(event: Extract<AgentStreamEvent, { type: 'tool_start' }>) {
+  const stepId = event.id ?? event.toolCallId ?? createId('tool')
+  const title = event.displayName || mapToolCallTitle(event.toolName)
+  activeToolNames.set(stepId, event.toolName)
+  store.updateAssistantStatus('tool_running')
+  addStep({
+    id: stepId,
+    kind: 'tool',
+    title,
+    content: event.inputSummary ?? summarizeSafeInput(event.arguments),
+    status: 'running',
+    startedAt: Date.now(),
+    tool: {
+      name: event.toolName,
+      displayName: title,
+      inputSummary: event.inputSummary,
+    },
+  })
+}
+
+function applyToolResult(stepId: string, event: Extract<AgentStreamEvent, { type: 'tool_result' }>) {
+  const toolName = activeToolNames.get(stepId)
+  const resultSummary = event.error
+    ? mapToolCallTitle(toolName, 'fallback')
+    : summarizeToolResult(toolName, event.data, event.summary)
+
+  store.updateReasoningStep(stepId, {
+    status: event.error ? 'error' : 'running',
+    title: event.error ? mapToolCallTitle(toolName, 'fallback') : mapToolCallTitle(toolName, 'success'),
+    tool: {
+      name: toolName ?? 'unknown',
+      displayName: mapToolCallTitle(toolName, event.error ? 'fallback' : 'success'),
+      resultSummary,
+    },
+  })
+}
+
+function finishToolStep(stepId: string, status: ReasoningStepStatus, durationMs?: number, errorText?: string) {
+  const toolName = activeToolNames.get(stepId)
+  store.updateReasoningStep(stepId, {
+    status,
+    title: status === 'error' ? mapToolCallTitle(toolName, 'fallback') : mapToolCallTitle(toolName, 'success'),
+    endedAt: Date.now(),
+    durationMs,
+  })
+  if (status === 'error' && errorText) handleRecoverableError(errorText, true)
+}
+
+function finishReasoningStep(stepId: string, status: ReasoningStepStatus, durationMs?: number) {
+  store.updateReasoningStep(stepId, {
+    status,
+    endedAt: Date.now(),
+    durationMs,
+  })
+}
+
+function handleRecoverableError(message: string, recoverable: boolean) {
+  store.failAssistant(message, recoverable)
+  addStep({
+    id: createId('error'),
+    kind: 'thought',
+    title: recoverable ? '执行过程已降级' : '执行过程失败',
+    content: recoverable ? `${message}，正在尝试继续生成最终回答。` : message,
+    status: 'error',
+    startedAt: Date.now(),
+    endedAt: Date.now(),
+  })
+}
+
+function handleLegacyAgentMessage(agent: string, content: string) {
+  if (agent === 'final_response') {
+    const delta = content.startsWith(lastLegacyFinal) ? content.slice(lastLegacyFinal.length) : content
+    lastLegacyFinal = content
+    appendAnswerDelta(delta)
+    return
+  }
+
+  upsertLegacyStep(agent, legacyAgentTitle(agent), content, 'running')
+}
+
+function handleLegacyTrace(event: Extract<AgentStreamEvent, { type: 'trace_update' }>) {
+  const status = normalizeTraceStatus(event.status)
+  const stepId = `trace-${event.phase}-${event.tool_name ?? event.title}`
+  const isTool = Boolean(event.tool_name) || event.phase === 'tool_call'
+  const title = event.tool_name
+    ? mapToolCallTitle(event.tool_name, status === 'error' ? 'fallback' : status === 'success' ? 'success' : 'running')
+    : event.title
+
+  if (isTool && event.tool_name) activeToolNames.set(stepId, event.tool_name)
+  addStep({
+    id: stepId,
+    kind: isTool ? 'tool' : 'thought',
+    title,
+    content: event.detail ?? '',
+    status,
+    startedAt: Date.now(),
+    endedAt: status === 'success' || status === 'error' ? Date.now() : undefined,
+    durationMs: typeof event.metadata?.duration_ms === 'number' ? event.metadata.duration_ms : undefined,
+    tool: event.tool_name ? {
+      name: event.tool_name,
+      displayName: title,
+      inputSummary: typeof event.metadata?.input_summary === 'string' ? event.metadata.input_summary : undefined,
+      resultSummary: typeof event.metadata?.output_summary === 'string' ? event.metadata.output_summary : undefined,
+    } : undefined,
+  })
+}
+
+function upsertLegacyStep(agent: string, title: string, content: string, status: ReasoningStepStatus) {
+  const stepId = legacyAgentStepIds.get(agent) ?? `legacy-${agent}`
+  legacyAgentStepIds.set(agent, stepId)
+  addStep({
+    id: stepId,
+    kind: 'thought',
+    title,
+    content,
+    status,
+    startedAt: Date.now(),
+    endedAt: status === 'success' || status === 'error' ? Date.now() : undefined,
+  })
+}
+
+function addStep(step: ReasoningStep) {
+  store.addReasoningStep(step)
+}
+
+function summarizeSafeInput(input?: Record<string, unknown>) {
+  if (!input) return ''
+  const safe = redactSensitive(input)
+  const keys = Object.keys(safe as Record<string, unknown>).slice(0, 3)
+  return keys.length ? `已接收 ${keys.join('、')} 等查询条件` : ''
+}
+
+function legacyAgentTitle(agent: string) {
+  const map: Record<string, string> = {
+    supervisor: '正在识别任务意图',
+    data_analyst: '正在汇总水雨情数据',
+    risk_assessor: '正在评估风险等级',
+    plan_generator: '正在生成处置方案',
+    knowledge_retriever: '正在检索知识库',
+    resource_dispatcher: '正在匹配资源',
+    notification: '正在整理通知方案',
+  }
+  return map[agent] ?? '正在分析...'
+}
+
+function normalizeTraceStatus(status: string): ReasoningStepStatus {
+  if (status === 'failed' || status === 'error') return 'error'
+  if (status === 'done' || status === 'success' || status === 'completed') return 'success'
+  if (status === 'pending') return 'pending'
+  return 'running'
+}
+
+function getFallbackStepId(prefix: string) {
+  return `${prefix}-active`
+}
+
+function createId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
 
 async function sendQuery(queryText: string) {
   if (!queryText.trim() || loading.value) return
 
   store.resetAgentStatus()
   store.resetTraces()
-
-  hasAgentMessages.value = false
-  typewriterQueue.value = []
-  isTyping.value = false
-  currentQueryBubbleIdx.clear()
-  agentLatestContent.clear()
+  resetStreamBuffers()
 
   store.addMessage({ role: 'user', content: queryText, timestamp: new Date() })
-  store.addMessage({ role: 'thinking', content: '正在分析，请稍候…', timestamp: new Date() })
+  store.createAssistantMessage()
   reset()
 
   try {
@@ -395,10 +554,11 @@ async function sendQuery(queryText: string) {
     await start(getStreamUrl(), payload)
     await store.fetchSessions()
     sessionDrawerRef.value?.refresh()
+    if (error.value) ElMessage.error(error.value)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     ElMessage.error(error.value || msg || '请求失败')
-    removeThinkingBubble()
+    store.failAssistant(error.value || msg || '请求失败', false)
   }
 }
 
