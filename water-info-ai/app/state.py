@@ -49,6 +49,8 @@ class ResourceAllocation:
     target_location: str = ""
     eta_minutes: int | None = None
     status: str = "pending"
+    resource_id: str | None = None
+    dispatch_id: str | None = None
 
 
 @dataclass

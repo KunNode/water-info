@@ -461,3 +461,101 @@ export interface PlanNotification {
   message: string
   status: string
 }
+
+// ─── Resource ───
+export type ResourceType = 'MATERIAL' | 'PERSONNEL' | 'VEHICLE'
+export type ResourceStatus = 'AVAILABLE' | 'IN_USE' | 'MAINTENANCE' | 'DEPLETED'
+export type DispatchStatus = 'PENDING' | 'DISPATCHED' | 'ARRIVED' | 'RETURNED' | 'CANCELLED'
+export type DispatchSource = 'AI' | 'MANUAL'
+
+export interface Resource {
+  id: string
+  type: ResourceType
+  name: string
+  quantity: number
+  unit: string
+  location: string
+  status: ResourceStatus
+  attributes: Record<string, any>
+  description: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateResourceRequest {
+  type: ResourceType
+  name: string
+  quantity: number
+  unit: string
+  location: string
+  attributes?: Record<string, any>
+  description?: string
+}
+
+export interface UpdateResourceRequest {
+  name?: string
+  quantity?: number
+  unit?: string
+  location?: string
+  status?: ResourceStatus
+  attributes?: Record<string, any>
+  description?: string
+}
+
+export interface ResourceQuery {
+  page?: number
+  size?: number
+  type?: ResourceType
+  status?: ResourceStatus
+  keyword?: string
+}
+
+export interface ResourceStats {
+  type: string
+  status: string
+  count: number
+  totalQuantity: number
+}
+
+export interface ResourceDispatch {
+  id: string
+  resourceId: string
+  resourceName: string
+  resourceType: string
+  planId: string
+  quantity: number
+  fromLocation: string
+  toLocation: string
+  status: DispatchStatus
+  dispatchedAt: string | null
+  arrivedAt: string | null
+  returnedAt: string | null
+  operator: string
+  source: DispatchSource
+  notes: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateDispatchRequest {
+  resourceId: string
+  planId?: string
+  quantity: number
+  fromLocation: string
+  toLocation: string
+  notes?: string
+}
+
+export interface UpdateDispatchStatusRequest {
+  status: DispatchStatus
+  notes?: string
+}
+
+export interface DispatchQuery {
+  page?: number
+  size?: number
+  resourceId?: string
+  planId?: string
+  status?: DispatchStatus
+  source?: DispatchSource
+}
