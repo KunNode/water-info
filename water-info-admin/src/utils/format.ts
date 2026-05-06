@@ -64,3 +64,31 @@ export const riskLevelMap: Record<string, { label: string; color: string }> = {
   high: { label: '高风险', color: '#F56C6C' },
   critical: { label: '极高风险', color: '#911' },
 }
+
+export const resourceTypeMap: Record<string, string> = {
+  MATERIAL: '物资',
+  PERSONNEL: '人员',
+  VEHICLE: '车辆设备',
+}
+
+type ElementTagType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
+
+export const resourceStatusMap: Record<string, { label: string; type?: ElementTagType }> = {
+  AVAILABLE: { label: '可用', type: 'success' },
+  IN_USE: { label: '使用中' },
+  MAINTENANCE: { label: '维护中', type: 'warning' },
+  DEPLETED: { label: '已耗尽', type: 'danger' },
+}
+
+export const dispatchStatusMap: Record<string, { label: string; type?: ElementTagType }> = {
+  PENDING: { label: '待调度', type: 'info' },
+  DISPATCHED: { label: '已调度' },
+  ARRIVED: { label: '已到达', type: 'success' },
+  RETURNED: { label: '已归还', type: 'warning' },
+  CANCELLED: { label: '已取消', type: 'danger' },
+}
+
+export const dispatchSourceMap: Record<string, string> = {
+  AI: 'AI调度',
+  MANUAL: '手动调度',
+}

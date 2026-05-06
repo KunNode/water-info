@@ -57,7 +57,13 @@ public enum ErrorCode {
     // Organization errors (1900-1999)
     ORG_NOT_FOUND(1900, "Organization not found"),
     ORG_CODE_EXISTS(1901, "Organization code already exists"),
-    DEPT_NOT_FOUND(1902, "Department not found");
+    DEPT_NOT_FOUND(1902, "Department not found"),
+
+    // Resource errors (2000-2099)
+    RESOURCE_NOT_FOUND(2000, "Resource not found"),
+    RESOURCE_INSUFFICIENT_STOCK(2001, "Insufficient resource stock"),
+    DISPATCH_NOT_FOUND(2002, "Dispatch record not found"),
+    DISPATCH_INVALID_STATUS_TRANSITION(2003, "Invalid dispatch status transition");
 
     private final Integer code;
     private final String message;

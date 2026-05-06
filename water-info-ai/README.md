@@ -1,279 +1,112 @@
 # 水务 AI 防洪应急服务
 
-基于 FastAPI + LangGraph 的防洪应急多 Agent AI 服务。
+`water-info-ai` 是防汛应急系统的 Python AI 服务。它基于 FastAPI 和 LangGraph，将会话记忆、实时水情数据、RAG 知识库、风险规则和 LLM 组合成多智能体防洪研判工作流。
 
-当前实现已经从“顺序流水线”切换到“共享状态 + 多节点图编排”的结构，前端继续通过 REST 和 SSE 接口接入，平台侧继续由 `water-info-platform` 代理和鉴权。
+## 当前能力
 
-## 当前状态
+- LangGraph 图编排，不再使用旧的顺序流水线。
+- 支持非流式 REST 查询和 SSE 流式查询。
+- 直接读取 PostgreSQL 中的监测、告警、阈值、资源和知识库数据。
+- 通过 Java 平台 API 保持需要业务一致性的写操作。
+- 支持 OpenAI-compatible LLM，默认配置指向 DeepSeek。
+- 支持 RAG：Markdown、TXT、PDF、DOCX 上传，切块、嵌入、检索和证据引用。
+- 支持会话历史、长期记忆、执行轨迹和风险巡检。
+- 支持 PostgreSQL LangGraph checkpointer，可通过 `LANGGRAPH_POSTGRES_ENABLED=true` 开启。
 
-- 已完全切到 LangGraph 图编排，唯一主入口在 [app/graph.py](./app/graph.py)
-- 已接入的核心节点：
-  - `supervisor`
-  - `conversation_assistant`
-  - `data_analyst`
-  - `risk_assessor`
-  - `plan_generator`
-  - `final_response`
-- 已补齐骨架、后续可继续增强的节点：
-  - `resource_dispatcher`
-  - `notification`
-  - `execution_monitor`
-  - `parallel_dispatch`
-- FastAPI 主入口已改为基于图执行，见 [app/main.py](./app/main.py)
-- 现有前端依赖的 SSE 事件协议仍然保留：
-  - `session_init`
-  - `agent_update`
-  - `risk_update`
-  - `plan_update`
-  - `agent_message`
-
-## 架构概览
+## 架构
 
 ```text
-water-info-admin (Vue)
-        |
-        |  /api/v1/flood/query
-        |  /api/v1/flood/query/stream
-        v
-water-info-platform (Spring Boot)
-        |
-        |  proxy / auth / unified API
-        v
-water-info-ai (FastAPI)
-        |
-        |  LangGraph
-        v
-Supervisor
-  -> ConversationAssistant
-  -> DataAnalyst
-  -> RiskAssessor
-  -> PlanGenerator
-  -> ResourceDispatcher
-  -> Notification
-  -> ExecutionMonitor
-  -> FinalResponse
-        |
-        +-> PostgreSQL / weather / platform APIs
+water-info-admin
+  |
+  | /api/v1/flood/query
+  | /api/v1/flood/query/stream
+  v
+water-info-platform
+  |
+  | proxy / auth / unified response
+  v
+water-info-ai
+  |
+  v
+LangGraph
+  memory_loader
+  -> supervisor
+  -> conversation_assistant
+  -> data_analyst
+  -> knowledge_retriever
+  -> risk_assessor
+  -> plan_generator
+  -> resource_dispatcher
+  -> notification
+  -> execution_monitor
+  -> parallel_dispatch
+  -> final_response
+  -> memory_writer
 ```
+
+并非每次查询都会经过所有节点。`supervisor` 会根据用户意图、已有状态和执行结果动态选择下一步。
 
 ## 目录结构
 
 ```text
 water-info-ai/
 ├── app/
-│   ├── agents/                # LangGraph 节点
-│   │   ├── supervisor.py
-│   │   ├── conversation_assistant.py
-│   │   ├── data_analyst.py
-│   │   ├── risk_assessor.py
-│   │   ├── plan_generator.py
-│   │   ├── resource_dispatcher.py
-│   │   ├── notification.py
-│   │   ├── execution_monitor.py
-│   │   ├── parallel_dispatch.py
-│   │   └── final_response.py
-│   ├── services/              # 服务层
-│   │   ├── llm.py
-│   │   ├── platform_client.py
-│   │   └── session.py
-│   ├── tools/                 # 工具注册
-│   │   ├── data_tools.py
-│   │   ├── risk_tools.py
-│   │   ├── plan_tools.py
-│   │   └── simple_tool.py
-│   ├── utils/
-│   │   └── json_parser.py
-│   ├── config.py
-│   ├── database.py
-│   ├── graph.py
-│   ├── main.py
-│   ├── models.py
-│   ├── plan.py
-│   ├── risk.py
-│   └── state.py
+│   ├── agents/                 # LangGraph 节点
+│   ├── api/                    # FastAPI router
+│   ├── memory/                 # 会话与长期记忆
+│   ├── rag/                    # 文档加载、切块、嵌入、检索
+│   ├── services/               # 数据库、平台客户端、LLM、预案持久化、风险巡检
+│   ├── tools/                  # Agent 可调用工具
+│   ├── utils/                  # JSON 解析、超时工具
+│   ├── config.py               # 环境变量配置
+│   ├── database.py             # asyncpg 数据服务
+│   ├── graph.py                # LangGraph 图定义
+│   ├── main.py                 # FastAPI 入口
+│   ├── state.py                # 共享状态和领域模型
+│   ├── risk.py                 # 风险规则与回退
+│   └── plan.py                 # 预案结构与回退
 ├── tests/
 ├── pyproject.toml
+├── uv.lock
 └── README.md
 ```
 
-## 节点职责
+## 核心节点
 
-| 节点 | 职责 | 说明 |
-| --- | --- | --- |
-| `supervisor` | 路由和收敛 | 决定下一步交给哪个节点 |
-| `conversation_assistant` | 对话助理 | 处理问候、闲聊、能力说明和模糊需求澄清 |
-| `data_analyst` | 数据采集与摘要 | 获取站点、阈值、告警、天气等上下文 |
-| `risk_assessor` | 风险评估 | 用结构化数据做 grounded 判断，模型负责组织风险结论 |
-| `plan_generator` | 预案生成 | 由模型生成结构化预案，模板与规则只作为约束和回退 |
-| `resource_dispatcher` | 资源调度 | 当前为骨架实现 |
-| `notification` | 通知方案 | 当前已生成结构化通知记录 |
-| `execution_monitor` | 执行监控 | 当前为骨架实现 |
-| `parallel_dispatch` | 并行分发占位节点 | 用于后续资源和通知并行 fan-out |
-| `final_response` | 最终回答 | 以助手口吻组织结论、依据和下一步建议 |
+| 节点 | 职责 |
+| --- | --- |
+| `memory_loader` | 加载当前会话短期上下文和用户可见长期记忆 |
+| `supervisor` | 意图识别、站点聚焦、路由和收敛 |
+| `conversation_assistant` | 问候、闲聊、能力说明、模糊需求澄清 |
+| `data_analyst` | 查询站点、观测、阈值、告警、天气等上下文 |
+| `knowledge_retriever` | 从知识库召回可引用证据 |
+| `risk_assessor` | 基于实时数据、规则和证据生成风险评估 |
+| `plan_generator` | 生成结构化应急预案 |
+| `resource_dispatcher` | 生成资源调度建议并对接资源工具 |
+| `notification` | 生成预警通知方案 |
+| `execution_monitor` | 汇总预案执行进度和问题 |
+| `parallel_dispatch` | 后续并行 fan-out 的占位节点 |
+| `final_response` | 整理最终回答、依据和下一步建议 |
+| `memory_writer` | 从本轮结果中提取高价值记忆并持久化 |
 
 ## 共享状态
 
-共享状态定义在 [app/state.py](./app/state.py)，主要字段包括：
+共享状态定义在 [app/state.py](./app/state.py)。常用字段包括：
 
-- `session_id`
-- `user_query`
-- `messages`
-- `iteration`
-- `data_summary`
-- `overview_data`
-- `weather_forecast`
-- `risk_assessment`
-- `emergency_plan`
-- `resource_plan`
-- `notifications`
-- `final_response`
-- `next_agent`
-- `error`
+- `session_id`、`user_id`、`username`
+- `user_query`、`messages`、`iteration`
+- `intent`、`next_agent`、`supervisor_reasoning`
+- `focus_station`、`data_summary`、`overview_data`
+- `weather_forecast`、`risk_assessment`
+- `emergency_plan`、`resource_plan`、`notifications`
+- `evidence`、`evidence_context`
+- `execution_progress`、`execution_traces`
+- `memory_context`、`memory_write_result`
+- `final_response`、`error`
 
-设计原则是：
+节点约定：只写自己负责的状态片段，最终由 API 层把结构化对象转换为 REST/SSE 响应。
 
-- 节点只改自己负责的状态片段
-- 风险、预案等关键结果尽量保留结构化对象
-- SSE 和 REST 响应在入口层统一转换
-
-## RAG 知识库
-
-当前 AI 服务已经接入一层可检索、可引用的知识库：
-
-- 支持 `Markdown / TXT / PDF / DOCX` 文档上传
-- 文档会被切块后写入 `kb_document / kb_chunk / kb_embedding / kb_ingest_job`
-- 检索走“向量召回 + 关键词召回 + RRF 融合”
-- LangGraph 新增 `knowledge_retriever` 节点
-- `risk_assessor`、`plan_generator`、`conversation_assistant` 会在合适场景注入证据片段
-- SSE 新增 `evidence_update` 事件，前端可以展示命中的引用片段
-
-### 知识库 API
-
-- `POST /api/v1/kb/documents`
-- `GET /api/v1/kb/documents`
-- `GET /api/v1/kb/documents/{id}`
-- `DELETE /api/v1/kb/documents/{id}`
-- `POST /api/v1/kb/documents/{id}/reindex`
-- `POST /api/v1/kb/search`
-- `GET /api/v1/kb/stats`
-
-### CLI
-
-```bash
-cd water-info-ai
-uv run python -m app.rag.cli ingest /path/to/manual.md
-```
-
-### RAG 相关环境变量
-
-```env
-EMBEDDING_API_KEY=your-siliconflow-api-key
-EMBEDDING_API_BASE=https://api.siliconflow.cn/v1
-EMBEDDING_MODEL=BAAI/bge-m3
-EMBEDDING_DIM=1024
-RAG_TOP_K=5
-RAG_MIN_SCORE=0.25
-RAG_CHUNK_SIZE=500
-RAG_CHUNK_OVERLAP=80
-```
-
-## 当前工作流
-
-一次查询会按用户意图动态走不同路径，例如：
-
-```text
-START
-  -> supervisor
-  -> conversation_assistant
-  -> END
-
-START
-  -> supervisor
-  -> data_analyst
-  -> supervisor
-  -> risk_assessor
-  -> supervisor
-  -> final_response
-  -> END
-
-START
-  -> supervisor
-  -> data_analyst
-  -> supervisor
-  -> risk_assessor
-  -> supervisor
-  -> plan_generator
-  -> supervisor
-  -> resource_dispatcher / notification
-  -> supervisor
-  -> final_response
-  -> END
-```
-
-其中：
-
-- `supervisor` 负责意图识别、站点聚焦和节点路由
-- 普通闲聊会直接转到对话型 agent，而不会误触发数据分析
-- 结构化工具层继续提供数据、规则和模板约束，但主回答口径由多 agent 协作完成
-
-## API
-
-### 1. 健康检查
-
-```bash
-GET /health
-```
-
-### 2. 非流式查询
-
-```bash
-POST /api/v1/flood/query
-Content-Type: application/json
-
-{
-  "query": "分析当前水情并生成防洪应急预案",
-  "session_id": "optional-session-id"
-}
-```
-
-### 3. 流式查询
-
-```bash
-POST /api/v1/flood/query/stream
-Content-Type: application/json
-Accept: text/event-stream
-```
-
-返回的 SSE 事件包括：
-
-- `session_init`
-- `agent_update`
-- `risk_update`
-- `plan_update`
-- `agent_message`
-
-### 4. 预案与会话接口
-
-- `GET /api/v1/plans`
-- `GET /api/v1/plans/count`
-- `GET /api/v1/plans/{plan_id}`
-- `POST /api/v1/plans/{plan_id}/execute`
-- `PATCH /api/v1/plans/{plan_id}/status`
-- `DELETE /api/v1/plans/{plan_id}`
-- `GET /api/v1/sessions`
-- `GET /api/v1/sessions/count`
-- `GET /api/v1/sessions/{session_id}`
-
-## 运行方式
-
-### 1. 安装依赖
-
-```bash
-cd water-info-ai
-uv sync
-```
-
-### 2. 配置环境变量
+## 环境变量
 
 复制模板：
 
@@ -281,19 +114,40 @@ uv sync
 cp .env.example .env
 ```
 
-至少需要确认这些配置：
+关键配置：
 
-- `PG_HOST`
-- `PG_PORT`
-- `PG_DATABASE`
-- `PG_USER`
-- `PG_PASSWORD`
-- `WATER_PLATFORM_BASE_URL`
-- `WATER_PLATFORM_USERNAME`
-- `WATER_PLATFORM_PASSWORD`
-- `OPENAI_API_KEY`（可选；未配置时会走回退逻辑）
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | LLM API Key | empty |
+| `OPENAI_API_BASE` | OpenAI-compatible base URL | `https://api.deepseek.com/v1` |
+| `OPENAI_MODEL` | Chat model | `deepseek-chat` |
+| `LLM_TIMEOUT` | LLM timeout seconds | `120` |
+| `EMBEDDING_API_KEY` | RAG embedding API Key | falls back to `OPENAI_API_KEY` |
+| `EMBEDDING_API_BASE` | Embedding API base URL | falls back to `OPENAI_API_BASE` |
+| `EMBEDDING_MODEL` | Embedding model | empty |
+| `EMBEDDING_DIM` | Embedding dimension | `1024` |
+| `PG_HOST` / `PG_PORT` | PostgreSQL host and port | `localhost` / `5432` |
+| `PG_DATABASE` | PostgreSQL database | `water_info` |
+| `PG_USER` / `PG_PASSWORD` | PostgreSQL credentials | `postgres` / `postgres` |
+| `REDIS_URL` / `REDIS_PASSWORD` | Redis session/cache settings | local Redis URL / empty |
+| `WATER_PLATFORM_BASE_URL` | Java platform URL | `http://localhost:8080` |
+| `WATER_PLATFORM_USERNAME` / `WATER_PLATFORM_PASSWORD` | Platform service login | `admin` / `admin123` |
+| `AI_SERVICE_HOST` / `AI_SERVICE_PORT` | FastAPI bind address | `0.0.0.0` / `8100` |
+| `LANGGRAPH_POSTGRES_ENABLED` | Enable Postgres checkpointer/store | `false` |
+| `RAG_TOP_K` / `RAG_MIN_SCORE` | RAG retrieval limits | `5` / `0.25` |
+| `RAG_CHUNK_SIZE` / `RAG_CHUNK_OVERLAP` | RAG chunking parameters | `500` / `80` |
+| `RISK_SCAN_PERIODIC_ENABLED` | Enable scheduled risk scan | `true` |
+| `RISK_SCAN_PERIODIC_MINUTES` | Risk scan interval | `15` |
 
-### 3. 启动服务
+## 运行
+
+### 安装依赖
+
+```bash
+uv sync --extra dev
+```
+
+### 启动服务
 
 ```bash
 uv run python -m app.main
@@ -305,57 +159,130 @@ uv run python -m app.main
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8100
 ```
 
-启动后可访问：
+访问：
 
-- `http://localhost:8100/docs`
+- Swagger UI: `http://localhost:8100/docs`
+- Health: `http://localhost:8100/health`
 
-## 开发说明
+## API
 
-### 规则与模型的分工
+### Flood Query
 
-当前实现采用“模型决策 + 工具/RAG grounding + 结构化校验”的思路：
+```http
+POST /api/v1/flood/query
+Content-Type: application/json
 
-- Supervisor：优先由 LLM 基于用户意图和 workflow_state 决定下一个 agent
-- 数据与知识：监测数据、RAG 证据片段、风险规则分数作为 grounding 输入模型
-- 结构化校验：风险 JSON、预案 JSON 必须通过字段、类型和业务边界检查
-- 规则兜底：[app/risk.py](./app/risk.py) 和 [app/plan.py](./app/plan.py) 只作为安全边界与失败回退
-
-这样做的好处是：
-
-- 让模型真正参与意图判断、风险结论和预案生成
-- 保留业务约束，不让模型脱离真实数据和制度依据胡说
-- 避免系统退化成关键词路由和模板字段拼接器
-
-## 测试
-
-如果本地已安装开发依赖：
-
-```bash
-python -m pytest
+{
+  "query": "分析当前水情并生成防洪应急预案",
+  "session_id": "optional-session-id"
+}
 ```
 
-建议优先关注：
+流式查询：
 
-- `tests/test_graph.py`
-- `tests/test_graph_routing.py`
-- `tests/test_agents.py`
-- `tests/test_supervisor_routing.py`
-- `tests/test_main_api.py`
+```http
+POST /api/v1/flood/query/stream
+Content-Type: application/json
+Accept: text/event-stream
+```
 
-## 技术栈
+SSE 事件类型：
 
-- Python 3.11+
-- FastAPI
-- LangGraph
-- Pydantic v2
-- asyncpg
-- httpx
+- `session_init`
+- `agent_update`
+- `agent_message`
+- `risk_update`
+- `plan_update`
+- `evidence_update`
+- `trace_update`
 
-## 后续建议
+### Knowledge Base
 
-当前 README 与当前代码实现已经对齐，旧顺序流水线已经移除。下一步更值得做的是：
+- `POST /api/v1/kb/documents`
+- `GET /api/v1/kb/documents`
+- `GET /api/v1/kb/documents/{document_id}`
+- `DELETE /api/v1/kb/documents/{document_id}`
+- `POST /api/v1/kb/documents/{document_id}/reindex`
+- `POST /api/v1/kb/search`
+- `GET /api/v1/kb/stats`
 
-1. 把 `resource_dispatcher`、`execution_monitor` 从占位实现补成真实业务节点。
-2. 把 `parallel_dispatch` 改成真正的并行 fan-out，而不是占位节点。
-3. 增加更完整的会话记忆与 checkpoint 能力。
-4. 继续降低固定模板式 fallback 的占比，让更多回答由 agent 协作生成。
+CLI 导入：
+
+```bash
+uv run python -m app.rag.cli ingest /path/to/manual.md
+```
+
+### Plans and Conversations
+
+- `GET /api/v1/plans`
+- `GET /api/v1/plans/count`
+- `GET /api/v1/plans/{plan_id}`
+- `POST /api/v1/plans/{plan_id}/execute`
+- `PATCH /api/v1/plans/{plan_id}/status`
+- `DELETE /api/v1/plans/{plan_id}`
+- `POST /api/v1/conversations`
+- `GET /api/v1/conversations`
+- `GET /api/v1/conversations/{session_id}`
+- `GET /api/v1/conversations/{session_id}/messages`
+- `PATCH /api/v1/conversations/{session_id}`
+- `DELETE /api/v1/conversations/{session_id}`
+- `GET /api/v1/sessions`
+- `GET /api/v1/sessions/count`
+- `GET /api/v1/sessions/{session_id}`
+
+### Memory
+
+- `GET /api/v1/memory`
+- `DELETE /api/v1/memory/{memory_id}`
+
+Memory items are scoped by user and session namespaces. They are useful for preferences, previous decisions, and recent conversation continuity, but current risk assessment must still rely on live data and rules.
+
+### Risk Scan
+
+- `POST /api/v1/flood/risk-scan/trigger`
+
+The scheduler can also run periodic scans according to `RISK_SCAN_PERIODIC_ENABLED` and `RISK_SCAN_PERIODIC_MINUTES`.
+
+## RAG Notes
+
+RAG tables are created by the Java platform migrations. The AI service performs:
+
+1. Document loading from upload or CLI input.
+2. Chunking with configured size and overlap.
+3. Embedding through the configured embedding endpoint.
+4. Hybrid retrieval with vector recall, keyword recall, and RRF fusion.
+5. Evidence injection into `risk_assessor`, `plan_generator`, and `conversation_assistant`.
+
+If no embedding API is configured, the service can still answer with live data and rule-based fallbacks, but evidence-backed retrieval will be limited.
+
+## Testing and Quality
+
+```bash
+uv run pytest tests/ -v
+uv run pytest tests/test_graph.py -v
+uv run pytest tests/test_main_api.py -v
+uv run ruff check app/ tests/
+uv run ruff format app/ tests/
+```
+
+The test suite includes graph routing, agents, RAG helpers, memory service, platform client, risk tools, plan persistence, risk scan scheduler, and API behavior.
+
+## Docker
+
+The root `docker-compose.yml` builds this service as `ai`:
+
+```bash
+docker-compose build ai
+docker-compose up -d postgres platform ai
+docker-compose logs -f ai
+```
+
+In Docker, compose injects database, Redis, platform URL, service port, and `LANGGRAPH_POSTGRES_ENABLED=true`.
+
+## Design Boundaries
+
+- LLM output is grounded by structured data, RAG evidence, and validation.
+- `app/risk.py` and `app/plan.py` are safety boundaries and fallback paths, not the primary product experience.
+- Direct PostgreSQL reads are allowed for low-latency analysis.
+- Writes that must obey platform business rules should go through `water-info-platform`.
+- Memory context may guide phrasing and continuity, but it must not override live monitoring data.
