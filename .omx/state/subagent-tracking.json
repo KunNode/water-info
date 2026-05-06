@@ -847,6 +847,29 @@
           "turn_count": 2
         }
       }
+    },
+    "019dfc30-1700-7e61-9c17-60b7c2fa5641": {
+      "session_id": "019dfc30-1700-7e61-9c17-60b7c2fa5641",
+      "leader_thread_id": "019dfc30-2bb1-76a2-a6e9-8b9b3f8a82c7",
+      "updated_at": "2026-05-06T07:33:28.584Z",
+      "threads": {
+        "019dfc30-2bb1-76a2-a6e9-8b9b3f8a82c7": {
+          "thread_id": "019dfc30-2bb1-76a2-a6e9-8b9b3f8a82c7",
+          "kind": "leader",
+          "first_seen_at": "2026-05-06T07:28:36.004Z",
+          "last_seen_at": "2026-05-06T07:28:36.004Z",
+          "last_turn_id": "019dfc30-2c1b-7d10-9a2f-1bf0e108a444",
+          "turn_count": 1
+        },
+        "019dfc30-1700-7e61-9c17-60b7c2fa5641": {
+          "thread_id": "019dfc30-1700-7e61-9c17-60b7c2fa5641",
+          "kind": "subagent",
+          "first_seen_at": "2026-05-06T07:33:28.584Z",
+          "last_seen_at": "2026-05-06T07:33:28.584Z",
+          "last_turn_id": "019dfc30-2b5d-7a11-b652-44c910c45f83",
+          "turn_count": 1
+        }
+      }
     }
   }
 }

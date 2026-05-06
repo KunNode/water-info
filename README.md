@@ -1,315 +1,229 @@
 # 智慧水利防汛应急管理系统
 
-基于 Spring Boot + FastAPI + LangGraph 的多智能体协作防洪应急管理平台。
+智慧水利防汛应急管理系统由 Java 业务平台、Python 多智能体 AI 服务和 Vue 管理端组成，覆盖监测站管理、水雨情采集、阈值告警、应急资源调度、AI 风险研判、应急预案生成和知识库检索增强。
 
-## 系统架构
+## 系统组成
 
+| 服务 | 目录 | 技术栈 | 默认端口 | 说明 |
+| --- | --- | --- | --- | --- |
+| 业务平台 | `water-info-platform` | Spring Boot 3.2.2 / Java 17 / MyBatis-Plus | `8080` | 统一 REST API、认证鉴权、告警、资源、AI 代理 |
+| AI 服务 | `water-info-ai` | FastAPI / LangGraph / Python 3.11 | `8100` | 防汛多 Agent 编排、RAG、会话记忆、风险巡检 |
+| 管理端 | `water-info-admin` | Vue 3 / TypeScript / Vite / Element Plus | `5173` | 数据大盘、监测管理、AI 指挥台、资源调度 |
+| 反向代理 | `nginx.conf` | Nginx | `80` | API、SSE、WebSocket 和前端入口 |
+| 数据组件 | `docker-compose.yml` | PostgreSQL / Redis | `5432` / `6379` | 业务数据、AI 直接读取、缓存与会话 |
+
+## 架构概览
+
+```text
+Browser
+  |
+  | http://localhost:80
+  v
+Nginx
+  |-- /api/v1/* --------------------> water-info-platform (:8080)
+  |                                      |-- PostgreSQL / Redis
+  |                                      |-- WebSocket /ws/alarms
+  |                                      +-- proxy /api/v1/flood, /plans, /kb
+  |
+  +-- SSE /api/v1/flood/query/stream --> water-info-platform --> water-info-ai (:8100)
+                                                       |
+                                                       |-- LangGraph agents
+                                                       |-- PostgreSQL direct read via asyncpg
+                                                       |-- RAG embeddings and memory
+                                                       +-- OpenAI-compatible LLM API
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                          前端 (Vue 3)                            │
-│                     http://localhost:5173                       │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-        ▼                   ▼                   ▼
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│  Nginx       │   │ Spring Boot  │   │  FastAPI AI  │
-│  :80         │   │  :8080       │   │  :8100       │
-│  反向代理     │   │  业务API      │   │  AI服务      │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
-       │                  │                   │
-       └──────────────────┼───────────────────┘
-                          │
-       ┌──────────────────┼──────────────────┐
-       ▼                  ▼                  ▼
-┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-│  PostgreSQL │   │    Redis    │   │   AI/LLM    │
-│  业务数据   │   │  缓存/会话  │   │  DeepSeek   │
-└─────────────┘   └─────────────┘   └─────────────┘
-```
 
-## 技术栈
+关键约定：AI 服务可以直接读 PostgreSQL 以降低分析延迟；需要保持业务规则一致性的写操作通过 Java 平台 API 完成。
 
-### 后端 (water-info-platform)
-- **框架**: Spring Boot 3.2.2
-- **语言**: Java 17
-- **ORM**: MyBatis-Plus 3.5.5
-- **数据库**: PostgreSQL 15
-- **缓存**: Redis + Caffeine
-- **安全**: Spring Security + JWT
-- **文档**: OpenAPI 3.0 + Knife4j
-- **测试**: JUnit 5 + Testcontainers
+## 功能范围
 
-### AI 服务 (water-info-ai)
-- **框架**: FastAPI 0.115+
-- **语言**: Python 3.11+
-- **AI 编排**: LangGraph 0.2+ / LangChain 0.3+
-- **模型**: DeepSeek / OpenAI
-- **数据库**: asyncpg (PostgreSQL 异步驱动)
-- **缓存**: Redis
-- **测试**: pytest + pytest-asyncio
-
-## 功能特性
-
-### 核心功能
-- 🏭 **监测站管理** - 水位站、雨量站、流量站等基础信息管理
-- 📊 **实时数据** - 水情数据批量采集与查询（支持5000条批量上传）
-- 🚨 **智能告警** - 基于阈值的自动告警，支持状态机流转（OPEN→ACK→CLOSED）
-- 📈 **风险预警** - AI 驱动的洪水风险等级评估（蓝/黄/橙/红四级）
-- 📝 **应急预案** - 多智能体协作生成防洪应急预案
-- 🔔 **实时推送** - WebSocket 告警实时推送
-- 👥 **权限管理** - RBAC 权限模型（ADMIN/OPERATOR/VIEWER）
-
-### AI 智能体
-
-| 智能体 | 职责 | 关键工具 |
-|--------|------|----------|
-| **Supervisor** | 意图理解与任务路由 | - |
-| **DataAnalyst** | 水情数据采集与分析 | fetch_stations, fetch_observations, fetch_alarms |
-| **RiskAssessor** | 洪水风险等级评估 | calculate_water_level_risk, calculate_rainfall_risk |
-| **PlanGenerator** | 应急预案生成 | generate_plan_id, get_response_template |
-| **ResourceDispatcher** | 资源调度方案 | - |
-| **Notification** | 预警通知方案 | - |
+- 监测站、传感器、水位/雨量/流量等观测数据管理。
+- 批量观测数据写入，单次最多 5000 条。
+- 阈值规则与告警状态机，支持 `OPEN -> ACK -> CLOSED`。
+- WebSocket 告警推送和 AI 查询 SSE 流式输出。
+- RBAC 权限控制，内置 `ADMIN`、`OPERATOR`、`VIEWER` 角色。
+- AI 智能指挥台：数据分析、风险评估、预案生成、通知建议、资源调度建议。
+- 知识库：支持 Markdown、TXT、PDF、DOCX 上传，向量召回 + 关键词召回 + RRF 融合检索。
+- 应急资源管理：物资、人员、车辆设备和调度记录。
+- AI 会话管理、长期记忆、执行轨迹和定时风险巡检。
 
 ## 快速开始
 
 ### 环境要求
-- Java 17+
-- Python 3.11+
-- PostgreSQL 15+
-- Redis 7+
-- Maven 3.8+
 
-### 1. 克隆项目
+- Docker 和 Docker Compose
+- Java 17+、Maven 3.8+（本地运行后端时需要）
+- Python 3.11+、`uv`（本地运行 AI 服务时需要）
+- Node.js 18+、npm（本地运行管理端时需要）
+
+### 一键启动
 
 ```bash
-git clone <repository-url>
-cd code-work
+cp water-info-ai/.env.example water-info-ai/.env
+# 按需填写 OPENAI_API_KEY、EMBEDDING_API_KEY、PG_PASSWORD 等
+
+docker-compose up -d --build
+docker-compose logs -f
 ```
 
-### 2. 启动基础设施
+启动后访问：
+
+- 管理端入口: `http://localhost`
+- Java API 文档: `http://localhost/swagger-ui.html`
+- Knife4j 文档: `http://localhost/doc.html`
+- AI Swagger: `http://localhost:8100/docs`
+
+默认管理员账号来自后端初始化配置：
+
+```text
+username: admin
+password: Admin@123456
+```
+
+生产或共享环境必须通过 `ADMIN_PASSWORD`、`JWT_SECRET`、`PG_PASSWORD`、`REDIS_PASSWORD` 覆盖默认值。
+
+### 只启动基础设施
 
 ```bash
-# 使用 Docker 启动 PostgreSQL 和 Redis
 docker-compose up -d postgres redis
 ```
 
-### 3. 启动后端服务
+### 本地运行后端
 
 ```bash
 cd water-info-platform
-
-# 编译
-./mvnw clean package -DskipTests
-
-# 运行（开发环境）
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
-
-# 或运行 jar
-java -jar target/water-info-platform-1.0.0-SNAPSHOT.jar
+mvn clean compile
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-后端服务启动后访问：
-- API 文档: http://localhost:8080/swagger-ui.html
-- Knife4j: http://localhost:8080/doc.html
+后端 API：
 
-### 4. 启动 AI 服务
+- `POST /api/v1/auth/login`
+- `GET /api/v1/stations`
+- `POST /api/v1/observations/batch`
+- `GET /api/v1/alarms`
+- `GET /api/v1/resources`
+- `POST /api/v1/flood/query`
+- `POST /api/v1/flood/query/stream`
+
+### 本地运行 AI 服务
 
 ```bash
 cd water-info-ai
-
-# 使用 UV 安装依赖
 uv sync --extra dev
-
-# 配置环境变量
 cp .env.example .env
-# 编辑 .env 文件，配置 OPENAI_API_KEY 等
-
-# 启动服务
 uv run python -m app.main
 ```
 
-AI 服务启动后访问：
-- Swagger UI: http://localhost:8100/docs
-- ReDoc: http://localhost:8100/redoc
-
-### 5. 使用 Docker Compose 一键启动
+### 本地运行管理端
 
 ```bash
-# 启动所有服务
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f
-
-# 停止服务
-docker-compose down
+cd water-info-admin
+npm install
+npm run dev
 ```
 
-## API 示例
-
-### 用户登录
-```bash
-curl -X POST http://localhost:8080/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "Admin@123456"}'
-```
-
-### 查询监测站
-```bash
-curl -X GET "http://localhost:8080/api/v1/stations?page=1&size=10" \
-  -H "Authorization: Bearer <token>"
-```
-
-### AI 防洪查询
-```bash
-# 普通请求
-curl -X POST http://localhost:8100/api/v1/flood/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "分析当前水情并生成防洪应急预案"}'
-
-# 流式请求（SSE）
-curl -N http://localhost:8100/api/v1/flood/query/stream \
-  -H "Content-Type: application/json" \
-  -d '{"query": "制定完整的防洪应急响应方案"}'
-```
+Vite 开发代理会把 `/api/v1/flood` 转到 AI 服务，把其他 `/api` 转到 Java 平台，把 `/ws` 转到后端 WebSocket。
 
 ## 项目结构
 
-```
+```text
 code-work/
-├── water-info-platform/          # Spring Boot 后端
-│   ├── src/main/java/com/waterinfo/platform/
-│   │   ├── common/               # 通用组件（异常、API响应、工具类）
-│   │   ├── config/               # 配置类
-│   │   ├── module/               # 业务模块
-│   │   │   ├── station/          # 监测站管理
-│   │   │   ├── observation/      # 观测数据
-│   │   │   ├── alarm/            # 告警管理
-│   │   │   ├── threshold/        # 阈值规则
-│   │   │   ├── user/             # 用户权限
-│   │   │   └── auth/             # 认证授权
-│   │   └── security/             # Spring Security 配置
-│   ├── src/main/resources/
-│   │   ├── db/migration/         # Flyway 数据库迁移脚本
-│   │   ├── application.yml       # 主配置
-│   │   ├── application-dev.yml   # 开发环境配置
-│   │   └── application-prod.yml  # 生产环境配置
-│   └── Dockerfile
-│
-├── water-info-ai/                # FastAPI AI 服务
-│   ├── app/
-│   │   ├── agents/               # LangGraph 智能体
-│   │   │   ├── supervisor.py     # 路由决策
-│   │   │   ├── data_analyst.py   # 数据分析
-│   │   │   ├── risk_assessor.py  # 风险评估
-│   │   │   └── plan_generator.py # 预案生成
-│   │   ├── tools/                # 智能体工具
-│   │   ├── services/             # 服务层（数据库、LLM）
-│   │   ├── config.py             # 配置
-│   │   ├── state.py              # 状态定义
-│   │   ├── graph.py              # 工作流图
-│   │   └── main.py               # FastAPI 入口
-│   ├── tests/                    # 测试
-│   ├── pyproject.toml            # 项目配置
-│   ├── .env.example              # 环境变量模板
-│   └── Dockerfile
-│
-├── docker-compose.yml            # Docker 编排
-├── nginx.conf                    # Nginx 配置
-└── README.md                     # 本文件
+├── water-info-platform/       # Spring Boot 业务平台
+│   ├── src/main/java/...      # 模块化业务代码
+│   └── src/main/resources/    # application 配置与 Flyway 迁移
+├── water-info-ai/             # FastAPI + LangGraph AI 服务
+│   ├── app/agents/            # 多 Agent 节点
+│   ├── app/rag/               # 知识库加载、切块、嵌入、检索
+│   ├── app/memory/            # 会话与长期记忆
+│   └── tests/                 # pytest 测试
+├── water-info-admin/          # Vue 3 管理端
+│   ├── src/views/             # 页面
+│   ├── src/api/               # Axios API 封装
+│   └── src/stores/            # Pinia 状态
+├── docker-compose.yml
+├── nginx.conf
+└── README.md
 ```
 
-## 开发指南
+## 开发与验证
 
-### 后端开发
+### 后端
 
 ```bash
 cd water-info-platform
-
-# 编译
-./mvnw clean compile
-
-# 运行测试
-./mvnw test
-
-# 运行单个测试
-./mvnw test -Dtest=StationServiceTest
-
-# 打包
-./mvnw package -DskipTests
+mvn clean compile
+mvn test
+mvn test -Dtest=StationServiceTest
+mvn package -DskipTests
 ```
 
-### AI 服务开发
+### AI 服务
 
 ```bash
 cd water-info-ai
-
-# 安装依赖
-uv sync --extra dev
-
-# 运行测试
 uv run pytest tests/ -v
-
-# 运行单个测试
-uv run pytest tests/test_agents.py::TestSupervisorAgent -v
-
-# 代码检查
 uv run ruff check app/ tests/
-
-# 格式化代码
 uv run ruff format app/ tests/
 ```
 
-## 部署指南
-
-### 生产环境配置
-
-1. **数据库**: 配置生产级 PostgreSQL，执行迁移脚本
-2. **Redis**: 配置持久化和认证
-3. **环境变量**: 修改 `application-prod.yml` 和 `.env`
-4. **JWT**: 更换生产环境密钥
-5. **日志**: 配置 JSON 格式日志收集
-
-### 使用 Docker 部署
+### 管理端
 
 ```bash
-# 构建镜像
-docker-compose build
-
-# 启动生产环境
-docker-compose -f docker-compose.yml up -d
-
-# 查看日志
-docker-compose logs -f platform
-docker-compose logs -f ai-service
+cd water-info-admin
+npm run build
+npm run lint
+npm run format
 ```
 
-### 监控与运维
+注意：仓库中的 `water-info-admin` 已包含 ESLint 配置；如在其他环境缺失配置，`npm run lint` 会失败，需要先补齐配置再执行。
 
-- **健康检查**: `GET /actuator/health`
-- **指标监控**: `GET /actuator/prometheus`
-- **API 文档**: `/swagger-ui.html`, `/doc.html`
+## 数据库迁移
 
-## 风险等级体系
+后端使用 Flyway 自动执行 `water-info-platform/src/main/resources/db/migration/` 下的迁移。当前迁移覆盖核心水利表、RBAC、兼容视图/测试数据、性能索引、翠屏湖示例数据、RAG 知识库、风险巡检和资源管理。
 
-| 等级 | 颜色 | 响应级别 | 触发条件 |
-|------|------|----------|----------|
-| none | - | 无需响应 | 正常水平 |
-| low | 🔵 蓝 | IV级 | 接近警戒水位 |
-| moderate | 🟡 黄 | III级 | 达到警戒水位 |
-| high | 🟠 橙 | II级 | 接近危险水位 |
-| critical | 🔴 红 | I级 | 超过危险水位 |
+新增迁移命名格式：
 
-## 贡献指南
+```text
+V{N}__{description}.sql
+```
 
-1. Fork 项目
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`) 
-## 许可证
+当前序列存在历史空档（例如没有 `V6`），新增迁移应使用下一个未使用版本号。
 
-[MIT](LICENSE)
+## 常用运维命令
 
-## 联系方式
+```bash
+docker-compose ps
+docker-compose logs -f platform
+docker-compose logs -f ai
+docker-compose logs -f nginx
+docker-compose down
+```
 
-如有问题或建议，欢迎提交 Issue 或 Pull Request。
+健康检查：
+
+- 平台: `GET /actuator/health`
+- AI: `GET /health`
+- Nginx: `GET /health`
+
+## 风险等级
+
+| 等级 | 响应 | 含义 |
+| --- | --- | --- |
+| `none` | 无需响应 | 当前数据正常 |
+| `low` | IV 级 | 接近警戒线，持续关注 |
+| `moderate` | III 级 | 达到警戒线，准备响应 |
+| `high` | II 级 | 接近危险线，启动应急协同 |
+| `critical` | I 级 | 超过危险线，立即处置 |
+
+## 安全提醒
+
+- 首次部署后立即修改管理员密码。
+- 生产环境必须更换 JWT 密钥，并启用 HTTPS。
+- 不要提交真实 `.env`、数据库密码、LLM API Key。
+- RAG 上传接口和系统管理接口应保持管理员权限限制。
+
+## 子项目文档
+
+- [water-info-platform/README.md](./water-info-platform/README.md)
+- [water-info-ai/README.md](./water-info-ai/README.md)

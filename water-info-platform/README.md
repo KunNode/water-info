@@ -1,339 +1,238 @@
-# Water Information Management System - Base Platform
+# Water Info Platform
 
-Water Information Management System (Base Platform) - A Spring Boot backend providing unified data and service foundation for multi-agent flood emergency response systems.
+`water-info-platform` is the Spring Boot service layer for the smart water management and flood emergency response system. It owns authentication, RBAC, station/sensor/observation data, alarms, thresholds, resources, audit logs, WebSocket push, and the Java-side proxy for the Python AI service.
 
-## Technology Stack
+## Stack
 
-- **Java**: 17
-- **Framework**: Spring Boot 3.2.x
-- **ORM**: MyBatis-Plus 3.5.5
-- **Database**: PostgreSQL 15+ (primary) / MySQL profile (requires dedicated SQL migrations)
-- **Migration**: Flyway
-- **Security**: Spring Security + JWT
-- **API Documentation**: OpenAPI 3.0 / Swagger UI / Knife4j
-- **Testing**: JUnit 5 + Testcontainers
+| Area | Technology |
+| --- | --- |
+| Runtime | Java 17 |
+| Framework | Spring Boot 3.2.2 |
+| Persistence | MyBatis-Plus 3.5.5 |
+| Database | PostgreSQL 15+ |
+| Migration | Flyway 10.8.1 |
+| Cache | Caffeine local cache, Redis integration |
+| Security | Spring Security, JWT, method-level `@PreAuthorize` |
+| API docs | Springdoc OpenAPI, Swagger UI, Knife4j |
+| Testing | JUnit 5, Spring Security Test, Testcontainers |
 
-## Features
+The repository currently does not include a Maven Wrapper, so use a local `mvn` installation.
 
-- **User & Permission System**: User management, role-based access control (ADMIN/OPERATOR/VIEWER)
-- **Station Management**: Monitoring station CRUD with location and type support
-- **Sensor Management**: Sensor device management with heartbeat tracking
-- **Observation Data**: Time series data batch upload (up to 5000 records per batch)
-- **Threshold Rules**: Configurable alert thresholds per station and metric
-- **Alarm Management**: Automatic alarm generation with state machine (OPEN -> ACK -> CLOSED)
-- **Audit Logging**: Comprehensive audit trail for critical operations
+## Module Map
 
-## Quick Start
+Each business module follows the same general shape:
+
+```text
+entity -> dto -> vo -> mapper -> service -> controller
+```
+
+| Module | Package | Responsibility |
+| --- | --- | --- |
+| Auth | `module/auth` | Login, current user, logout |
+| User/RBAC | `module/user` | Users, roles, orgs, departments |
+| Station | `module/station` | Monitoring station CRUD and type/location metadata |
+| Sensor | `module/sensor` | Sensor device records, status, heartbeat |
+| Observation | `module/observation` | Time-series observation query and batch ingestion |
+| Threshold | `module/threshold` | Alarm threshold rules |
+| Alarm | `module/alarm` | Alarm query, ACK/close lifecycle, scheduled checks |
+| Resource | `module/resource` | Emergency resources and dispatch records |
+| AI proxy | `module/ai` | Flood AI query, SSE, plans, conversations, knowledge base proxy |
+| AI assessment | `module/aiassessment` | Persisted AI assessment records |
+| Audit | `module/audit` | Audit log query |
+
+## Configuration
+
+Main configuration lives in:
+
+- `src/main/resources/application.yml`
+- `src/main/resources/application-dev.yml`
+- `src/main/resources/application-prod.yml`
+
+Important environment variables:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SPRING_DATASOURCE_URL` | PostgreSQL JDBC URL | value from profile/config |
+| `SPRING_DATASOURCE_USERNAME` | Database user | value from profile/config |
+| `SPRING_DATASOURCE_PASSWORD` | Database password | value from profile/config |
+| `SPRING_DATA_REDIS_HOST` | Redis host | value from profile/config |
+| `SPRING_DATA_REDIS_PASSWORD` | Redis password | value from profile/config |
+| `ADMIN_PASSWORD` | Initial admin password | `Admin@123456` |
+| `JWT_SECRET` | JWT signing secret | development secret in config |
+| `AI_SERVICE_URL` | Python AI service URL | `http://localhost:8100` |
+
+For production, always override `ADMIN_PASSWORD`, `JWT_SECRET`, database credentials, and Redis credentials.
+
+## Database Migrations
+
+Flyway runs migrations from `src/main/resources/db/migration`.
+
+Current migrations:
+
+| File | Purpose |
+| --- | --- |
+| `V1__water_info_schema.sql` | Core water domain schema |
+| `V2__user_access_control.sql` | User, role, permission tables |
+| `V3__legacy_public_compat.sql` | Legacy public schema compatibility |
+| `V4__legacy_public_seed_test_data.sql` | Legacy/demo seed data |
+| `V5__performance_indexes.sql` | Performance indexes |
+| `V7__cuiping_lake_demo_data.sql` | Cuiping Lake demo data |
+| `V8__rag_knowledge_base.sql` | RAG knowledge-base tables |
+| `V9__rag_embedding_dimension_fix.sql` | RAG embedding dimension adjustment |
+| `V10__scheduled_risk_monitoring.sql` | Scheduled risk-monitoring support |
+| `V11__resource_management.sql` | Resource and dispatch tables |
+
+There is no `V6`; keep the historical gap and add future migrations with the next unused version.
+
+## Local Development
 
 ### Prerequisites
 
 - Java 17+
 - Maven 3.8+
-- PostgreSQL 15+ (or MySQL 8+)
-- Docker (optional, for Testcontainers)
+- PostgreSQL 15+
+- Redis 7+
+- Docker, if running Testcontainers-based tests
 
-### 1. Database Setup
-
-Create a PostgreSQL database:
+### Database
 
 ```sql
 CREATE DATABASE water_info;
 ```
 
-### 1.1 Migration Notes (Two Files Only)
-
-Current repository status:
-- Application Flyway path: `src/main/resources/db/migration`
-- Active migration files:
-  - `V1__water_info_schema.sql` (water info domain)
-  - `V2__user_access_control.sql` (user/role/permission domain)
-
-If you want the latest reviewed schema in PostgreSQL, run:
+Flyway will apply migrations on application startup. If you need to run SQL manually:
 
 ```bash
 psql -U postgres -d water_info -f src/main/resources/db/migration/V1__water_info_schema.sql
 psql -U postgres -d water_info -f src/main/resources/db/migration/V2__user_access_control.sql
 ```
 
-Data guardrails (scope consistency, metric range, latitude/longitude range, NULL-sensitive scope uniqueness) are already merged into these two files.
+Prefer automatic Flyway execution for the full migration chain.
 
-### 2. Configuration
-
-Edit `src/main/resources/application.yml`:
-
-```yaml
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/water_info
-    username: postgres
-    password: your_password
-
-app:
-  admin:
-    password: YourSecurePassword123!  # Change this!
-```
-
-Or use environment variables:
+### Build and Run
 
 ```bash
-export DB_HOST=localhost
-export DB_PORT=5432
-export DB_NAME=water_info
-export DB_USERNAME=postgres
-export DB_PASSWORD=your_password
-export ADMIN_PASSWORD=YourSecurePassword123!
+mvn clean compile
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-### 3. Build & Run
+Package:
 
 ```bash
-# Build
 mvn clean package -DskipTests
-
-# Run
-mvn spring-boot:run
-
-# Or run the JAR
 java -jar target/water-info-platform-1.0.0-SNAPSHOT.jar
 ```
 
-### 4. Access API Docs
+API docs:
 
-Open one of the following in your browser:
-- Swagger UI: http://localhost:8080/swagger-ui.html
-- Knife4j UI: http://localhost:8080/doc.html
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- Knife4j: `http://localhost:8080/doc.html`
+- OpenAPI JSON: `http://localhost:8080/v3/api-docs`
 
-### 5. Login & Get Token
+## Authentication
+
+Login:
 
 ```bash
-# Login
 curl -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "Admin@123456"}'
-
-# Response:
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "accessToken": "eyJhbG...",
-    "tokenType": "Bearer",
-    "expiresIn": 86400,
-    "user": {
-      "id": "...",
-      "username": "admin",
-      "roles": ["ADMIN"]
-    }
-  }
-}
+  -d '{"username":"admin","password":"Admin@123456"}'
 ```
 
-### 6. Use the Token
-
-Add the token to the Authorization header:
+Use the returned access token:
 
 ```bash
-curl -X GET http://localhost:8080/api/v1/stations \
-  -H "Authorization: Bearer eyJhbG..."
+curl http://localhost:8080/api/v1/stations \
+  -H "Authorization: Bearer <access-token>"
 ```
 
-## API Examples
+## Main Endpoints
 
-### Batch Upload Observations
+### Platform APIs
 
-```bash
-curl -X POST http://localhost:8080/api/v1/observations/batch \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "requestId": "batch-001",
-    "observations": [
-      {
-        "stationId": "STATION_UUID",
-        "metricType": "WATER_LEVEL",
-        "value": 12.5,
-        "unit": "m",
-        "observedAt": "2024-01-15T10:30:00",
-        "qualityFlag": "GOOD",
-        "source": "sensor-001"
-      }
-    ]
-  }'
+| Area | Endpoints |
+| --- | --- |
+| Auth | `POST /api/v1/auth/login`, `GET /api/v1/auth/me`, `POST /api/v1/auth/logout` |
+| Users | `GET/POST /api/v1/users`, `GET/PUT/DELETE /api/v1/users/{id}` |
+| Roles | `GET /api/v1/roles`, `GET /api/v1/roles/{id}` |
+| Orgs/Depts | `GET/POST/PUT/DELETE /api/v1/orgs`, `GET/POST/PUT/DELETE /api/v1/depts` |
+| Stations | `GET/POST /api/v1/stations`, `GET/PUT/DELETE /api/v1/stations/{id}` |
+| Sensors | `GET/POST /api/v1/sensors`, `PUT /api/v1/sensors/{id}/status`, `PUT /api/v1/sensors/{id}/heartbeat` |
+| Observations | `POST /api/v1/observations/batch`, `GET /api/v1/observations`, `GET /api/v1/observations/latest`, `POST /api/v1/observations/latest/batch` |
+| Thresholds | `GET/POST /api/v1/threshold-rules`, `PUT /api/v1/threshold-rules/{id}/enable`, `PUT /api/v1/threshold-rules/{id}/disable` |
+| Alarms | `GET /api/v1/alarms`, `GET /api/v1/alarms/{id}`, `POST /api/v1/alarms/{id}/ack`, `POST /api/v1/alarms/{id}/close` |
+| Resources | `GET/POST /api/v1/resources`, `GET /api/v1/resources/stats`, `GET /api/v1/resources/available` |
+| Dispatches | `GET/POST /api/v1/resource-dispatches`, `PATCH /api/v1/resource-dispatches/{id}/status` |
+| Audit | `GET /api/v1/audit-logs` |
+| AI assessments | `GET/POST /api/v1/ai-assessments` |
+
+### AI Proxy APIs
+
+The Java service proxies AI traffic to `AI_SERVICE_URL`.
+
+| Area | Endpoints |
+| --- | --- |
+| Flood query | `POST /api/v1/flood/query`, `POST /api/v1/flood/query/stream` |
+| Plans | `GET /api/v1/plans`, `GET /api/v1/plans/{id}`, `POST /api/v1/plans/{id}/execute` |
+| Sessions | `GET /api/v1/sessions/{id}` |
+| Conversations | `GET/POST /api/v1/conversations`, `GET/PATCH/DELETE /api/v1/conversations/{sessionId}`, `GET /api/v1/conversations/{sessionId}/messages` |
+| Knowledge base | `POST /api/v1/kb/documents`, `GET /api/v1/kb/documents`, `GET /api/v1/kb/documents/{id}`, `DELETE /api/v1/kb/documents/{id}`, `POST /api/v1/kb/documents/{id}/reindex`, `POST /api/v1/kb/search`, `GET /api/v1/kb/stats` |
+
+## Alarm Lifecycle
+
+```text
+OPEN -> ACK -> CLOSED
+OPEN --------> CLOSED
 ```
 
-### Create Station
-
-```bash
-curl -X POST http://localhost:8080/api/v1/stations \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "code": "STN001",
-    "name": "Test Station",
-    "type": "WATER_LEVEL",
-    "adminRegion": "Region A",
-    "lat": 30.123456,
-    "lon": 120.654321
-  }'
-```
-
-### Create Threshold Rule
-
-```bash
-curl -X POST http://localhost:8080/api/v1/threshold-rules \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stationId": "STATION_UUID",
-    "metricType": "WATER_LEVEL",
-    "level": "WARNING",
-    "thresholdValue": 10.0
-  }'
-```
-
-### Acknowledge Alarm
-
-```bash
-curl -X POST http://localhost:8080/api/v1/alarms/{alarmId}/ack \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-## Running Tests
-
-```bash
-# Run all tests (requires Docker for Testcontainers)
-mvn test
-
-# Skip tests
-mvn package -DskipTests
-```
-
-## API Endpoints
-
-### Authentication
-- `POST /api/v1/auth/login` - Login and get JWT token
-- `GET /api/v1/auth/me` - Get current user info
-- `POST /api/v1/auth/logout` - Logout
-
-### User Management (ADMIN)
-- `POST /api/v1/users` - Create user
-- `GET /api/v1/users` - List users
-- `GET /api/v1/users/{id}` - Get user
-- `PUT /api/v1/users/{id}` - Update user
-- `PUT /api/v1/users/{id}/password` - Change password
-- `PUT /api/v1/users/{id}/roles` - Set roles
-- `DELETE /api/v1/users/{id}` - Delete user
-
-### Stations
-- `POST /api/v1/stations` - Create station
-- `GET /api/v1/stations` - List stations
-- `GET /api/v1/stations/{id}` - Get station
-- `PUT /api/v1/stations/{id}` - Update station
-- `DELETE /api/v1/stations/{id}` - Delete station
-
-### Sensors
-- `POST /api/v1/sensors` - Create sensor
-- `GET /api/v1/sensors` - List sensors
-- `PUT /api/v1/sensors/{id}/heartbeat` - Update heartbeat
-
-### Observations
-- `POST /api/v1/observations/batch` - Batch upload (1-5000 records)
-- `GET /api/v1/observations` - Query observations
-- `GET /api/v1/observations/latest` - Get latest observation
-
-### Threshold Rules
-- `POST /api/v1/threshold-rules` - Create rule
-- `GET /api/v1/threshold-rules` - List rules
-- `PUT /api/v1/threshold-rules/{id}/enable` - Enable rule
-- `PUT /api/v1/threshold-rules/{id}/disable` - Disable rule
-
-### Alarms
-- `GET /api/v1/alarms` - List alarms
-- `POST /api/v1/alarms/{id}/ack` - Acknowledge alarm
-- `POST /api/v1/alarms/{id}/close` - Close alarm
-
-### Audit Logs
-- `GET /api/v1/audit-logs` - Query audit logs
-
-## Alarm State Machine
-
-```
-                    +-----------+
-                    |   OPEN    |
-                    +-----------+
-                          |
-           +--------------+--------------+
-           |                             |
-           v                             v
-     +-----------+                 +-----------+
-     |    ACK    |---------------->|  CLOSED   |
-     +-----------+                 +-----------+
-
-Valid transitions:
-- OPEN -> ACK (acknowledge)
-- ACK -> CLOSED (close)
-- OPEN -> CLOSED (close without ack)
-
-Invalid transitions:
-- ACK -> OPEN
-- CLOSED -> any
-```
+Invalid transitions, such as reopening a closed alarm, are rejected by service-layer validation.
 
 ## Role Permissions
 
-| Operation | ADMIN | OPERATOR | VIEWER |
-|-----------|-------|----------|--------|
-| User CRUD | Yes | No | No |
-| Station CRUD | Yes | Yes | Read |
-| Sensor CRUD | Yes | Yes | Read |
-| Observation Write | Yes | Yes | No |
-| Observation Read | Yes | Yes | Yes |
-| Threshold CRUD | Yes | Yes | Read |
-| Alarm ACK/Close | Yes | Yes | No |
-| Alarm Read | Yes | Yes | Yes |
-| Audit Log Read | Yes | Yes | No |
+| Capability | ADMIN | OPERATOR | VIEWER |
+| --- | --- | --- | --- |
+| User/org/department management | Full | No | No |
+| Station/sensor management | Full | Create/update/read | Read |
+| Observation write | Yes | Yes | No |
+| Observation read | Yes | Yes | Yes |
+| Threshold management | Full | Create/update/read | Read |
+| Alarm ACK/close | Yes | Yes | No |
+| Resource and dispatch management | Full | Create/update/read | Read |
+| AI query and plan read | Yes | Yes | Yes |
+| Knowledge document upload/delete | Yes | No | No |
+| Audit log read | Yes | Yes | No |
 
-## MySQL Support
+## WebSocket and Streaming
 
-To use MySQL instead of PostgreSQL:
+- Alarm WebSocket: `ws://localhost:8080/ws/alarms`
+- AI flood-query SSE: `POST /api/v1/flood/query/stream`
 
-1. Create MySQL database:
-```sql
-CREATE DATABASE water_info CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
+The Nginx config disables buffering for SSE and forwards WebSocket upgrade headers.
 
-2. Create MySQL migration file at `src/main/resources/db/migration/mysql/V1__init.sql`
-   (Note: the PostgreSQL `V1/V2` scripts use PostgreSQL-specific features such as `JSONB`, partial indexes, and `UUID[]`. They are not directly portable to MySQL.)
+## Testing
 
-3. Run with MySQL profile:
 ```bash
-mvn spring-boot:run -Dspring.profiles.active=mysql
+mvn test
+mvn test -Dtest=StationServiceTest
+mvn test -Dtest=StationServiceTest#shouldCreateStationSuccessfully
 ```
 
-## Observation Time Series Partitioning (Optional)
+Some tests use Testcontainers and require Docker.
 
-For high-volume observation data, consider:
-- PostgreSQL: Use native table partitioning by month
-- TimescaleDB: Use hypertables for automatic partitioning
+## Docker
 
-Example partition setup (not included in V1):
-```sql
--- Convert to partitioned table
-CREATE TABLE observation_new (LIKE observation INCLUDING ALL)
-PARTITION BY RANGE (observed_at);
+The root `docker-compose.yml` builds this service as `platform` and injects production profile settings:
 
--- Create monthly partitions
-CREATE TABLE observation_2024_01 PARTITION OF observation_new
-FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');
+```bash
+docker-compose build platform
+docker-compose up -d postgres redis platform
+docker-compose logs -f platform
 ```
 
 ## Security Notes
 
-1. **Change default admin password immediately after first deployment**
-2. **Use strong JWT secret in production** (at least 256 bits)
-3. **Enable HTTPS in production**
-4. **Review and restrict CORS settings for production**
-
-## License
-
-Proprietary - All Rights Reserved
+1. Change the default admin password after first startup.
+2. Use a strong JWT secret in every non-local environment.
+3. Keep production CORS, rate-limit, and HTTPS settings restrictive.
+4. Do not expose Swagger/Knife4j publicly unless access is controlled.
+5. Keep AI knowledge-base write endpoints administrator-only.
