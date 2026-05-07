@@ -8,14 +8,14 @@ This is a **Smart Water Management and Flood Emergency Response System** with a 
 
 - **water-info-platform** (Spring Boot 3.2.2, Java 17): REST API for station management, observations, alarms, thresholds, RBAC
 - **water-info-ai** (Python 3.11, FastAPI, LangGraph): Multi-agent AI system for flood emergency plan generation
-- **water-info-admin** (Vue 3, TypeScript, Vite): Admin dashboard frontend with Element Plus UI
+- **water-info-admin** (Vue 3, TypeScript, Vite): Admin dashboard frontend with Element Plus UI (port 5175)
 
 ## Architecture
 
 ### Service Communication
 
 ```
-Frontend (:5173) → Nginx (:80) → Spring Boot (:8080) / FastAPI AI (:8100)
+Frontend (:5175) → Nginx (:80) → Spring Boot (:8080) / FastAPI AI (:8100)
                                          ↕                    ↕
                                     PostgreSQL 15         PostgreSQL 15 (direct read via asyncpg)
                                     Redis 7               Redis 7 (sessions)

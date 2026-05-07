@@ -21,20 +21,24 @@ async def resource_dispatcher_node(state: dict) -> dict:
     plan_resources = _coerce_allocations(getattr(plan, "resources", [])) if plan else []
 
     available: list[dict[str, Any]] = []
+    inventory_query_failed = False
     with TracedCall(
         phase="tool_call",
         tool_name="query_available_resources",
         title="查询可用资源库存",
     ) as trace:
-        result_str = await query_available_resources.ainvoke({})
         try:
+            result_str = await query_available_resources.ainvoke({})
             parsed = json.loads(result_str) if isinstance(result_str, str) else result_str
             available = parsed.get("data", []) if isinstance(parsed, dict) else parsed
             if not isinstance(available, list):
                 available = []
-        except (json.JSONDecodeError, TypeError):
+            trace.complete(output_summary=f"{len(available)} 项可用资源")
+        except Exception as exc:
             available = []
-        trace.complete(output_summary=f"{len(available)} 项可用资源")
+            inventory_query_failed = True
+            trace.trace["status"] = "failed"
+            trace.trace["detail"] = f"库存查询失败，已按预案资源需求降级生成调度建议：{str(exc)[:160]}"
     traces.append(trace.trace)
 
     resources = _match_plan_resources(plan_resources, available)
@@ -52,6 +56,8 @@ async def resource_dispatcher_node(state: dict) -> dict:
 
     llm = get_llm()
     message = f"已制定 {len(resources)} 项资源调度安排"
+    if inventory_query_failed:
+        message += "（库存接口异常，已使用预案资源需求降级生成）"
     if llm.is_enabled and available:
         refined = await _refine_with_llm(state, plan, available, resources)
         if refined:

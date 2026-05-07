@@ -13,7 +13,12 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
     mkdir -p "$PGDATA"
     chown -R postgres:postgres "$PGDATA"
 
-    su-exec postgres initdb --username="$POSTGRES_USER" --pwfile=<(echo "$POSTGRES_PASSWORD") --encoding=UTF8 --locale=C
+    # Write password to a temp file (process substitution fails under su-exec on Alpine)
+    pwfile=$(mktemp)
+    echo "$POSTGRES_PASSWORD" > "$pwfile"
+    chown postgres:postgres "$pwfile"
+    su-exec postgres initdb --username="$POSTGRES_USER" --pwfile="$pwfile" --encoding=UTF8 --locale=C
+    rm -f "$pwfile"
 
     # Configure password auth
     {
@@ -33,7 +38,7 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
     su-exec postgres pg_ctl -D "$PGDATA" -o "-c listen_addresses=''" -w start
 
     if [ "$POSTGRES_DB" != "postgres" ]; then
-        su-exec postgres createdb -O "$POSTGRES_USER" "$POSTGRES_DB"
+        su-exec postgres createdb --username="$POSTGRES_USER" -O "$POSTGRES_USER" "$POSTGRES_DB"
     fi
 
     # Run init scripts

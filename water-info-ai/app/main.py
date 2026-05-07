@@ -155,6 +155,54 @@ def _build_initial_state(
     }
 
 
+def _normalize_history_messages(rows: list[dict]) -> list[dict[str, str]]:
+    """Keep only completed chat turns that are safe to pass back into the graph."""
+    messages: list[dict[str, str]] = []
+    for row in rows:
+        role = str(row.get("role") or "")
+        content = str(row.get("content") or "").strip()
+        status = str(row.get("status") or "completed")
+        if role not in {"user", "assistant"} or not content or status in {"failed", "streaming"}:
+            continue
+        messages.append({"role": role, "content": content})
+    return messages
+
+
+async def _load_session_history(session_id: str, db, sessions) -> list[dict[str, str]]:
+    """Load short-term dialogue history when LangGraph checkpointing is unavailable.
+
+    LangGraph's Postgres checkpointer already restores thread-scoped state by
+    thread_id=session_id. When it is active, adding Redis/DB history again would
+    duplicate old messages because the state reducer appends messages.
+    """
+    if get_langgraph_persistence().enabled:
+        return []
+
+    try:
+        history = _normalize_history_messages(await sessions.get_history(session_id))
+        if history:
+            return history
+    except Exception as exc:
+        logger.debug("[%s] Redis session history load skipped: %s", session_id, exc)
+
+    try:
+        rows = await db.get_conversation_messages(session_id, limit=20)
+        return _normalize_history_messages(rows)
+    except Exception as exc:
+        logger.debug("[%s] DB session history fallback skipped: %s", session_id, exc)
+        return []
+
+
+async def _save_short_term_turn(sessions, session_id: str, role: str, content: str) -> None:
+    """Mirror a completed chat turn into Redis short-term memory."""
+    if not content:
+        return
+    try:
+        await sessions.save_turn(session_id, role, content)
+    except Exception as exc:
+        logger.debug("[%s] Redis session turn save skipped: %s", session_id, exc)
+
+
 def _event_line(payload: dict) -> str:
     import json
 
@@ -371,9 +419,10 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
         session_id, title, user_id=user_id, username=username, title_source="auto_first_query"
     )
 
-    history = await sessions.get_history(session_id)
+    history = await _load_session_history(session_id, db, sessions)
     # Save user message with new schema
     await db.save_conversation_message(session_id, "user", request.query, message_type="chat", status="completed")
+    await _save_short_term_turn(sessions, session_id, "user", request.query)
 
     try:
         final_state = await flood_response_graph.ainvoke(
@@ -389,6 +438,7 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
     # Save assistant response
     response_content = final_state.get("final_response") or "处理完成"
     await db.save_conversation_message(session_id, "assistant", response_content, message_type="chat", status="completed")
+    await _save_short_term_turn(sessions, session_id, "assistant", response_content)
 
     # Persist plan and snapshot
     asyncio.create_task(_persist_result(session_id, final_state))
@@ -427,10 +477,11 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
             session_id, title, user_id=user_id, username=username, title_source="auto_first_query"
         )
 
-        history = await sessions.get_history(session_id)
+        history = await _load_session_history(session_id, db, sessions)
 
         # Save user message
         await db.save_conversation_message(session_id, "user", request.query, message_type="chat", status="completed")
+        await _save_short_term_turn(sessions, session_id, "user", request.query)
 
         # Create assistant placeholder message with streaming status
         assistant_msg_id = await db.save_conversation_message(
@@ -480,6 +531,7 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
                     assistant_msg_id, final_response, status="completed",
                     metadata=trace_metadata,
                 )
+                await _save_short_term_turn(sessions, session_id, "assistant", final_response)
                 # Persist plan and snapshot
                 asyncio.create_task(_persist_result(session_id, final_state))
             yield _event_line({"type": "agent_update", "agent": "__done__", "status": "done"})

@@ -289,7 +289,7 @@ async def data_analyst_node(state: dict) -> dict:
         bundle = await _build_deterministic_bundle(state)
         overview = bundle["overview_data"]
         tc.complete(
-            output_summary=f"{len(overview.get('stations', []))} 个站点, {len(overview.get('alarms', []))} 条告警",
+            output_summary=f"{len(overview.get('stations', []))} 个站点, {len(overview.get('active_alarms', []))} 条告警",
         )
     traces.append(tc.trace)
 

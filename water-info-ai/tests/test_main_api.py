@@ -51,6 +51,7 @@ def _build_db_mock():
         ensure_or_create_session=AsyncMock(),
         save_conversation_message=AsyncMock(side_effect=[101, 102, 103]),
         update_message_content=AsyncMock(),
+        get_conversation_messages=AsyncMock(return_value=[]),
         save_conversation_snapshot=AsyncMock(),
         save_emergency_plan=AsyncMock(),
         save_resource_allocations=AsyncMock(),
@@ -283,7 +284,37 @@ def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():
     db_mock.save_resource_allocations.assert_awaited_once()
     db_mock.save_notifications.assert_awaited_once()
     session_mock.get_history.assert_awaited_once_with("session-001")
+    assert session_mock.save_turn.await_count == 2
+    session_mock.save_turn.assert_any_await("session-001", "user", "分析当前水情并生成预案")
+    session_mock.save_turn.assert_any_await("session-001", "assistant", "已完成防汛研判并生成响应预案。")
     assert db_mock.save_conversation_message.await_count == 2
+
+
+def test_flood_query_uses_database_history_when_redis_history_is_empty():
+    db_mock = _build_db_mock()
+    db_mock.get_conversation_messages = AsyncMock(return_value=[
+        {"role": "user", "content": "上一轮要求关注北闸站", "status": "completed"},
+        {"role": "assistant", "content": "已记录北闸站为重点。", "status": "completed"},
+        {"role": "assistant", "content": "", "status": "streaming"},
+    ])
+    session_mock = _build_session_mock(history=[])
+    graph = StubGraph(final_state={"final_response": "我会延续上一轮北闸站上下文。"})
+
+    with _patched_client(db_mock=db_mock, session_mock=session_mock, graph=graph) as (client, _db, _session, _graph):
+        response = client.post(
+            "/api/v1/flood/query",
+            json={"query": "继续刚才的问题", "session_id": "session-db-history"},
+        )
+
+    assert response.status_code == 200
+    initial_state = graph.ainvoke.await_args.args[0]
+    assert initial_state["messages"] == [
+        {"role": "user", "content": "上一轮要求关注北闸站"},
+        {"role": "assistant", "content": "已记录北闸站为重点。"},
+        {"role": "user", "content": "继续刚才的问题"},
+    ]
+    session_mock.save_turn.assert_any_await("session-db-history", "user", "继续刚才的问题")
+    session_mock.save_turn.assert_any_await("session-db-history", "assistant", "我会延续上一轮北闸站上下文。")
 
 
 def test_flood_query_does_not_persist_plan_for_non_plan_manual_query():

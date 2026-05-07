@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">运行时拓扑</title>
+  <desc id="desc">展示浏览器、Nginx、前端、业务平台、AI 服务、PostgreSQL、Redis 和外部 LLM 的运行拓扑。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#1d4ed8"/></marker>
+    <style>
+      .bg{fill:#f8fafc}.title{font:700 28px sans-serif;fill:#0f172a}.box{fill:#fff;stroke:#1d4ed8;stroke-width:2.5;rx:10}
+      .store{fill:#eff6ff;stroke:#0284c7;stroke-width:2.5;rx:10}.edge{stroke:#1d4ed8;stroke-width:2.4;fill:none;marker-end:url(#arrow)}.dash{stroke-dasharray:8 7}
+      .h{font:700 18px sans-serif;fill:#0f172a}.t{font:14px sans-serif;fill:#334155}.p{font:12px sans-serif;fill:#64748b}
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="675"/><text x="60" y="58" class="title">运行时拓扑</text>
+  <rect class="box" x="65" y="160" width="170" height="95"/><text x="112" y="197" class="h">浏览器</text><text x="108" y="226" class="t">用户访问</text>
+  <rect class="box" x="315" y="135" width="190" height="145"/><text x="378" y="174" class="h">Nginx</text><text x="355" y="203" class="t">:80</text><text x="352" y="226" class="t">API / SSE / WS</text><text x="352" y="249" class="p">统一入口</text>
+  <rect class="box" x="590" y="70" width="220" height="105"/><text x="635" y="108" class="h">water-info-admin</text><text x="656" y="137" class="t">Vue SPA</text><text x="668" y="158" class="p">容器内 :80</text>
+  <rect class="box" x="590" y="235" width="220" height="120"/><text x="632" y="273" class="h">water-info-platform</text><text x="655" y="302" class="t">Spring Boot</text><text x="672" y="324" class="p">:8080</text>
+  <rect class="box" x="590" y="420" width="220" height="120"/><text x="655" y="458" class="h">water-info-ai</text><text x="654" y="487" class="t">FastAPI</text><text x="672" y="509" class="p">:8100</text>
+  <rect class="store" x="925" y="210" width="190" height="95"/><text x="974" y="248" class="h">PostgreSQL</text><text x="985" y="277" class="t">water_info</text>
+  <rect class="store" x="925" y="345" width="190" height="85"/><text x="999" y="382" class="h">Redis</text><text x="980" y="407" class="t">缓存 / 会话</text>
+  <rect class="box" x="925" y="480" width="190" height="85"/><text x="981" y="517" class="h">LLM API</text><text x="968" y="542" class="t">DeepSeek 等</text>
+  <path class="edge" d="M235 208H315"/><path class="edge" d="M505 175L590 122"/><path class="edge" d="M505 240L590 295"/><path class="edge" d="M810 295H925"/><path class="edge" d="M810 320C870 335 880 375 925 388"/><path class="edge" d="M700 355V420"/><path class="edge dash" d="M810 480C875 455 870 260 925 258"/><path class="edge" d="M810 500C875 520 875 522 925 522"/>
+  <text x="326" y="323" class="p">SSE: 关闭缓冲</text><text x="326" y="346" class="p">WebSocket: Upgrade 透传</text>
+</svg>
+

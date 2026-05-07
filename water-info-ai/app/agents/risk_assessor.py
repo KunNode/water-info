@@ -92,13 +92,8 @@ def _from_structured_data(state: dict) -> RiskAssessment:
     weather = state.get("weather_forecast") or {}
     forecast = weather.get("forecast", weather)
     focus_station = state.get("focus_station")
-    stations = [focus_station] if focus_station else overview.get("stations", [])
+    stations = overview.get("stations", [])
     alarms = overview.get("active_alarms", [])
-    if focus_station:
-        alarms = [
-            alarm for alarm in alarms
-            if str(alarm.get("station_id")) == str(focus_station.get("id"))
-        ]
     forecast_24h = float(forecast.get("total_precip_24h_mm", 0))
 
     max_wl_score = 0.0
