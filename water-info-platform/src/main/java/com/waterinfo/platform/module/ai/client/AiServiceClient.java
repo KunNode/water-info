@@ -322,6 +322,86 @@ public class AiServiceClient {
                         .doOnError(e -> log.error("Error deleting conversation {}: {}", sessionId, e.getMessage())));
     }
 
+    /**
+     * List visible memory items for the current user/session.
+     */
+    public Mono<JsonNode> listMemory(String sessionId, int limit, int offset) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.get()
+                        .uri(u -> {
+                            var builder = u.path("/api/v1/memory")
+                                    .queryParam("limit", limit)
+                                    .queryParam("offset", offset);
+                            if (sessionId != null && !sessionId.isBlank()) {
+                                builder.queryParam("session_id", sessionId);
+                            }
+                            return builder.build();
+                        })
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error listing memory: {}", e.getMessage())));
+    }
+
+    /**
+     * List current user's long-term memory items.
+     */
+    public Mono<JsonNode> listUserMemory(int limit, int offset) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.get()
+                        .uri(u -> u.path("/api/v1/memory/user")
+                                .queryParam("limit", limit)
+                                .queryParam("offset", offset)
+                                .build())
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error listing user memory: {}", e.getMessage())));
+    }
+
+    /**
+     * Update or disable a visible memory item.
+     */
+    public Mono<JsonNode> updateMemory(long memoryId, java.util.Map<String, Object> body, String sessionId) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.patch()
+                        .uri(u -> {
+                            var builder = u.path("/api/v1/memory/{memoryId}");
+                            if (sessionId != null && !sessionId.isBlank()) {
+                                builder.queryParam("session_id", sessionId);
+                            }
+                            return builder.build(memoryId);
+                        })
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .bodyValue(body == null ? java.util.Map.of() : body)
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error updating memory {}: {}", memoryId, e.getMessage())));
+    }
+
+    /**
+     * Delete a visible memory item.
+     */
+    public Mono<Void> deleteMemory(long memoryId, String sessionId) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.delete()
+                        .uri(u -> {
+                            var builder = u.path("/api/v1/memory/{memoryId}");
+                            if (sessionId != null && !sessionId.isBlank()) {
+                                builder.queryParam("session_id", sessionId);
+                            }
+                            return builder.build(memoryId);
+                        })
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(Void.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error deleting memory {}: {}", memoryId, e.getMessage())));
+    }
+
     // ── Knowledge base ──────────────────────────────────────────────────────
 
     public Mono<JsonNode> uploadKnowledgeDocument(MultipartFile file, String title, String sourceUri) {

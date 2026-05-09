@@ -756,6 +756,73 @@ class DatabaseService:
         )
         return [self._normalize_memory_row(row) for row in rows]
 
+    async def update_memory_item(
+        self,
+        memory_id: int,
+        *,
+        namespaces: list[str],
+        item_type: str | None = None,
+        content: str | None = None,
+        importance: float | None = None,
+        confidence: float | None = None,
+        metadata: dict | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any] | None:
+        if not namespaces:
+            return None
+
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                """
+                SELECT id, item_type, content
+                FROM memory_item
+                WHERE id = $1
+                  AND namespace = ANY($2)
+                  AND status != 'deleted'
+                """,
+                memory_id,
+                namespaces,
+            )
+            if not existing:
+                return None
+
+            next_type = (item_type or existing["item_type"] or "fact").strip()
+            next_content = content.strip() if content is not None else existing["content"]
+            if not next_type or not next_content:
+                return None
+
+            content_hash = hashlib.sha256(f"{next_type}:{next_content}".encode("utf-8")).hexdigest()
+            row = await conn.fetchrow(
+                """
+                UPDATE memory_item
+                SET item_type = $3,
+                    content = $4,
+                    importance = COALESCE($5, importance),
+                    confidence = COALESCE($6, confidence),
+                    metadata = COALESCE($7::jsonb, metadata),
+                    status = COALESCE($8, status),
+                    content_hash = $9,
+                    memory_key = $10,
+                    updated_at = NOW()
+                WHERE id = $1
+                  AND namespace = ANY($2)
+                RETURNING id, namespace, item_type, content, importance, confidence, metadata,
+                          source_session_id, updated_at, importance AS score
+                """,
+                memory_id,
+                namespaces,
+                next_type,
+                next_content,
+                importance,
+                confidence,
+                json.dumps(metadata, ensure_ascii=False) if metadata is not None else None,
+                status,
+                content_hash,
+                content_hash[:32],
+            )
+        return self._normalize_memory_row(dict(row)) if row else None
+
     async def delete_memory_item(self, memory_id: int, namespaces: list[str] | None = None) -> bool:
         if namespaces:
             result = await self._fetchval(

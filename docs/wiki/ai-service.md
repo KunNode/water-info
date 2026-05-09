@@ -72,7 +72,10 @@
 - `POST /api/v1/kb/search`
 - `GET /api/v1/plans`
 - `GET /api/v1/conversations`
-- `GET /api/v1/memory`
+- `GET /api/v1/memory?session_id=...`
+- `GET /api/v1/memory/user`
+- `PATCH /api/v1/memory/{memory_id}`
+- `DELETE /api/v1/memory/{memory_id}`
 - `POST /api/v1/flood/risk-scan/trigger`
 
 生产访问通常通过 Java 平台代理，不建议让浏览器直接面向 AI 服务。

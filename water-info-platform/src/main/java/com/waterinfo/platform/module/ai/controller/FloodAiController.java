@@ -160,6 +160,48 @@ public class FloodAiController {
                 .then(Mono.just(ApiResponse.<Void>success(null)));
     }
 
+    @Operation(summary = "记忆列表", description = "获取当前用户或会话可见的 AI 长期记忆")
+    @GetMapping("/memory")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<JsonNode>> listMemory(
+            @RequestParam(value = "session_id", required = false) String sessionId,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        return aiServiceClient.listMemory(sessionId, limit, offset)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "用户记忆列表", description = "获取当前用户命名空间下的 AI 长期记忆")
+    @GetMapping("/memory/user")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<JsonNode>> listUserMemory(
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        return aiServiceClient.listUserMemory(limit, offset)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "更新记忆", description = "更新或禁用一条 AI 长期记忆")
+    @PatchMapping("/memory/{memoryId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<JsonNode>> updateMemory(
+            @PathVariable long memoryId,
+            @RequestParam(value = "session_id", required = false) String sessionId,
+            @RequestBody java.util.Map<String, Object> body) {
+        return aiServiceClient.updateMemory(memoryId, body, sessionId)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "删除记忆", description = "软删除一条 AI 长期记忆")
+    @DeleteMapping("/memory/{memoryId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<Void>> deleteMemory(
+            @PathVariable long memoryId,
+            @RequestParam(value = "session_id", required = false) String sessionId) {
+        return aiServiceClient.deleteMemory(memoryId, sessionId)
+                .then(Mono.just(ApiResponse.<Void>success(null)));
+    }
+
     // ── Knowledge base ──────────────────────────────────────────────────────
 
     @Operation(summary = "上传知识文档", description = "上传文档到 AI 知识库并异步触发切块与索引")

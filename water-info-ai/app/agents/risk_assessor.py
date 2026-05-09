@@ -91,7 +91,6 @@ def _from_structured_data(state: dict) -> RiskAssessment:
     overview = state.get("overview_data") or {}
     weather = state.get("weather_forecast") or {}
     forecast = weather.get("forecast", weather)
-    focus_station = state.get("focus_station")
     stations = overview.get("stations", [])
     alarms = overview.get("active_alarms", [])
     forecast_24h = float(forecast.get("total_precip_24h_mm", 0))

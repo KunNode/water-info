@@ -159,6 +159,15 @@ class MemoryItemResponse(BaseModel):
     updated_at: str | None = None
 
 
+class MemoryItemUpdateRequest(BaseModel):
+    item_type: str | None = None
+    content: str | None = None
+    importance: float | None = Field(default=None, ge=0.0, le=1.0)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    metadata: dict | None = None
+    status: str | None = Field(default=None, pattern="^(active|disabled|deleted)$")
+
+
 class KBDocumentUploadResponse(BaseModel):
     document_id: str
     job_id: str

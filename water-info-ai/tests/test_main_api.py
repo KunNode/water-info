@@ -68,6 +68,7 @@ def _build_db_mock():
         }),
         create_kb_ingest_job=AsyncMock(return_value="job-001"),
         list_memory_items=AsyncMock(return_value=[]),
+        update_memory_item=AsyncMock(return_value=None),
         delete_memory_item=AsyncMock(return_value=True),
     )
 
@@ -523,6 +524,56 @@ def test_memory_endpoint_lists_visible_memories():
     assert response.status_code == 200
     assert response.json()[0]["content"] == "用户偏好先看翠屏湖站点。"
     db_mock.list_memory_items.assert_awaited_once()
+
+
+def test_user_memory_endpoint_lists_only_current_user_namespace():
+    db_mock = _build_db_mock()
+    db_mock.list_memory_items = AsyncMock(return_value=[
+        {
+            "id": 8,
+            "namespace": "user:u-1:flood_assistant",
+            "item_type": "fact",
+            "content": "用户关注北闸站。",
+            "importance": 0.7,
+            "confidence": 0.8,
+            "metadata": {},
+            "source_session_id": "session-002",
+            "updated_at": "2026-05-02T00:00:00+00:00",
+        }
+    ])
+    with _patched_client(db_mock=db_mock) as (client, _db_mock, _session_mock, _graph):
+        response = client.get("/api/v1/memory/user", headers={"X-User-Id": "u-1"})
+
+    assert response.status_code == 200
+    assert response.json()[0]["namespace"] == "user:u-1:flood_assistant"
+    db_mock.list_memory_items.assert_awaited_once()
+    assert db_mock.list_memory_items.await_args.kwargs["namespaces"] == ["user:u-1:flood_assistant"]
+
+
+def test_memory_endpoint_updates_visible_memory():
+    db_mock = _build_db_mock()
+    db_mock.update_memory_item = AsyncMock(return_value={
+        "id": 7,
+        "namespace": "user:u-1:flood_assistant",
+        "item_type": "preference",
+        "content": "用户偏好先看北闸站。",
+        "importance": 0.9,
+        "confidence": 0.9,
+        "metadata": {"reason": "manual_correction"},
+        "source_session_id": "session-001",
+        "updated_at": "2026-05-02T00:00:00+00:00",
+    })
+    with _patched_client(db_mock=db_mock) as (client, _db_mock, _session_mock, _graph):
+        response = client.patch(
+            "/api/v1/memory/7?session_id=session-001",
+            headers={"X-User-Id": "u-1"},
+            json={"content": "用户偏好先看北闸站。", "importance": 0.9, "metadata": {"reason": "manual_correction"}},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "用户偏好先看北闸站。"
+    db_mock.update_memory_item.assert_awaited_once()
+    assert db_mock.update_memory_item.await_args.kwargs["content"] == "用户偏好先看北闸站。"
 
 
 def test_memory_endpoint_deletes_visible_memory():

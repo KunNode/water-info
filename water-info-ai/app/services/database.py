@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -397,7 +396,10 @@ class DatabaseService:
                 await conn.execute("DELETE FROM emergency_action WHERE plan_id = $1", plan_id)
                 for a in actions:
                     await conn.execute("""
-                        INSERT INTO emergency_action (plan_id, action_id, action_type, description, priority, responsible_dept, deadline_minutes, status)
+                        INSERT INTO emergency_action (
+                            plan_id, action_id, action_type, description, priority,
+                            responsible_dept, deadline_minutes, status
+                        )
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                     """, plan_id, a.get("action_id", ""), a.get("action_type", ""),
                         a.get("description", ""), a.get("priority", 3),
@@ -413,7 +415,10 @@ class DatabaseService:
                 await conn.execute("DELETE FROM resource_allocation WHERE plan_id = $1", plan_id)
                 for r in resources:
                     await conn.execute("""
-                        INSERT INTO resource_allocation (plan_id, resource_type, resource_name, quantity, source_location, target_location, eta_minutes)
+                        INSERT INTO resource_allocation (
+                            plan_id, resource_type, resource_name, quantity,
+                            source_location, target_location, eta_minutes
+                        )
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
                     """, plan_id, r.get("resource_type", ""), r.get("resource_name", ""),
                         r.get("quantity", 0), r.get("source_location", ""),

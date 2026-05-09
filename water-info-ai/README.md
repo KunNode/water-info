@@ -232,7 +232,9 @@ uv run python -m app.rag.cli ingest /path/to/manual.md
 
 ### Memory
 
-- `GET /api/v1/memory`
+- `GET /api/v1/memory?session_id=...`
+- `GET /api/v1/memory/user`
+- `PATCH /api/v1/memory/{memory_id}`
 - `DELETE /api/v1/memory/{memory_id}`
 
 Memory items are scoped by user and session namespaces. They are useful for preferences, previous decisions, and recent conversation continuity, but current risk assessment must still rely on live data and rules.

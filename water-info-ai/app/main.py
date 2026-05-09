@@ -37,6 +37,7 @@ from app.models import (
     KBSearchRequest,
     KBStatsResponse,
     MemoryItemResponse,
+    MemoryItemUpdateRequest,
     PlanDetailResponse,
     PlanExecuteRequest,
     PlanExecuteResponse,
@@ -135,6 +136,20 @@ def _risk_level_value(assessment: RiskAssessment | None) -> str:
     if not assessment:
         return "none"
     return assessment.risk_level.value
+
+
+def _memory_item_response(row: dict) -> MemoryItemResponse:
+    return MemoryItemResponse(
+        id=int(row["id"]),
+        namespace=str(row.get("namespace") or ""),
+        item_type=str(row.get("item_type") or "fact"),
+        content=str(row.get("content") or ""),
+        importance=float(row.get("importance") or 0.5),
+        confidence=float(row.get("confidence") or 0.5),
+        metadata=row.get("metadata") or {},
+        source_session_id=str(row.get("source_session_id") or "") or None,
+        updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
+    )
 
 
 def _build_initial_state(
@@ -850,20 +865,43 @@ async def list_memory(http_request: Request, session_id: str | None = None, limi
     user_id, _ = _get_user_from_request(http_request)
     namespaces = build_memory_namespaces(user_id, session_id or "")
     rows = await get_db_service().list_memory_items(namespaces=namespaces, limit=limit, offset=offset)
-    return [
-        MemoryItemResponse(
-            id=int(row["id"]),
-            namespace=str(row.get("namespace") or ""),
-            item_type=str(row.get("item_type") or "fact"),
-            content=str(row.get("content") or ""),
-            importance=float(row.get("importance") or 0.5),
-            confidence=float(row.get("confidence") or 0.5),
-            metadata=row.get("metadata") or {},
-            source_session_id=str(row.get("source_session_id") or "") or None,
-            updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
-        )
-        for row in rows
-    ]
+    return [_memory_item_response(row) for row in rows]
+
+
+@app.get("/api/v1/memory/user", response_model=list[MemoryItemResponse])
+async def list_user_memory(http_request: Request, limit: int = 50, offset: int = 0):
+    """List active long-term memory items owned by the current user namespace."""
+    user_id, _ = _get_user_from_request(http_request)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="缺少用户身份")
+    namespace = f"user:{user_id}:flood_assistant"
+    rows = await get_db_service().list_memory_items(namespaces=[namespace], limit=limit, offset=offset)
+    return [_memory_item_response(row) for row in rows]
+
+
+@app.patch("/api/v1/memory/{memory_id}", response_model=MemoryItemResponse)
+async def update_memory(memory_id: int, request: MemoryItemUpdateRequest, http_request: Request, session_id: str | None = None):
+    """Update or disable a memory item in the current user's visible namespace."""
+    if request.content is not None and not request.content.strip():
+        raise HTTPException(status_code=400, detail="记忆内容不能为空")
+    if request.item_type is not None and not request.item_type.strip():
+        raise HTTPException(status_code=400, detail="记忆类型不能为空")
+
+    user_id, _ = _get_user_from_request(http_request)
+    namespaces = build_memory_namespaces(user_id, session_id or "")
+    row = await get_db_service().update_memory_item(
+        memory_id,
+        namespaces=namespaces,
+        item_type=request.item_type,
+        content=request.content,
+        importance=request.importance,
+        confidence=request.confidence,
+        metadata=request.metadata,
+        status=request.status,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="记忆不存在")
+    return _memory_item_response(row)
 
 
 @app.delete("/api/v1/memory/{memory_id}")
