@@ -8,12 +8,18 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 class FloodQueryRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    query: str = Field(..., description="用户请求，如：'分析当前水情并生成应急预案'")
+    query: str = Field(
+        ...,
+        description="用户请求，如：'分析当前水情并生成应急预案'",
+        validation_alias=AliasChoices("query", "message"),
+        serialization_alias="query",
+    )
     session_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices("session_id", "sessionId"),
         serialization_alias="session_id",
     )
+    stream: bool = False
 
 
 class FloodQueryResponse(BaseModel):

@@ -50,7 +50,8 @@ export interface PlanInfo {
 }
 
 const LOCAL_STORAGE_KEYS = {
-  CURRENT_SESSION_ID: 'water_ai_current_session_id',
+  CURRENT_SESSION_ID: 'fm-ai-active-session-id',
+  LEGACY_CURRENT_SESSION_ID: 'water_ai_current_session_id',
   INPUT_DRAFT: 'water_ai_input_draft',
   DRAWER_OPEN: 'water_ai_drawer_open',
 }
@@ -105,6 +106,7 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
   // ── Initialize from localStorage ──────────────────────────────────
   function initFromLocalStorage() {
     const savedSessionId = localStorage.getItem(LOCAL_STORAGE_KEYS.CURRENT_SESSION_ID)
+      || localStorage.getItem(LOCAL_STORAGE_KEYS.LEGACY_CURRENT_SESSION_ID)
     const savedDraft = localStorage.getItem(LOCAL_STORAGE_KEYS.INPUT_DRAFT)
     const savedDrawerOpen = localStorage.getItem(LOCAL_STORAGE_KEYS.DRAWER_OPEN)
 
@@ -120,6 +122,7 @@ export const useAiConversationStore = defineStore('aiConversation', () => {
     } else {
       localStorage.removeItem(LOCAL_STORAGE_KEYS.CURRENT_SESSION_ID)
     }
+    localStorage.removeItem(LOCAL_STORAGE_KEYS.LEGACY_CURRENT_SESSION_ID)
     localStorage.setItem(LOCAL_STORAGE_KEYS.INPUT_DRAFT, inputDraft.value)
     localStorage.setItem(LOCAL_STORAGE_KEYS.DRAWER_OPEN, String(drawerOpen.value))
   }

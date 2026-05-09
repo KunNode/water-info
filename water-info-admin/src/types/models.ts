@@ -355,8 +355,9 @@ export interface AuditLogQuery {
 
 // ─── AI / Flood Plan ───
 export interface FloodQueryRequest {
-  query: string
+  message: string
   sessionId?: string
+  stream?: boolean
 }
 
 export interface FloodPlan {

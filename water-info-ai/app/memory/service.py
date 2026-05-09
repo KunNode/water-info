@@ -45,6 +45,18 @@ def to_store_namespace(namespace: str) -> tuple[str, ...]:
     return tuple(part for part in namespace.split(":") if part)
 
 
+def _normalize_chat_messages(rows: list[dict], *, limit: int = 10) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
+    for row in rows:
+        role = str(row.get("role") or "")
+        content = str(row.get("content") or "").strip()
+        status = str(row.get("status") or "completed")
+        if role not in {"user", "assistant"} or not content or status in {"failed", "streaming"}:
+            continue
+        messages.append({"role": role, "content": content[:1000]})
+    return messages[-limit:]
+
+
 class MemoryService:
     """Loads concise memory context and writes high-value memories after turns."""
 
@@ -76,6 +88,18 @@ class MemoryService:
             snapshot = await db.get_conversation_snapshot(session_id)
         except Exception as exc:
             logger.debug("[%s] memory snapshot load skipped: %s", session_id, exc)
+
+        recent_session_messages = recent_messages or []
+        if len(recent_session_messages) <= 1 and hasattr(db, "get_conversation_messages"):
+            try:
+                db_messages = _normalize_chat_messages(
+                    await db.get_conversation_messages(session_id, limit=10),
+                    limit=10,
+                )
+                if db_messages:
+                    recent_session_messages = db_messages
+            except Exception as exc:
+                logger.debug("[%s] recent conversation messages load skipped: %s", session_id, exc)
 
         embedding: list[float] | None = None
         embedder = get_embedding_client()
@@ -118,7 +142,7 @@ class MemoryService:
 
         return MemoryContext(
             summary=summary,
-            recent_messages=recent_messages or [],
+            recent_messages=recent_session_messages,
             memories=memories,
             snapshot=snapshot,
         )

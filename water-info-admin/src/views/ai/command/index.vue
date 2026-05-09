@@ -124,7 +124,7 @@ async function handleSessionSelect(newSessionId: string) {
   resetStreamBuffers()
   reset()
 
-  router.replace({ name: 'AICommandSession', params: { sessionId: newSessionId } })
+  syncRouteSession(newSessionId)
 }
 
 function handleNewSession() {
@@ -133,7 +133,7 @@ function handleNewSession() {
   resetStreamBuffers()
   reset()
 
-  router.replace({ name: 'AICommand' })
+  router.replace({ name: 'AICommand', query: {} })
 }
 
 function toggleDrawer() {
@@ -259,13 +259,16 @@ onMounted(async () => {
   store.initFromLocalStorage()
   await store.fetchSessions()
 
-  const sessionIdFromRoute = route.params.sessionId as string | undefined
+  const sessionIdFromRoute = typeof route.query.sessionId === 'string'
+    ? route.query.sessionId
+    : undefined
   if (sessionIdFromRoute) {
     await store.loadSession(sessionIdFromRoute)
     startTime.value = new Date().toLocaleTimeString()
   } else if (store.currentSessionId) {
     await store.loadSession(store.currentSessionId)
     startTime.value = new Date().toLocaleTimeString()
+    syncRouteSession(store.currentSessionId)
   }
 
   situationStore.connectAssessmentStream()
@@ -361,8 +364,13 @@ function bindSession(sessionId: string) {
   if (!store.currentSessionId) {
     store.setSessionId(sessionId)
     startTime.value = new Date().toLocaleTimeString()
-    router.replace({ name: 'AICommandSession', params: { sessionId } })
   }
+  syncRouteSession(store.currentSessionId || sessionId)
+}
+
+function syncRouteSession(sessionId: string) {
+  if (!sessionId || route.query.sessionId === sessionId) return
+  router.replace({ name: 'AICommand', query: { ...route.query, sessionId } })
 }
 
 function startThoughtStep(stepId: string, title: string, content = '') {
@@ -549,7 +557,10 @@ async function sendQuery(queryText: string) {
   reset()
 
   try {
-    const payload: { query: string; sessionId?: string } = { query: queryText }
+    const payload: { message: string; sessionId?: string; stream: boolean } = {
+      message: queryText,
+      stream: true,
+    }
     if (store.currentSessionId) payload.sessionId = store.currentSessionId
     await start(getStreamUrl(), payload)
     await store.fetchSessions()

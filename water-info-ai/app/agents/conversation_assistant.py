@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 
 from app.services.llm import get_llm
 
@@ -30,28 +29,13 @@ def _fallback_reply(query: str) -> str:
     )
 
 
-def _session_memory_reply(query: str, memory_context: dict) -> str | None:
-    recent_messages = memory_context.get("recent_session_messages") or []
-    recent_user_text = "\n".join(
-        str(item.get("content", "")) for item in recent_messages if item.get("role") == "user"
-    )
-    if "临时口令" in query and "临时口令" in recent_user_text:
-        match = re.search(r"临时口令是([^。！？\n，,]+)", recent_user_text)
-        if match:
-            return f"你刚才在本轮会话里说的临时口令是：**{match.group(1).strip()}**。"
-    if any(word in query for word in ["我叫什么", "我的名字"]) and "名字" in recent_user_text:
-        match = re.search(r"(?:我的名字是|我叫)([^。！？\n，,]+)", recent_user_text)
-        if match:
-            return f"你刚才在本轮会话里说，你的名字是：**{match.group(1).strip()}**。"
-    return None
-
 
 async def conversation_assistant_node(state: dict) -> dict:
     query = str(state.get("user_query", ""))
     evidence = list(state.get("evidence_context") or [])
     memory_context = state.get("memory_context", {})
     llm = get_llm()
-    reply = _session_memory_reply(query, memory_context) or _fallback_reply(query)
+    reply = _fallback_reply(query)
 
     if llm.is_enabled:
         try:

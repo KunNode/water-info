@@ -8,6 +8,7 @@ can run its consistency validation and evidence dedup over every workflow path.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from unittest.mock import patch
 
 import pytest
@@ -46,6 +47,54 @@ async def test_conversation_assistant_uses_recent_session_memory_without_llm():
         })
 
     assert "蓝色水位线" in result["final_response_draft"]
+
+
+@pytest.mark.asyncio
+async def test_conversation_assistant_uses_same_session_assistant_alias_before_llm():
+    llm = SimpleNamespace(
+        is_enabled=True,
+        ainvoke=AsyncMock(return_value=SimpleNamespace(content="你好！我是防汛智能助手。")),
+    )
+
+    with patch("app.agents.conversation_assistant.get_llm", return_value=llm):
+        result = await conversation_assistant_node({
+            "user_query": "你是谁",
+            "memory_context": {
+                "recent_session_messages": [
+                    {"role": "user", "content": "你现在叫江西水利电力大学水宝宝"},
+                    {"role": "assistant", "content": "好的，收到！"},
+                    {"role": "user", "content": "你是谁"},
+                ]
+            },
+        })
+
+    assert "江西水利电力大学水宝宝" in result["final_response_draft"]
+    llm.ainvoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_conversation_assistant_does_not_use_long_term_memory_for_identity_alias():
+    llm = SimpleNamespace(
+        is_enabled=True,
+        ainvoke=AsyncMock(return_value=SimpleNamespace(content="我是江西水利电力大学水宝宝。")),
+    )
+
+    with patch("app.agents.conversation_assistant.get_llm", return_value=llm):
+        result = await conversation_assistant_node({
+            "user_query": "你是谁",
+            "memory_context": {
+                "recent_session_messages": [],
+                "long_term_memories": [
+                    {
+                        "type": "fact",
+                        "content": "用户曾在其他会话要求助手叫江西水利电力大学水宝宝。",
+                    }
+                ],
+            },
+        })
+
+    assert "江西水利电力大学水宝宝" not in result["final_response_draft"]
+    llm.ainvoke.assert_not_awaited()
 
 
 @pytest.mark.asyncio
