@@ -1,3 +1,5 @@
+const REMEMBER_USER_KEY = 'water_remember_user'
+const REMEMBER_PASS_KEY = 'water_remember_pass'
 const TOKEN_KEY = 'water_access_token'
 const REFRESH_TOKEN_KEY = 'water_refresh_token'
 const USER_KEY = 'water_user_info'
@@ -48,4 +50,22 @@ export function clearAuth(): void {
   removeToken()
   removeRefreshToken()
   removeUserInfo()
+}
+
+export function getRememberedUsername(): string | null {
+  return localStorage.getItem(REMEMBER_USER_KEY)
+}
+
+export function getRememberedPassword(): string | null {
+  return localStorage.getItem(REMEMBER_PASS_KEY)
+}
+
+export function setRememberedCredentials(username: string, password: string): void {
+  localStorage.setItem(REMEMBER_USER_KEY, username)
+  localStorage.setItem(REMEMBER_PASS_KEY, password)
+}
+
+export function clearRememberedCredentials(): void {
+  localStorage.removeItem(REMEMBER_USER_KEY)
+  localStorage.removeItem(REMEMBER_PASS_KEY)
 }
