@@ -7,6 +7,7 @@ import logging
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.agents._prompt import session_context_payload
 from app.plan import generate_plan_id, get_response_template
 from app.services.llm import get_llm
 from app.state import EmergencyAction, EmergencyPlan, NotificationRecord, ResourceAllocation, RiskLevel, to_plain_data
@@ -220,7 +221,7 @@ async def plan_generator_node(state: dict) -> dict:
                     "risk_assessment": to_plain_data(assessment),
                     "data_summary": state.get("data_summary", ""),
                     "evidence": to_plain_data(evidence),
-                    "memory_context": to_plain_data(state.get("memory_context", {})),
+                    "memory_context": session_context_payload(state),
                     "template_reference": template,
                     "fallback_plan": to_plain_data(plan),
                 }, ensure_ascii=False, indent=2),

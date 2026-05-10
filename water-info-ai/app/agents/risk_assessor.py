@@ -6,6 +6,7 @@ import json
 
 from pydantic import BaseModel, Field
 
+from app.agents._prompt import session_context_payload
 from app.risk import calculate_composite_risk, calculate_rainfall_risk, calculate_water_level_risk
 from app.services.llm import get_llm
 from app.state import RiskAssessment, RiskLevel, to_plain_data
@@ -163,7 +164,7 @@ async def risk_assessor_node(state: dict) -> dict:
                     "overview_data": to_plain_data(state.get("overview_data")),
                     "weather_forecast": to_plain_data(state.get("weather_forecast")),
                     "evidence": to_plain_data(evidence),
-                    "memory_context": to_plain_data(state.get("memory_context", {})),
+                    "memory_context": session_context_payload(state),
                     "deterministic_baseline": to_plain_data(assessment),
                 }, ensure_ascii=False, indent=2),
                 system_prompt=(

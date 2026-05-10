@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher
 
+from app.agents._prompt import session_context_payload
 from app.database import get_db_service
 from app.services.llm import get_llm
 from app.state import to_plain_data
@@ -351,6 +352,7 @@ async def data_analyst_node(state: dict) -> dict:
                     "focus_station": to_plain_data(focus_station),
                     "overview_data": to_plain_data(bundle["overview_data"]),
                     "weather_forecast": to_plain_data(bundle["weather_forecast"]),
+                    "memory_context": session_context_payload(state),
                 },
                 system_prompt=(
                     "你是防汛数据分析智能体。"

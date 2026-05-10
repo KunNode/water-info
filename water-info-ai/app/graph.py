@@ -29,6 +29,24 @@ def _route_from_supervisor(state: dict) -> str:
     return str(next_agent)
 
 
+def _route_from_memory_loader(state: dict) -> str:
+    """Route after ``memory_loader`` — short-circuit to END on unrecoverable
+    memory load failures (Req 4.4).
+
+    When ``memory_loader_node`` catches a ``MemoryLoadError`` it writes an
+    ``error`` string of the form ``"memory_load_failed: <source>"`` and sets
+    ``next_agent="__end__"``. A plain ``add_edge("memory_loader", "supervisor")``
+    would ignore those signals and keep the graph running, so non-streaming
+    consumers (``/api/v1/flood/query``) could end up persisting a fabricated
+    assistant reply. Routing to ``END`` here is the belt-and-suspenders fix
+    that protects every graph consumer, not just the SSE path.
+    """
+    error = str(state.get("error") or "")
+    if error.startswith("memory_load_failed:") or state.get("next_agent") == "__end__":
+        return "__end__"
+    return "supervisor"
+
+
 def build_flood_response_graph(*, checkpointer=None, store=None):
     graph = StateGraph(FloodGraphState)
     graph.add_node("memory_loader", audited_agent("memory_loader", memory_loader_node))
@@ -48,7 +66,11 @@ def build_flood_response_graph(*, checkpointer=None, store=None):
     graph.add_node("memory_writer", audited_agent("memory_writer", memory_writer_node))
 
     graph.add_edge(START, "memory_loader")
-    graph.add_edge("memory_loader", "supervisor")
+    graph.add_conditional_edges(
+        "memory_loader",
+        _route_from_memory_loader,
+        {"__end__": END, "supervisor": "supervisor"},
+    )
     graph.add_conditional_edges(
         "supervisor",
         _route_from_supervisor,

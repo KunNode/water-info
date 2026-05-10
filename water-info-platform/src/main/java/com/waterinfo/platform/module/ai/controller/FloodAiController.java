@@ -128,7 +128,7 @@ public class FloodAiController {
             @PathVariable String sessionId,
             @RequestParam(defaultValue = "40") int limit,
             @RequestParam(required = false) Long beforeId) {
-        return aiServiceClient.getConversationMessages(sessionId)
+        return aiServiceClient.getConversationMessages(sessionId, limit, beforeId)
                 .map(ApiResponse::success);
     }
 

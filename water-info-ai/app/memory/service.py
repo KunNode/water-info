@@ -17,6 +17,22 @@ from app.utils.json_parser import extract_json
 logger = logging.getLogger(__name__)
 
 
+class MemoryLoadError(RuntimeError):
+    """Raised when a critical memory source (summary / snapshot / conversation_messages) fails to load.
+
+    The ``source`` argument identifies which backing store failed; callers map
+    it to a structured SSE ``error`` event so the frontend can show a
+    non-recoverable prompt and stop streaming.
+    """
+
+    def __init__(self, source: str) -> None:
+        super().__init__(f"memory_load_failed: {source}")
+        self.source = source
+
+
+CONTEXT_HISTORY_LIMIT: int = get_settings().memory_context_history_limit
+
+
 def _clamp(value: Any, default: float = 0.5) -> float:
     try:
         return max(0.0, min(1.0, float(value)))
@@ -45,9 +61,18 @@ def to_store_namespace(namespace: str) -> tuple[str, ...]:
     return tuple(part for part in namespace.split(":") if part)
 
 
-def _normalize_chat_messages(rows: list[dict], *, limit: int = 10) -> list[dict[str, str]]:
+def _normalize_chat_messages(rows: list[dict], *, limit: int = CONTEXT_HISTORY_LIMIT) -> list[dict[str, str]]:
+    """Return user/assistant chat messages in DB ``id`` ascending order.
+
+    ``rows`` is expected to come from :meth:`DatabaseService.get_conversation_messages`,
+    which already orders by ``id ASC``. We sort defensively in case callers pass
+    rows from elsewhere; we also drop streaming / failed rows and ones with empty
+    content so the returned list always satisfies ``role ∈ {user, assistant}``
+    and ``content`` non-empty (see Property 3 in design.md §Correctness Properties).
+    """
+    ordered = sorted(rows, key=lambda row: int(row.get("id") or 0)) if rows else []
     messages: list[dict[str, str]] = []
-    for row in rows:
+    for row in ordered:
         role = str(row.get("role") or "")
         content = str(row.get("content") or "").strip()
         status = str(row.get("status") or "completed")
@@ -104,31 +129,43 @@ class MemoryService:
         snapshot: dict[str, Any] | None = None
         memories: list[MemorySearchResult] = []
 
+        # ── Critical reads: summary / snapshot / conversation_messages ─────────
+        # A failure to read any of these is treated as non-recoverable so the
+        # SSE layer can emit a structured ``error`` event (Req 4.4). Non-critical
+        # auxiliary lookups (memory_items, embedding search) still degrade below.
         try:
             latest_summary = await db.get_latest_conversation_summary(session_id)
             if latest_summary:
                 summary = str(latest_summary.get("summary") or "")
         except Exception as exc:
-            logger.debug("[%s] memory summary load skipped: %s", session_id, exc)
+            logger.warning("[%s] summary load failed: %s", session_id, exc)
+            raise MemoryLoadError("summary") from exc
 
         try:
             raw_snapshot = await db.get_conversation_snapshot(session_id)
             snapshot = _normalize_snapshot(raw_snapshot) if raw_snapshot else None
         except Exception as exc:
-            logger.debug("[%s] memory snapshot load skipped: %s", session_id, exc)
+            logger.warning("[%s] snapshot load failed: %s", session_id, exc)
+            raise MemoryLoadError("snapshot") from exc
 
-        recent_session_messages = recent_messages or []
-        if len(recent_session_messages) <= 1 and hasattr(db, "get_conversation_messages"):
-            try:
-                db_messages = _normalize_chat_messages(
-                    await db.get_conversation_messages(session_id, limit=10),
-                    limit=10,
-                )
-                if db_messages:
-                    recent_session_messages = db_messages
-            except Exception as exc:
-                logger.debug("[%s] recent conversation messages load skipped: %s", session_id, exc)
+        # Req 3.2: always try the DB, even when callers pre-populate
+        # ``recent_messages`` from in-memory graph state, so a Loaded_Session
+        # receives the same payload as live streaming.
+        try:
+            rows = await db.get_conversation_messages(session_id, limit=CONTEXT_HISTORY_LIMIT)
+        except Exception as exc:
+            logger.warning("[%s] recent messages load failed: %s", session_id, exc)
+            raise MemoryLoadError("conversation_messages") from exc
 
+        db_messages = _normalize_chat_messages(rows, limit=CONTEXT_HISTORY_LIMIT)
+        if db_messages:
+            recent_session_messages = db_messages
+        else:
+            # DB is authoritative but empty: fall back to caller-provided context
+            # (e.g. brand-new session with no persisted messages yet).
+            recent_session_messages = list(recent_messages or [])
+
+        # ── Non-critical auxiliary lookups (embedding + memory_items) ──────────
         embedding: list[float] | None = None
         embedder = get_embedding_client()
         if embedder.is_enabled and query.strip():

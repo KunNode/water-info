@@ -31,7 +31,12 @@
           :key="item.session_id"
           class="session-row"
           :class="{ active: item.session_id === currentSessionId }"
+          role="button"
+          tabindex="0"
+          :aria-current="item.session_id === currentSessionId ? 'true' : 'false'"
           @click="handleSelect(item)"
+          @keyup.enter.self.prevent="handleSelect(item)"
+          @keyup.space.self.prevent="handleSelect(item)"
         >
           <div class="row-title" :title="item.title">{{ item.title }}</div>
           <div class="row-meta">
@@ -247,12 +252,26 @@ defineExpose({ refresh: fetchConversations })
     background: var(--fm-bg-2);
   }
 
+  &:focus {
+    outline: none;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--el-color-primary, var(--fm-brand-2));
+    outline-offset: -2px;
+    background: var(--fm-bg-2);
+  }
+
   &.active {
     background: linear-gradient(90deg, rgba(47, 123, 255, 0.15), transparent 70%);
     border-left: 2px solid var(--fm-brand-2);
   }
 
   &:hover .row-del {
+    opacity: 1;
+  }
+
+  &:focus-visible .row-del {
     opacity: 1;
   }
 }

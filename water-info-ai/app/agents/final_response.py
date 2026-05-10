@@ -8,6 +8,7 @@ import logging
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.agents.output_validator import validate_final_response
+from app.agents._prompt import session_context_payload
 from app.rag.service import format_evidence_markdown
 from app.services.llm import get_llm
 from app.state import to_plain_data
@@ -355,7 +356,7 @@ async def final_response_node(state: dict) -> dict:
                     "resource_plan": to_plain_data(state.get("resource_plan", [])),
                     "notifications": to_plain_data(state.get("notifications", [])),
                     "evidence": to_plain_data(evidence),
-                    "memory_context": to_plain_data(state.get("memory_context", {})),
+                    "memory_context": session_context_payload(state),
                     "error": state.get("error"),
                     "must_satisfy": must_satisfy,
                     "llm_context": {

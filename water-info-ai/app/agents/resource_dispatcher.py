@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.agents._prompt import session_context_payload
 from app.config import get_settings
 from app.platform.dispatch_state_machine import DispatchState
 from app.platform.dispatch_validator import validate_dispatch_plan
@@ -241,6 +242,7 @@ async def _refine_with_llm(
                 "plan": to_plain_data(plan),
                 "available_resources": available,
                 "matched_resources": to_plain_data(resources),
+                "memory_context": session_context_payload(state),
             }, ensure_ascii=False, indent=2),
             system_prompt=(
                 "你是防汛资源调度智能体。根据可用资源库存和预案需求，优化调度方案。"

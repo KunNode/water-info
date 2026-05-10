@@ -8,6 +8,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from app.agents._prompt import session_context_payload
 from app.config import get_settings
 from app.platform.skill_executor import SkillExecutor
 from app.platform.skill_registry import get_skill_registry
@@ -668,7 +669,7 @@ async def supervisor_node(state: dict) -> dict:
             "resource_plan": bool(state.get("resource_plan")),
             "notifications": bool(state.get("notifications")),
         },
-        "memory_context": state.get("memory_context", {}),
+        "memory_context": session_context_payload(state),
         "answer_policy": answer_policy,
         "guardrails": [
             "防汛业务问题必须先有 data_analyst 提供监测数据 grounding，除非是闲聊或知识库问答。",

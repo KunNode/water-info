@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from app.agents._prompt import session_context_payload
 from app.config import get_settings
 from app.rag.service import build_evidence, search_knowledge_base
 from app.services.llm import get_llm
@@ -91,6 +92,7 @@ async def knowledge_retriever_node(state: dict) -> dict:
                         "user_query": query,
                         "evidence": [item.__dict__ for item in evidence],
                         "fallback_reply": reply,
+                        "memory_context": session_context_payload(state),
                     },
                     ensure_ascii=False,
                     indent=2,

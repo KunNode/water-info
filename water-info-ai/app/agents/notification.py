@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from app.agents._prompt import session_context_payload
 from app.plan import build_notifications
 from app.services.llm import get_llm
 from app.state import NotificationRecord, RiskLevel, to_plain_data
@@ -35,6 +36,7 @@ async def notification_node(state: dict) -> dict:
                     "risk_assessment": to_plain_data(assessment),
                     "plan": to_plain_data(plan),
                     "fallback_notifications": to_plain_data(notifications),
+                    "memory_context": session_context_payload(state),
                 }, ensure_ascii=False, indent=2),
                 system_prompt=(
                     "你是防汛通知智能体。"

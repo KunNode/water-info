@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import re
 
+from app.agents._prompt import session_context_payload
 from app.services.llm import get_llm
-from app.state import to_plain_data
 
 
 def _fallback_reply(query: str) -> str:
@@ -88,7 +88,7 @@ def _reply_from_recent_session(query: str, memory_context: dict) -> str | None:
 async def conversation_assistant_node(state: dict) -> dict:
     query = str(state.get("user_query", ""))
     evidence = list(state.get("evidence_context") or [])
-    memory_context = state.get("memory_context", {})
+    memory_context = session_context_payload(state)
     llm = get_llm()
     reply = _fallback_reply(query)
 
@@ -121,7 +121,7 @@ async def conversation_assistant_node(state: dict) -> dict:
                             "has_plan": bool(state.get("emergency_plan")),
                             "focus_station_query": state.get("focus_station_query"),
                         },
-                        "memory_context": to_plain_data(memory_context),
+                        "memory_context": memory_context,
                         "evidence": [item.__dict__ for item in evidence],
                     },
                     ensure_ascii=False,

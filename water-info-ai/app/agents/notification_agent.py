@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
+from app.agents._prompt import session_context_payload
 from app.services.llm import get_llm
-from app.state import FloodResponseState, NotificationRecord
+from app.state import FloodResponseState, NotificationRecord, to_plain_data
 from app.utils.json_parser import extract_json
 from app.utils.timeout import with_timeout
 
@@ -85,7 +88,16 @@ async def notification_node(state: FloodResponseState) -> dict:
 
     messages = [
         SystemMessage(content=NOTIFICATION_PROMPT),
-        HumanMessage(content="\n\n".join(context_parts) or "请制定基础防汛值班通知"),
+        HumanMessage(content=json.dumps(
+            {
+                "context": "\n\n".join(context_parts) or "请制定基础防汛值班通知",
+                "risk_assessment": to_plain_data(risk),
+                "emergency_plan": to_plain_data(plan),
+                "memory_context": session_context_payload(state),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )),
     ]
 
     response = await llm.ainvoke(messages)

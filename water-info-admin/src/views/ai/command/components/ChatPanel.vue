@@ -92,17 +92,23 @@ watch(inputText, (val) => {
   store.setInputDraft(val)
 })
 
+function scrollToBottom() {
+  if (messagesRef.value) {
+    messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+  }
+}
+
 watch(
   () => props.messages,
   () => {
     nextTick(() => {
-      if (messagesRef.value) {
-        messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-      }
+      scrollToBottom()
     })
   },
   { deep: true },
 )
+
+defineExpose({ scrollToBottom })
 </script>
 
 <style scoped lang="scss">

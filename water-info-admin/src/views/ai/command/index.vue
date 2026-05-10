@@ -58,6 +58,7 @@
 
     <div class="fm-ai-grid">
       <ChatPanel
+        ref="chatPanelRef"
         :messages="store.messages"
         :loading="loading"
         class="fm-ai-grid__chat"
@@ -114,17 +115,29 @@ const { loading, error, start, stop, reset, onEvent, onText } = useAgentStream()
 
 // ── Session drawer ──────────────────────────────────────────────
 const sessionDrawerRef = ref<InstanceType<typeof SessionDrawer> | null>(null)
+const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
 const startTime = ref('')
+
+function scrollChatToBottom() {
+  chatPanelRef.value?.scrollToBottom()
+}
 
 async function handleSessionSelect(newSessionId: string) {
   if (!newSessionId || newSessionId === store.currentSessionId) return
 
-  await store.loadSession(newSessionId)
-  startTime.value = new Date().toLocaleTimeString()
-  resetStreamBuffers()
-  reset()
-
-  syncRouteSession(newSessionId)
+  try {
+    await store.loadSession(newSessionId)
+    startTime.value = new Date().toLocaleTimeString()
+    resetStreamBuffers()
+    reset()
+    store.setDrawerOpen(false)
+    syncRouteSession(newSessionId)
+    await nextTick()
+    scrollChatToBottom()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    ElMessage.error(msg || '加载会话失败，请稍后重试')
+  }
 }
 
 function handleNewSession() {
@@ -331,7 +344,10 @@ function handleStreamEvent(event: AgentStreamEvent) {
       finishAnswerAfterTypewriter()
       break
     case 'error':
-      handleRecoverableError(event.message, event.recoverable !== false)
+      // Backend emits `{ type, message, code?, recoverable? }` per design §5 and
+      // Task 3.3. Treat missing `recoverable` as recoverable=true (soft
+      // degradation) and pass `code` through for observability.
+      handleRecoverableError(event.message, event.recoverable !== false, event.code)
       break
     case 'agent_update':
       store.setAgentStatus(event.agent, event.status)
@@ -441,13 +457,27 @@ function finishReasoningStep(stepId: string, status: ReasoningStepStatus, durati
   })
 }
 
-function handleRecoverableError(message: string, recoverable: boolean) {
-  store.failAssistant(message, recoverable)
+function handleRecoverableError(message: string, recoverable: boolean, code?: string) {
+  // Unrecoverable errors (e.g. backend `memory_load_failed` from Task 3.3):
+  // terminate the stream, surface a top-level toast so the user isn't left
+  // guessing, and mark the assistant message as failed. Recoverable errors
+  // keep the existing degraded flow (reasoning step + retry hint only).
+  if (!recoverable) {
+    stop()
+    store.failAssistant(message, false)
+    ElMessage.error(message || '会话流已终止，请稍后重试')
+  } else {
+    store.failAssistant(message, true)
+  }
   addStep({
     id: createId('error'),
     kind: 'thought',
     title: recoverable ? '执行过程已降级' : '执行过程失败',
-    content: recoverable ? `${message}，正在尝试继续生成最终回答。` : message,
+    content: recoverable
+      ? `${message}，正在尝试继续生成最终回答。`
+      : code
+        ? `${message}（错误码：${code}）`
+        : message,
     status: 'error',
     startedAt: Date.now(),
     endedAt: Date.now(),

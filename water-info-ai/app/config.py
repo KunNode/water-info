@@ -56,6 +56,7 @@ class Settings:
     rag_chunk_overlap: int = 80
     rag_max_calls_per_session: int = 2
     rag_preflight_risk_enabled: bool = False
+    memory_context_history_limit: int = 20
     risk_scan_periodic_minutes: int = 15
     risk_scan_periodic_enabled: bool = True
     risk_scan_event_debounce_seconds: int = 60
@@ -111,6 +112,7 @@ def get_settings() -> Settings:
         rag_chunk_overlap=int(os.environ.get("RAG_CHUNK_OVERLAP", "80")),
         rag_max_calls_per_session=int(os.environ.get("RAG_MAX_CALLS_PER_SESSION", "2")),
         rag_preflight_risk_enabled=os.environ.get("RAG_PREFLIGHT_RISK_ENABLED", "false").lower() == "true",
+        memory_context_history_limit=int(os.environ.get("MEMORY_CONTEXT_HISTORY_LIMIT", "20")),
         risk_scan_periodic_minutes=int(os.environ.get("RISK_SCAN_PERIODIC_MINUTES", "15")),
         risk_scan_periodic_enabled=os.environ.get("RISK_SCAN_PERIODIC_ENABLED", "true").lower() == "true",
         risk_scan_event_debounce_seconds=int(os.environ.get("RISK_SCAN_EVENT_DEBOUNCE_SECONDS", "60")),

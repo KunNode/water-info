@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+import json
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from loguru import logger
 
+from app.agents._prompt import session_context_payload
 from app.services.llm import get_llm
-from app.state import ExecutionProgress, FloodResponseState
+from app.state import ExecutionProgress, FloodResponseState, to_plain_data
 from app.utils.timeout import with_timeout
 
 EXECUTION_MONITOR_PROMPT = """你是防洪应急预案系统的 **执行监控智能体**。
@@ -61,11 +64,18 @@ async def execution_monitor_node(state: FloodResponseState) -> dict:
 
     messages = [
         SystemMessage(content=EXECUTION_MONITOR_PROMPT),
-        HumanMessage(content=f"""请评估当前预案执行情况：
-
-{chr(10).join(context_parts) if context_parts else '当前没有正在执行的预案'}
-
-请给出执行监控报告。"""),
+        HumanMessage(content=json.dumps(
+            {
+                "user_query": state.get("user_query", ""),
+                "execution_context": "\n".join(context_parts) if context_parts else "当前没有正在执行的预案",
+                "memory_context": session_context_payload(state),
+                "emergency_plan": to_plain_data(plan),
+                "resource_plan_count": len(resource_plan),
+                "notifications_count": len(notifications),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )),
     ]
 
     response = await llm.ainvoke(messages)
