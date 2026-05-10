@@ -8,7 +8,8 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
-    "format": "prettier --write src/"
+    "format": "prettier --write src/",
+    "test": "vitest --run"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -25,20 +26,25 @@
     "vue-router": "^4.3.0"
   },
   "devDependencies": {
+    "@fast-check/vitest": "^0.4.1",
     "@playwright/test": "^1.59.1",
     "@types/dompurify": "^3.0.5",
     "@types/nprogress": "^0.2.3",
     "@typescript-eslint/eslint-plugin": "^7.1.0",
     "@typescript-eslint/parser": "^7.1.0",
     "@vitejs/plugin-vue": "^5.0.4",
+    "@vue/test-utils": "^2.4.10",
     "eslint": "^8.57.0",
     "eslint-plugin-vue": "^9.22.0",
+    "fast-check": "^4.7.0",
+    "jsdom": "^29.1.1",
     "prettier": "^3.2.5",
     "sass": "^1.71.1",
     "typescript": "~5.3.3",
     "unplugin-auto-import": "^0.17.5",
     "unplugin-vue-components": "^0.26.0",
     "vite": "^5.1.4",
+    "vitest": "^4.1.5",
     "vue-tsc": "^2.0.6"
   }
 }

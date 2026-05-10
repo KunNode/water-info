@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">核心领域关系</title>
+  <desc id="desc">展示站点、传感器、观测、阈值、告警、资源、调度、用户、角色之间的核心关系。</desc>
+  <defs>
+    <marker id="many" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto"><path d="M1 1L11 6L1 11M1 6H11" stroke="#2563eb" stroke-width="1.6" fill="none"/></marker>
+    <style>
+      .bg{fill:#f8fafc}.title{font:700 28px sans-serif;fill:#0f172a}.entity{fill:#fff;stroke:#2563eb;stroke-width:2.4;rx:10}.core{fill:#eff6ff;stroke:#1d4ed8;stroke-width:3;rx:12}
+      .rel{stroke:#2563eb;stroke-width:2.2;fill:none;marker-end:url(#many)}.h{font:700 18px sans-serif;fill:#0f172a}.t{font:13px sans-serif;fill:#475569}.lab{font:13px sans-serif;fill:#64748b}
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="675"/><text x="60" y="58" class="title">核心领域关系</text>
+  <rect class="core" x="485" y="255" width="180" height="92"/><text x="545" y="294" class="h">STATION</text><text x="532" y="321" class="t">监测站点</text>
+  <rect class="entity" x="160" y="120" width="180" height="78"/><text x="225" y="153" class="h">SENSOR</text><text x="213" y="178" class="t">传感器</text>
+  <rect class="entity" x="160" y="250" width="180" height="78"/><text x="198" y="283" class="h">OBSERVATION</text><text x="202" y="308" class="t">观测数据</text>
+  <rect class="entity" x="160" y="380" width="180" height="78"/><text x="190" y="413" class="h">THRESHOLD_RULE</text><text x="212" y="438" class="t">阈值规则</text>
+  <rect class="entity" x="485" y="445" width="180" height="78"/><text x="546" y="478" class="h">ALARM</text><text x="535" y="503" class="t">告警记录</text>
+  <path class="rel" d="M485 280C420 210 395 160 340 160"/><path class="rel" d="M485 295H340"/><path class="rel" d="M485 315C420 365 395 420 340 420"/><path class="rel" d="M575 347V445"/>
+
+  <rect class="core" x="780" y="145" width="180" height="88"/><text x="825" y="183" class="h">RESOURCE</text><text x="820" y="209" class="t">应急资源</text>
+  <rect class="entity" x="780" y="300" width="180" height="78"/><text x="802" y="333" class="h">RESOURCE_DISPATCH</text><text x="828" y="358" class="t">调度记录</text>
+  <path class="rel" d="M870 233V300"/>
+
+  <rect class="core" x="780" y="445" width="180" height="78"/><text x="828" y="478" class="h">SYS_USER</text><text x="845" y="503" class="t">用户</text>
+  <rect class="entity" x="990" y="445" width="150" height="78"/><text x="1018" y="478" class="h">SYS_ROLE</text><text x="1044" y="503" class="t">角色</text>
+  <rect class="entity" x="885" y="555" width="170" height="68"/><text x="915" y="594" class="h">SYS_USER_ROLE</text>
+  <path class="rel" d="M870 523C895 548 915 560 940 555"/><path class="rel" d="M1065 523C1045 548 1025 560 1000 555"/>
+
+  <text x="70" y="610" class="lab">关系语义：站点拥有多个传感器、观测、阈值规则和告警；资源产生调度记录；用户通过关联表绑定角色。</text>
+</svg>
+

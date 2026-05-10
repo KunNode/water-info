@@ -9,7 +9,7 @@ import type {
   PlanExecuteResult,
 } from '@/types'
 
-export function queryFlood(data: { query: string; sessionId?: string }) {
+export function queryFlood(data: { message: string; sessionId?: string; stream?: boolean }) {
   return post<any>('/flood/query', data, withAuth())
 }
 

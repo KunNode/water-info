@@ -108,10 +108,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { getRememberedUsername, getRememberedPassword, setRememberedCredentials, clearRememberedCredentials } from '@/utils/storage'
 
 const router = useRouter()
 const route = useRoute()
@@ -124,6 +125,16 @@ const focusedField = ref('')
 const loginForm = reactive({
   username: '',
   password: '',
+})
+
+onMounted(() => {
+  const savedUsername = getRememberedUsername()
+  const savedPassword = getRememberedPassword()
+  if (savedUsername && savedPassword) {
+    loginForm.username = savedUsername
+    loginForm.password = savedPassword
+    remember.value = true
+  }
 })
 
 const brandStats = [
@@ -149,6 +160,11 @@ async function handleLogin() {
       username: loginForm.username,
       password: loginForm.password,
     })
+    if (remember.value) {
+      setRememberedCredentials(loginForm.username, loginForm.password)
+    } else {
+      clearRememberedCredentials()
+    }
     ElMessage.success('登录成功')
     const redirect = (route.query.redirect as string) || '/'
     router.push(redirect)

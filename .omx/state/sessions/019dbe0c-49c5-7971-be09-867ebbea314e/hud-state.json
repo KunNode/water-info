@@ -1,6 +1,0 @@
-{
-  "last_turn_at": "2026-04-24T11:35:42.718Z",
-  "turn_count": 7,
-  "last_progress_at": "2026-04-24T11:35:42.718Z",
-  "last_agent_output": "这次的重复不是前面那种 `final_response` 重复，而是后端图路由循环：`risk_assessor` 已经完成后，下一轮 `supervisor` 仍然听从 LLM 建议继续选择 `ri"
-}

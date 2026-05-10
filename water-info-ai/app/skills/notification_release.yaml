@@ -1,0 +1,14 @@
+{
+  "id": "notification_release",
+  "name": "预警通知发布",
+  "version": "1.0",
+  "trigger_intents": ["notification"],
+  "required_inputs": ["user_query", "emergency_plan"],
+  "required_tools": ["query_alarms"],
+  "agent_sequence": ["data_analyst", "risk_assessor", "plan_generator", "notification", "safety_checker"],
+  "output_schema": "PlanGeneratorOutput",
+  "quality_gates": [
+    {"name": "notifications_present", "check_type": "field_present", "target_field": "notifications", "condition": "is_not_none"}
+  ],
+  "fallback_strategy": "escalate_to_human"
+}

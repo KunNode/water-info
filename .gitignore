@@ -46,3 +46,4 @@ logs/
 *.tmp
 *.temp
 .omx/
+/docs/**

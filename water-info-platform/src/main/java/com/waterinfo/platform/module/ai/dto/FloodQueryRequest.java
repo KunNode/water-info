@@ -1,5 +1,6 @@
 package com.waterinfo.platform.module.ai.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import jakarta.validation.constraints.NotBlank;
@@ -16,8 +17,12 @@ public class FloodQueryRequest {
 
     @NotBlank(message = "Query text is required")
     @Size(max = 2000, message = "Query must not exceed 2000 characters")
+    @JsonAlias("message")
     private String query;
 
     @Size(max = 64, message = "Session ID must not exceed 64 characters")
+    @JsonAlias({"sessionId", "session_id"})
     private String sessionId;
+
+    private Boolean stream = false;
 }

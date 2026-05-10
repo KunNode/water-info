@@ -108,6 +108,38 @@ export const constantRoutes: RouteRecordRaw[] = [
     ],
   },
   {
+    path: '/resource',
+    component: Layout,
+    redirect: '/resource/material',
+    meta: { title: '资源管理', icon: 'Box' },
+    children: [
+      {
+        path: 'material',
+        name: 'ResourceMaterial',
+        component: () => import('@/views/resource/material/index.vue'),
+        meta: { title: '物资管理', icon: 'Goods' },
+      },
+      {
+        path: 'personnel',
+        name: 'ResourcePersonnel',
+        component: () => import('@/views/resource/personnel/index.vue'),
+        meta: { title: '人员管理', icon: 'User' },
+      },
+      {
+        path: 'vehicle',
+        name: 'ResourceVehicle',
+        component: () => import('@/views/resource/vehicle/index.vue'),
+        meta: { title: '车辆设备', icon: 'Van' },
+      },
+      {
+        path: 'dispatch',
+        name: 'ResourceDispatch',
+        component: () => import('@/views/resource/dispatch/index.vue'),
+        meta: { title: '调度记录', icon: 'Promotion' },
+      },
+    ],
+  },
+  {
     path: '/map',
     component: Layout,
     children: [

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-
 _TEMPLATES: dict[str, dict] = {
     "critical": {
         "response_level": "I级响应",

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">LangGraph 多 Agent 工作流</title>
+  <desc id="desc">memory_loader 到 supervisor，由 supervisor 路由到各 Agent，最终 final_response 和 memory_writer 结束。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#0f766e"/></marker>
+    <style>
+      .bg{fill:#f8fafc}.title{font:700 28px sans-serif;fill:#0f172a}.node{fill:#fff;stroke:#0f766e;stroke-width:2.2;rx:9}.hub{fill:#ecfdf5;stroke:#0f766e;stroke-width:3;rx:12}
+      .edge{stroke:#0f766e;stroke-width:2.1;fill:none;marker-end:url(#arrow)}.back{stroke:#64748b;stroke-width:1.8;fill:none;stroke-dasharray:7 6;marker-end:url(#arrow)}
+      .h{font:700 17px sans-serif;fill:#0f172a}.t{font:13px sans-serif;fill:#475569}
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="675"/><text x="60" y="58" class="title">LangGraph 多 Agent 工作流</text>
+  <rect class="node" x="55" y="285" width="120" height="58"/><text x="96" y="320" class="h">START</text>
+  <rect class="node" x="220" y="275" width="160" height="78"/><text x="254" y="306" class="h">memory_loader</text><text x="252" y="330" class="t">加载上下文</text>
+  <rect class="hub" x="445" y="260" width="170" height="108"/><text x="486" y="300" class="h">supervisor</text><text x="482" y="326" class="t">意图识别</text><text x="483" y="348" class="t">动态路由</text>
+  <rect class="node" x="700" y="85" width="175" height="54"/><text x="724" y="119" class="h">conversation</text>
+  <rect class="node" x="700" y="155" width="175" height="54"/><text x="735" y="189" class="h">data_analyst</text>
+  <rect class="node" x="700" y="225" width="175" height="54"/><text x="720" y="259" class="h">knowledge</text>
+  <rect class="node" x="700" y="295" width="175" height="54"/><text x="730" y="329" class="h">risk_assessor</text>
+  <rect class="node" x="700" y="365" width="175" height="54"/><text x="724" y="399" class="h">plan_generator</text>
+  <rect class="node" x="700" y="435" width="175" height="54"/><text x="718" y="469" class="h">resource_dispatch</text>
+  <rect class="node" x="700" y="505" width="175" height="54"/><text x="734" y="539" class="h">notification</text>
+  <rect class="node" x="700" y="575" width="175" height="54"/><text x="710" y="609" class="h">execution_monitor</text>
+  <rect class="node" x="965" y="285" width="155" height="58"/><text x="994" y="320" class="h">final_response</text>
+  <rect class="node" x="965" y="390" width="155" height="58"/><text x="1001" y="425" class="h">memory_writer</text>
+  <path class="edge" d="M175 314H220"/><path class="edge" d="M380 314H445"/>
+  <path class="edge" d="M615 286C660 190 665 112 700 112"/><path class="edge" d="M615 296C660 220 665 182 700 182"/><path class="edge" d="M615 306C660 260 665 252 700 252"/><path class="edge" d="M615 316H700"/><path class="edge" d="M615 326C660 360 665 392 700 392"/><path class="edge" d="M615 336C660 410 665 462 700 462"/><path class="edge" d="M615 346C660 465 665 532 700 532"/><path class="edge" d="M615 358C660 540 665 602 700 602"/>
+  <path class="back" d="M875 182C920 210 900 295 965 314"/><path class="back" d="M875 252C920 265 910 300 965 314"/><path class="back" d="M875 322H965"/><path class="back" d="M875 392C930 380 910 330 965 314"/><path class="back" d="M875 462C930 430 910 340 965 314"/><path class="edge" d="M1120 343V390"/>
+</svg>
+

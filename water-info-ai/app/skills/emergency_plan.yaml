@@ -1,0 +1,14 @@
+{
+  "id": "emergency_plan_generation",
+  "name": "应急预案生成",
+  "version": "1.0",
+  "trigger_intents": ["plan_generation"],
+  "required_inputs": ["user_query", "risk_assessment"],
+  "required_tools": ["query_station_data", "query_observations", "search_knowledge_base"],
+  "agent_sequence": ["data_analyst", "risk_assessor", "plan_generator", "plan_reviewer"],
+  "output_schema": "PlanGeneratorOutput",
+  "quality_gates": [
+    {"name": "plan_present", "check_type": "field_present", "target_field": "emergency_plan", "condition": "is_not_none"}
+  ],
+  "fallback_strategy": "retry"
+}

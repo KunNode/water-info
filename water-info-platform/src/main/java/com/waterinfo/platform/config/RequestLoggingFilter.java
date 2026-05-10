@@ -31,24 +31,50 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
         }
 
         long start = System.currentTimeMillis();
-        ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(response);
 
+        // Reactive endpoints (returning Mono/Flux) must NOT be wrapped —
+        // the async write bypasses ContentCachingResponseWrapper, producing
+        // an empty response body.
+        if (isReactiveEndpoint(request.getRequestURI())) {
+            try {
+                filterChain.doFilter(request, response);
+            } finally {
+                logDuration(request, response.getStatus(), start);
+            }
+            return;
+        }
+
+        ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(response);
         try {
             filterChain.doFilter(request, wrappedResponse);
         } finally {
-            long duration = System.currentTimeMillis() - start;
-            int status = wrappedResponse.getStatus();
-
-            if (status >= 500) {
-                log.error("HTTP {} {} {} {}ms", request.getMethod(), request.getRequestURI(), status, duration);
-            } else if (status >= 400) {
-                log.warn("HTTP {} {} {} {}ms", request.getMethod(), request.getRequestURI(), status, duration);
-            } else {
-                log.info("HTTP {} {} {} {}ms", request.getMethod(), request.getRequestURI(), status, duration);
-            }
-
+            logDuration(request, wrappedResponse.getStatus(), start);
             wrappedResponse.copyBodyToResponse();
         }
+    }
+
+    private void logDuration(HttpServletRequest request, int status, long start) {
+        long duration = System.currentTimeMillis() - start;
+        if (status >= 500) {
+            log.error("HTTP {} {} {} {}ms", request.getMethod(), request.getRequestURI(), status, duration);
+        } else if (status >= 400) {
+            log.warn("HTTP {} {} {} {}ms", request.getMethod(), request.getRequestURI(), status, duration);
+        } else {
+            log.info("HTTP {} {} {} {}ms", request.getMethod(), request.getRequestURI(), status, duration);
+        }
+    }
+
+    /**
+     * Endpoints that return reactive types (Mono/Flux) must not be wrapped
+     * with ContentCachingResponseWrapper — the async response write bypasses
+     * the wrapper, resulting in an empty response body.
+     */
+    private boolean isReactiveEndpoint(String uri) {
+        return uri.startsWith("/api/v1/flood/")
+                || uri.startsWith("/api/v1/plans")
+                || uri.startsWith("/api/v1/sessions")
+                || uri.startsWith("/api/v1/conversations")
+                || uri.startsWith("/api/v1/kb/");
     }
 
     private boolean shouldSkip(HttpServletRequest request) {

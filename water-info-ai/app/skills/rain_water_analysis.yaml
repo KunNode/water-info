@@ -1,0 +1,14 @@
+{
+  "id": "rain_water_situation_analysis",
+  "name": "雨水情分析",
+  "version": "1.0",
+  "trigger_intents": ["overview", "station_status"],
+  "required_inputs": ["user_query", "session_id"],
+  "required_tools": ["query_station_data", "query_observations", "query_alarms"],
+  "agent_sequence": ["data_analyst"],
+  "output_schema": "RiskAssessorOutput",
+  "quality_gates": [
+    {"name": "data_summary_present", "check_type": "field_present", "target_field": "data_summary", "condition": "is_not_none"}
+  ],
+  "fallback_strategy": "degrade"
+}

@@ -2,7 +2,7 @@
 
 Two modes selected by ``rag_target`` in state:
 - ``answer``: synthesize a knowledge-base-grounded reply and terminate the run.
-- ``preflight_plan`` / ``preflight_risk``: retrieve only, populate
+- ``preflight_plan`` / ``preflight_risk`` / ``validation``: retrieve only, populate
   ``evidence_context`` for a downstream agent, and return to supervisor.
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from app.agents._prompt import session_context_payload
 from app.config import get_settings
 from app.rag.service import build_evidence, search_knowledge_base
 from app.services.llm import get_llm
@@ -42,7 +43,11 @@ async def knowledge_retriever_node(state: dict) -> dict:
         skip_reasons.append(f"budget_exhausted:{call_count}")
     else:
         top_k = settings.rag_top_k if rag_target == "answer" else max(3, settings.rag_top_k - 1)
-        results = await search_knowledge_base(query, top_k=top_k)
+        results = await search_knowledge_base(
+            query,
+            top_k=top_k,
+            metadata_filter=state.get("metadata_filter"),
+        )
         call_count += 1
         if query_hash:
             cache[query_hash] = results
@@ -87,6 +92,7 @@ async def knowledge_retriever_node(state: dict) -> dict:
                         "user_query": query,
                         "evidence": [item.__dict__ for item in evidence],
                         "fallback_reply": reply,
+                        "memory_context": session_context_payload(state),
                     },
                     ensure_ascii=False,
                     indent=2,

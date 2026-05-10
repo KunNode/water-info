@@ -46,6 +46,7 @@ async function primeClientState(page) {
   await page.addInitScript(() => {
     localStorage.setItem("water_access_token", "playwright-e2e-token")
     localStorage.removeItem("water_ai_current_session_id")
+    localStorage.removeItem("fm-ai-active-session-id")
     localStorage.removeItem("water_ai_input_draft")
     localStorage.setItem("water_ai_drawer_open", "false")
   })

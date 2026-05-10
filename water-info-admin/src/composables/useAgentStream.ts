@@ -1,6 +1,7 @@
 import { ref, onUnmounted } from 'vue'
-import { getToken } from '@/utils/storage'
+import { getToken, getUserInfo } from '@/utils/storage'
 import type { AgentStreamEvent } from '@/types/agentStream'
+import type { UserInfo } from '@/types'
 
 export interface ParsedSSEMessage {
   event?: string
@@ -31,11 +32,14 @@ export function useAgentStream() {
     controller = new AbortController()
 
     try {
+      const user = getUserInfo<UserInfo>()
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+          ...(user?.id ? { 'X-User-Id': user.id } : {}),
+          ...(user?.username ? { 'X-Username': user.username } : {}),
         },
         body: JSON.stringify(body),
         signal: controller.signal,

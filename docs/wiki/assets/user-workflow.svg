@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">用户视角工作流</title>
+  <desc id="desc">从登录、查看仪表盘、监测维护、告警、AI 研判、预案、调度到复盘的端到端流程。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="#2563eb"/></marker>
+    <style>
+      .bg{fill:#f8fafc}.title{font:700 28px sans-serif;fill:#0f172a}.box{fill:#fff;stroke:#2563eb;stroke-width:2.4;rx:10}
+      .edge{stroke:#2563eb;stroke-width:2.3;fill:none;marker-end:url(#arrow)}.num{font:700 15px sans-serif;fill:#fff}.badge{fill:#2563eb}
+      .h{font:700 17px sans-serif;fill:#0f172a}.t{font:13px sans-serif;fill:#475569}
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="675"/>
+  <text x="60" y="58" class="title">用户视角工作流</text>
+  <g transform="translate(75,150)">
+    <rect class="box" width="145" height="100"/><circle class="badge" cx="24" cy="24" r="16"/><text class="num" x="19" y="29">1</text><text class="h" x="48" y="36">登录管理端</text><text class="t" x="24" y="70">JWT 登录</text>
+    <path class="edge" d="M145 50H190"/>
+  </g>
+  <g transform="translate(265,150)">
+    <rect class="box" width="145" height="100"/><circle class="badge" cx="24" cy="24" r="16"/><text class="num" x="19" y="29">2</text><text class="h" x="48" y="36">指挥仪表盘</text><text class="t" x="24" y="70">态势总览</text>
+    <path class="edge" d="M145 50H190"/>
+  </g>
+  <g transform="translate(455,150)">
+    <rect class="box" width="145" height="100"/><circle class="badge" cx="24" cy="24" r="16"/><text class="num" x="19" y="29">3</text><text class="h" x="48" y="36">监测维护</text><text class="t" x="24" y="66">站点 / 传感器</text><text class="t" x="24" y="84">观测数据</text>
+    <path class="edge" d="M145 50H190"/>
+  </g>
+  <g transform="translate(645,150)">
+    <rect class="box" width="145" height="100"/><circle class="badge" cx="24" cy="24" r="16"/><text class="num" x="19" y="29">4</text><text class="h" x="48" y="36">阈值告警</text><text class="t" x="24" y="70">OPEN / ACK</text>
+    <path class="edge" d="M145 50H190"/>
+  </g>
+  <g transform="translate(835,150)">
+    <rect class="box" width="145" height="100"/><circle class="badge" cx="24" cy="24" r="16"/><text class="num" x="19" y="29">5</text><text class="h" x="48" y="36">AI 研判</text><text class="t" x="24" y="66">数据分析</text><text class="t" x="24" y="84">风险评估</text>
+    <path class="edge" d="M72 100V175"/>
+  </g>
+  <g transform="translate(835,325)">
+    <rect class="box" width="145" height="100"/><circle class="badge" cx="24" cy="24" r="16"/><text class="num" x="19" y="29">6</text><text class="h" x="48" y="36">应急预案</text><text class="t" x="24" y="70">措施与分工</text>
+    <path class="edge" d="M0 50H-45"/>
+  </g>
+  <g transform="translate(645,325)">
+    <rect class="box" width="145" height="100"/><circle class="badge" cx="24" cy="24" r="16"/><text class="num" x="19" y="29">7</text><text class="h" x="48" y="36">资源调度</text><text class="t" x="24" y="70">物资 / 人员 / 车辆</text>
+    <path class="edge" d="M0 50H-45"/>
+  </g>
+  <g transform="translate(455,325)">
+    <rect class="box" width="145" height="100"/><circle class="badge" cx="24" cy="24" r="16"/><text class="num" x="19" y="29">8</text><text class="h" x="48" y="36">执行复盘</text><text class="t" x="24" y="70">进度与记录</text>
+  </g>
+</svg>
+

@@ -1,9 +1,9 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
-import { getToken, clearAuth } from '@/utils/storage'
+import { getToken, clearAuth, getUserInfo } from '@/utils/storage'
 import router from '@/router'
-import type { ApiResponse } from '@/types'
+import type { ApiResponse, UserInfo } from '@/types'
 
 const service: AxiosInstance = axios.create({
   baseURL: '/api/v1',
@@ -30,6 +30,14 @@ function handleUnauthorized(config?: AxiosRequestConfig | InternalAxiosRequestCo
   ElMessage.error('登录已过期，请重新登录')
 }
 
+function buildIdentityHeaders(): Record<string, string> {
+  const user = getUserInfo<UserInfo>()
+  return {
+    ...(user?.id ? { 'X-User-Id': user.id } : {}),
+    ...(user?.username ? { 'X-Username': user.username } : {}),
+  }
+}
+
 // Request interceptor — attach JWT token
 service.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -37,6 +45,7 @@ service.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    Object.assign(config.headers, buildIdentityHeaders())
     return config
   },
   (error) => Promise.reject(error),
@@ -105,6 +114,7 @@ export function withAuth(config: AxiosRequestConfig = {}): AxiosRequestConfig {
   const headers = {
     ...(config.headers as Record<string, unknown> | undefined),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...buildIdentityHeaders(),
   }
   return { ...config, headers }
 }

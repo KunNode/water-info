@@ -20,7 +20,8 @@ services:
       test: ["CMD-SHELL", "export PATH=/usr/lib/postgresql16/bin:/usr/libexec/postgresql16:$$PATH && pg_isready -U root -d water_info"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   # ─── Redis ───
   redis:
@@ -130,7 +131,7 @@ services:
     depends_on:
       - platform
     ports:
-      - "5173:80"
+      - "5175:80"
 
   # ─── Nginx Reverse Proxy ───
   nginx:

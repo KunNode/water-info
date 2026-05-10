@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import logging
 
+from loguru import logger as _loguru_logger
+
 from app.memory import get_memory_service
+from app.memory.service import MemoryLoadError
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,23 @@ async def memory_loader_node(state: dict, runtime=None) -> dict:
             **_TURN_RESET,
             "current_agent": "memory_loader",
             "memory_context": context.to_prompt_context(),
+        }
+    except MemoryLoadError as exc:
+        # Req 4.4: critical memory read failures are non-recoverable. Short-circuit
+        # the graph (``next_agent="__end__"``) and surface a structured error
+        # string the SSE layer maps to a ``type=error`` event.
+        _loguru_logger.error(
+            "[{session_id}] memory load failed (source={source}): {exc}",
+            session_id=session_id,
+            source=exc.source,
+            exc=exc,
+        )
+        return {
+            **_TURN_RESET,
+            "current_agent": "memory_loader",
+            "memory_context": {},
+            "error": f"memory_load_failed: {exc.source}",
+            "next_agent": "__end__",
         }
     except Exception as exc:
         logger.debug("[%s] memory loader skipped: %s", session_id, exc)

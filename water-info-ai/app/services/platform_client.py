@@ -51,6 +51,38 @@ class WaterPlatformClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_available_resources(self, resource_type: str = "", location: str = "") -> dict:
+        params = {}
+        if resource_type:
+            params["type"] = resource_type
+        if location:
+            params["location"] = location
+        response = await self._client.get(
+            self._build_url("/resources/available"),
+            headers=await self._headers(),
+            params=params,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def create_dispatch_order(self, payload: dict) -> dict:
+        response = await self._client.post(
+            self._build_url("/resource-dispatches"),
+            headers=await self._headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def post_audit_record(self, table: str, payload: dict) -> dict:
+        response = await self._client.post(
+            self._build_url(f"/ai-audit/{table}"),
+            headers=await self._headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def close(self) -> None:
         await self._client.aclose()
 

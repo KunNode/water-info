@@ -248,10 +248,17 @@ public class AiServiceClient {
     /**
      * Get messages for a conversation session.
      */
-    public Mono<ConversationDetail> getConversationMessages(String sessionId) {
+    public Mono<ConversationDetail> getConversationMessages(String sessionId, int limit, Long beforeId) {
         return userContext.getCurrentUser()
                 .flatMap(user -> webClient.get()
-                        .uri("/api/v1/conversations/{sessionId}/messages", sessionId)
+                        .uri(u -> {
+                            var builder = u.path("/api/v1/conversations/{sessionId}/messages")
+                                    .queryParam("limit", limit);
+                            if (beforeId != null) {
+                                builder.queryParam("before_id", beforeId);
+                            }
+                            return builder.build(sessionId);
+                        })
                         .headers(headers -> addUserHeaders(headers, user))
                         .retrieve()
                         .bodyToMono(JsonNode.class)
@@ -320,6 +327,86 @@ public class AiServiceClient {
                         .bodyToMono(Void.class)
                         .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
                         .doOnError(e -> log.error("Error deleting conversation {}: {}", sessionId, e.getMessage())));
+    }
+
+    /**
+     * List visible memory items for the current user/session.
+     */
+    public Mono<JsonNode> listMemory(String sessionId, int limit, int offset) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.get()
+                        .uri(u -> {
+                            var builder = u.path("/api/v1/memory")
+                                    .queryParam("limit", limit)
+                                    .queryParam("offset", offset);
+                            if (sessionId != null && !sessionId.isBlank()) {
+                                builder.queryParam("session_id", sessionId);
+                            }
+                            return builder.build();
+                        })
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error listing memory: {}", e.getMessage())));
+    }
+
+    /**
+     * List current user's long-term memory items.
+     */
+    public Mono<JsonNode> listUserMemory(int limit, int offset) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.get()
+                        .uri(u -> u.path("/api/v1/memory/user")
+                                .queryParam("limit", limit)
+                                .queryParam("offset", offset)
+                                .build())
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error listing user memory: {}", e.getMessage())));
+    }
+
+    /**
+     * Update or disable a visible memory item.
+     */
+    public Mono<JsonNode> updateMemory(long memoryId, java.util.Map<String, Object> body, String sessionId) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.patch()
+                        .uri(u -> {
+                            var builder = u.path("/api/v1/memory/{memoryId}");
+                            if (sessionId != null && !sessionId.isBlank()) {
+                                builder.queryParam("session_id", sessionId);
+                            }
+                            return builder.build(memoryId);
+                        })
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .bodyValue(body == null ? java.util.Map.of() : body)
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error updating memory {}: {}", memoryId, e.getMessage())));
+    }
+
+    /**
+     * Delete a visible memory item.
+     */
+    public Mono<Void> deleteMemory(long memoryId, String sessionId) {
+        return userContext.getCurrentUser()
+                .flatMap(user -> webClient.delete()
+                        .uri(u -> {
+                            var builder = u.path("/api/v1/memory/{memoryId}");
+                            if (sessionId != null && !sessionId.isBlank()) {
+                                builder.queryParam("session_id", sessionId);
+                            }
+                            return builder.build(memoryId);
+                        })
+                        .headers(headers -> addUserHeaders(headers, user))
+                        .retrieve()
+                        .bodyToMono(Void.class)
+                        .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                        .doOnError(e -> log.error("Error deleting memory {}: {}", memoryId, e.getMessage())));
     }
 
     // ── Knowledge base ──────────────────────────────────────────────────────
@@ -480,8 +567,15 @@ public class AiServiceClient {
         if (arr.isArray()) {
             arr.forEach(m -> {
                 ConversationDetail.ConversationMessage msg = new ConversationDetail.ConversationMessage();
+                msg.setId(longValue(m, "id"));
                 msg.setRole(text(m, "role"));
                 msg.setContent(text(m, "content"));
+                msg.setMessageType(text(m, "message_type", "messageType"));
+                msg.setStatus(text(m, "status"));
+                JsonNode metadata = m.get("metadata");
+                if (metadata != null && !metadata.isNull()) {
+                    msg.setMetadata(metadata);
+                }
                 msg.setCreatedAt(text(m, "created_at"));
                 msgs.add(msg);
             });
@@ -698,6 +792,23 @@ public class AiServiceClient {
         for (String value : values) {
             if (value != null && !value.isBlank()) {
                 return value;
+            }
+        }
+        return null;
+    }
+
+    private Long longValue(JsonNode node, String... fieldNames) {
+        if (node == null) {
+            return null;
+        }
+        for (String fieldName : fieldNames) {
+            JsonNode value = node.get(fieldName);
+            if (value != null && !value.isNull()) {
+                String textValue = value.asText();
+                if (textValue == null || textValue.isBlank()) {
+                    return null;
+                }
+                return value.isNumber() ? value.asLong() : Long.parseLong(textValue);
             }
         }
         return null;

@@ -3,24 +3,39 @@
 from __future__ import annotations
 
 import json
+import logging
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.agents._prompt import session_context_payload
 from app.plan import generate_plan_id, get_response_template
 from app.services.llm import get_llm
 from app.state import EmergencyAction, EmergencyPlan, NotificationRecord, ResourceAllocation, RiskLevel, to_plain_data
-from app.utils.json_parser import extract_json
+from app.utils.llm_output_harness import StructuredOutputHarness
+
+logger = logging.getLogger(__name__)
 
 
 class PlanActionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     action_type: str
     description: str
     priority: int = Field(default=3, ge=1, le=5)
     responsible_dept: str = ""
     deadline_minutes: int | None = Field(default=None, ge=0)
 
+    @field_validator("action_type", "description")
+    @classmethod
+    def _required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
 
 class PlanResourcePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     resource_type: str
     resource_name: str
     quantity: int = Field(ge=1)
@@ -28,22 +43,69 @@ class PlanResourcePayload(BaseModel):
     target_location: str = ""
     eta_minutes: int | None = Field(default=None, ge=0)
 
+    @field_validator("resource_type", "resource_name")
+    @classmethod
+    def _required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
 
 class PlanNotificationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     target: str
     channel: str = "sms"
     content: str
     status: str = "pending"
 
+    @field_validator("target", "content")
+    @classmethod
+    def _required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+
+class PlanCitationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    citation_id: str
+    document_title: str = ""
+    source_uri: str = ""
+    content: str = ""
+
+    @field_validator("citation_id")
+    @classmethod
+    def _required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
 
 class EmergencyPlanPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     plan_name: str
     trigger_conditions: str
     summary: str
     actions: list[PlanActionPayload] = Field(min_length=1)
     resources: list[PlanResourcePayload] = Field(min_length=1)
     notifications: list[PlanNotificationPayload] = Field(default_factory=list)
-    citations: list[dict] = Field(default_factory=list)
+    citations: list[PlanCitationPayload] = Field(default_factory=list)
+
+    @field_validator("plan_name", "trigger_conditions", "summary")
+    @classmethod
+    def _required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+
+_PLAN_OUTPUT_HARNESS = StructuredOutputHarness(
+    EmergencyPlanPayload,
+    name="EmergencyPlanPayload",
+)
 
 
 def _build_template_plan(plan_id: str, level: str, template: dict, session_id: str) -> EmergencyPlan:
@@ -81,7 +143,7 @@ def _build_template_plan(plan_id: str, level: str, template: dict, session_id: s
 
 
 def _plan_from_model_payload(
-    parsed: dict,
+    payload: EmergencyPlanPayload,
     *,
     fallback_plan: EmergencyPlan,
     plan_id: str,
@@ -89,7 +151,6 @@ def _plan_from_model_payload(
     session_id: str,
     template: dict,
 ) -> EmergencyPlan:
-    payload = EmergencyPlanPayload.model_validate(parsed)
     actions = [
         EmergencyAction(
             action_id=f"{plan_id}-A{i + 1:02d}",
@@ -137,7 +198,7 @@ def _plan_from_model_payload(
             for item in payload.notifications[:20]
             if item.target and item.content
         ],
-        citations=[dict(item) for item in payload.citations if isinstance(item, dict)],
+        citations=[item.model_dump(exclude_none=True) for item in payload.citations],
     )
 
 
@@ -160,7 +221,7 @@ async def plan_generator_node(state: dict) -> dict:
                     "risk_assessment": to_plain_data(assessment),
                     "data_summary": state.get("data_summary", ""),
                     "evidence": to_plain_data(evidence),
-                    "memory_context": to_plain_data(state.get("memory_context", {})),
+                    "memory_context": session_context_payload(state),
                     "template_reference": template,
                     "fallback_plan": to_plain_data(plan),
                 }, ensure_ascii=False, indent=2),
@@ -177,16 +238,18 @@ async def plan_generator_node(state: dict) -> dict:
                     "resources 中每项至少包含 resource_type, resource_name, quantity, "
                     "source_location, target_location, eta_minutes。"
                     "notifications 中每项至少包含 target, channel, content, status。"
+                    "citations 中每项至少包含 citation_id，可包含 document_title, source_uri, content。"
+                    f"{_PLAN_OUTPUT_HARNESS.schema_instruction()}"
                     "不得输出与防汛无关内容。"
                 ),
                 temperature=0.2,
                 response_format={"type": "json_object"},
             )
             content = getattr(response, "content", "")
-            parsed = extract_json(content) or {}
-            if parsed:
+            harness_result = _PLAN_OUTPUT_HARNESS.parse(content)
+            if harness_result.ok and harness_result.payload is not None:
                 plan = _plan_from_model_payload(
-                    parsed,
+                    harness_result.payload,
                     fallback_plan=plan,
                     plan_id=plan_id,
                     level=level,
@@ -194,6 +257,11 @@ async def plan_generator_node(state: dict) -> dict:
                     template=template,
                 )
                 message = f"已生成预案 {plan.plan_name}，包含 {len(plan.actions)} 项措施"
+            elif harness_result.issues:
+                logger.warning(
+                    "plan generator LLM output failed harness validation: %s",
+                    "; ".join(harness_result.issues[:5]),
+                )
         except Exception:
             message = f"已生成预案 {plan.plan_name}"
 

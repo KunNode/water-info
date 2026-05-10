@@ -1,0 +1,14 @@
+{
+  "id": "risk_assessment",
+  "name": "风险研判",
+  "version": "1.0",
+  "trigger_intents": ["risk_assessment", "alarm_overview"],
+  "required_inputs": ["user_query", "session_id"],
+  "required_tools": ["query_station_data", "query_observations", "query_alarms", "query_weather"],
+  "agent_sequence": ["data_analyst", "risk_assessor"],
+  "output_schema": "RiskAssessorOutput",
+  "quality_gates": [
+    {"name": "risk_score_present", "check_type": "field_present", "target_field": "risk_assessment.risk_score", "condition": "is_not_none"}
+  ],
+  "fallback_strategy": "degrade"
+}

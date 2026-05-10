@@ -377,3 +377,87 @@ class TestAgentNodes:
 
         assert result["emergency_plan"].plan_name != "空预案"
         assert result["emergency_plan"].actions[0].action_type != ""
+
+    @pytest.mark.asyncio
+    async def test_plan_generator_node_falls_back_when_model_payload_has_extra_fields(self):
+        mock_llm = SimpleNamespace(
+            is_enabled=True,
+            ainvoke=AsyncMock(
+                return_value=SimpleNamespace(
+                    content=(
+                        '{"plan_name":"越界预案","trigger_conditions":"高风险","summary":"响应",'
+                        '"actions":[{"action_type":"patrol","description":"巡查","priority":1,'
+                        '"responsible_dept":"防汛办","deadline_minutes":30,"unexpected":"extra"}],'
+                        '"resources":[{"resource_type":"team","resource_name":"抢险队","quantity":1,'
+                        '"source_location":"仓库","target_location":"城区","eta_minutes":20}],'
+                        '"notifications":[],"citations":[]}'
+                    )
+                )
+            ),
+        )
+
+        with patch("app.agents.plan_generator.get_llm", return_value=mock_llm):
+            result = await plan_generator_node(
+                {
+                    "session_id": "test-session",
+                    "user_query": "生成应急预案",
+                    "messages": [],
+                    "iteration": 0,
+                    "data_summary": "多个站点接近警戒水位",
+                    "risk_assessment": RiskAssessment(
+                        risk_level=RiskLevel.HIGH,
+                        risk_score=80.0,
+                        affected_stations=["S1"],
+                        key_risks=["水位超过警戒线"],
+                    ),
+                }
+            )
+
+        assert result["emergency_plan"].plan_name != "越界预案"
+        assert result["emergency_plan"].actions[0].action_type != ""
+
+    @pytest.mark.asyncio
+    async def test_plan_generator_node_accepts_harness_valid_payload(self):
+        mock_llm = SimpleNamespace(
+            is_enabled=True,
+            ainvoke=AsyncMock(
+                return_value=SimpleNamespace(
+                    content=(
+                        '{"plan_name":"城区高风险防汛预案","trigger_conditions":"水位超过警戒线",'
+                        '"summary":"立即组织重点区域巡查和物资前置。",'
+                        '"actions":[{"action_type":"patrol","description":"加密巡查低洼路段",'
+                        '"priority":1,"responsible_dept":"防汛办","deadline_minutes":30}],'
+                        '"resources":[{"resource_type":"team","resource_name":"抢险队","quantity":2,'
+                        '"source_location":"应急仓库","target_location":"低洼片区","eta_minutes":20}],'
+                        '"notifications":[{"target":"街道值班员","channel":"sms","content":"请立即到岗",'
+                        '"status":"pending"}],'
+                        '"citations":[{"citation_id":"[1]","document_title":"防汛手册",'
+                        '"source_uri":"kb://manual","content":"高风险响应条款"}]}'
+                    )
+                )
+            ),
+        )
+
+        with patch("app.agents.plan_generator.get_llm", return_value=mock_llm):
+            result = await plan_generator_node(
+                {
+                    "session_id": "test-session",
+                    "user_query": "生成应急预案",
+                    "messages": [],
+                    "iteration": 0,
+                    "data_summary": "多个站点接近警戒水位",
+                    "risk_assessment": RiskAssessment(
+                        risk_level=RiskLevel.HIGH,
+                        risk_score=80.0,
+                        affected_stations=["S1"],
+                        key_risks=["水位超过警戒线"],
+                    ),
+                }
+            )
+
+        plan = result["emergency_plan"]
+        assert plan.plan_name == "城区高风险防汛预案"
+        assert plan.actions[0].responsible_dept == "防汛办"
+        assert plan.resources[0].quantity == 2
+        assert plan.notifications[0].target == "街道值班员"
+        assert plan.citations[0]["citation_id"] == "[1]"

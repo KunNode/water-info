@@ -12,6 +12,7 @@ from dataclasses import asdict
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from loguru import logger as loguru_logger
 
 from app.api.risk_scan import router as risk_scan_router
 from app.config import get_settings
@@ -37,11 +38,15 @@ from app.models import (
     KBSearchRequest,
     KBStatsResponse,
     MemoryItemResponse,
+    MemoryItemUpdateRequest,
     PlanDetailResponse,
     PlanExecuteRequest,
     PlanExecuteResponse,
     SessionResponse,
 )
+from app.platform.audit_recorder import AuditRecorder, set_audit_recorder
+from app.platform.human_in_the_loop import HumanInTheLoopGateway
+from app.platform.skill_registry import get_skill_registry
 from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
@@ -137,6 +142,20 @@ def _risk_level_value(assessment: RiskAssessment | None) -> str:
     return assessment.risk_level.value
 
 
+def _memory_item_response(row: dict) -> MemoryItemResponse:
+    return MemoryItemResponse(
+        id=int(row["id"]),
+        namespace=str(row.get("namespace") or ""),
+        item_type=str(row.get("item_type") or "fact"),
+        content=str(row.get("content") or ""),
+        importance=float(row.get("importance") or 0.5),
+        confidence=float(row.get("confidence") or 0.5),
+        metadata=row.get("metadata") or {},
+        source_session_id=str(row.get("source_session_id") or "") or None,
+        updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
+    )
+
+
 def _build_initial_state(
     session_id: str,
     query: str,
@@ -153,6 +172,54 @@ def _build_initial_state(
         "messages": history + [{"role": "user", "content": query}],
         "iteration": 0,
     }
+
+
+def _normalize_history_messages(rows: list[dict]) -> list[dict[str, str]]:
+    """Keep only completed chat turns that are safe to pass back into the graph."""
+    messages: list[dict[str, str]] = []
+    for row in rows:
+        role = str(row.get("role") or "")
+        content = str(row.get("content") or "").strip()
+        status = str(row.get("status") or "completed")
+        if role not in {"user", "assistant"} or not content or status in {"failed", "streaming"}:
+            continue
+        messages.append({"role": role, "content": content})
+    return messages
+
+
+async def _load_session_history(session_id: str, db, sessions) -> list[dict[str, str]]:
+    """Load short-term dialogue history when LangGraph checkpointing is unavailable.
+
+    LangGraph's Postgres checkpointer already restores thread-scoped state by
+    thread_id=session_id. When it is active, adding Redis/DB history again would
+    duplicate old messages because the state reducer appends messages.
+    """
+    if get_langgraph_persistence().enabled:
+        return []
+
+    try:
+        history = _normalize_history_messages(await sessions.get_history(session_id))
+        if history:
+            return history
+    except Exception as exc:
+        logger.debug("[%s] Redis session history load skipped: %s", session_id, exc)
+
+    try:
+        rows = await db.get_conversation_messages(session_id, limit=20)
+        return _normalize_history_messages(rows)
+    except Exception as exc:
+        logger.debug("[%s] DB session history fallback skipped: %s", session_id, exc)
+        return []
+
+
+async def _save_short_term_turn(sessions, session_id: str, role: str, content: str) -> None:
+    """Mirror a completed chat turn into Redis short-term memory."""
+    if not content:
+        return
+    try:
+        await sessions.save_turn(session_id, role, content)
+    except Exception as exc:
+        logger.debug("[%s] Redis session turn save skipped: %s", session_id, exc)
 
 
 def _event_line(payload: dict) -> str:
@@ -241,6 +308,106 @@ def _build_stream_events(agent: str, update: dict) -> list[dict]:
     return events
 
 
+def _normalize_reasoning_status(status_raw: str) -> str:
+    """Map heterogeneous trace status values to the frontend's 4-state enum."""
+    normalized = (status_raw or "").lower()
+    if normalized in {"completed", "success", "done"}:
+        return "success"
+    if normalized in {"failed", "error"}:
+        return "error"
+    if normalized in {"running", "in_progress", "started"}:
+        return "running"
+    return "success"
+
+
+def _reasoning_steps_from_final_state(final_state: dict) -> list[dict]:
+    """Build ``conversation_messages.metadata.reasoning_steps`` from graph state.
+
+    Merges ``execution_traces`` (and any future thought steps exposed on the
+    state) into the JSONB schema documented in design §1: each entry carries
+    ``id / kind / title / content / status / duration_ms`` plus an optional
+    ``tool`` sub-object for ``kind == "tool"``.
+
+    This is a *pure* function: deterministic, no clock access, no I/O. Missing
+    fields fall back to safe defaults; non-dict inputs yield an empty list.
+    """
+    if not isinstance(final_state, dict):
+        return []
+    traces = final_state.get("execution_traces") or []
+    steps: list[dict] = []
+    for idx, trace in enumerate(traces):
+        if not isinstance(trace, dict):
+            continue
+        tool_name = trace.get("tool_name")
+        kind = "tool" if tool_name else "thought"
+        metadata = trace.get("metadata") if isinstance(trace.get("metadata"), dict) else {}
+        step: dict = {
+            "id": f"{kind}-{idx}",
+            "kind": kind,
+            "title": str(trace.get("title") or ""),
+            "content": str(trace.get("detail") or ""),
+            "status": _normalize_reasoning_status(str(trace.get("status") or "completed")),
+        }
+        duration_ms = metadata.get("duration_ms")
+        if isinstance(duration_ms, (int, float)) and not isinstance(duration_ms, bool):
+            step["duration_ms"] = int(duration_ms)
+        if kind == "tool":
+            tool_obj: dict = {
+                "name": str(tool_name),
+                "display_name": str(trace.get("title") or tool_name),
+            }
+            input_summary = metadata.get("input_summary")
+            result_summary = metadata.get("output_summary")
+            if input_summary:
+                tool_obj["input_summary"] = str(input_summary)
+            if result_summary:
+                tool_obj["result_summary"] = str(result_summary)
+            step["tool"] = tool_obj
+        steps.append(step)
+    return steps
+
+
+def _tool_calls_from_traces(traces: list[dict] | None) -> list[dict]:
+    """Flatten tool-class traces into ``metadata.tool_calls[]``.
+
+    Each emitted entry matches the design §1 schema:
+    ``{tool_call_id, tool_name, arguments, result, error, duration_ms}``.
+    A trace is considered tool-class when it carries ``tool_name`` or has
+    ``phase == "tool_call"``. Other traces are skipped so the audit panel only
+    sees real tool invocations.
+
+    Pure function: deterministic mapping, never raises.
+    """
+    if not traces:
+        return []
+    calls: list[dict] = []
+    for idx, trace in enumerate(traces):
+        if not isinstance(trace, dict):
+            continue
+        tool_name = trace.get("tool_name")
+        phase = str(trace.get("phase") or "")
+        if not tool_name and phase != "tool_call":
+            continue
+        metadata = trace.get("metadata") if isinstance(trace.get("metadata"), dict) else {}
+        input_summary = metadata.get("input_summary")
+        output_summary = metadata.get("output_summary")
+        duration_ms = metadata.get("duration_ms")
+        status_raw = str(trace.get("status") or "").lower()
+        detail = str(trace.get("detail") or "")
+        error_msg = detail if status_raw in {"failed", "error"} and detail else None
+        call: dict = {
+            "tool_call_id": f"tool-{idx}-{tool_name or phase}",
+            "tool_name": str(tool_name or ""),
+            "arguments": {"input_summary": str(input_summary)} if input_summary else {},
+            "result": {"output_summary": str(output_summary)} if output_summary else {},
+            "error": error_msg,
+        }
+        if isinstance(duration_ms, (int, float)) and not isinstance(duration_ms, bool):
+            call["duration_ms"] = int(duration_ms)
+        calls.append(call)
+    return calls
+
+
 def _serialize_kb_document(row: dict) -> dict:
     return {
         "id": str(row["id"]),
@@ -312,6 +479,20 @@ async def lifespan(app: FastAPI):
             )
     except Exception as exc:
         logger.warning("数据库预热失败（服务仍可启动）: %s", exc)
+    if settings.skill_registry_enabled:
+        try:
+            registry = get_skill_registry()
+            registry.load_all()
+            app.state.skill_registry = registry
+            logger.info("SkillRegistry loaded %s skills", len(registry.skills))
+        except Exception as exc:
+            logger.warning("SkillRegistry initialization failed; continuing without skills: %s", exc)
+    app.state.audit_recorder = AuditRecorder(
+        get_platform_client(),
+        enabled=settings.audit_tables_enabled,
+    )
+    set_audit_recorder(app.state.audit_recorder)
+    app.state.hil_gateway = HumanInTheLoopGateway()
     await get_risk_scan_scheduler().start()
     yield
     await get_risk_scan_scheduler().stop()
@@ -371,9 +552,10 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
         session_id, title, user_id=user_id, username=username, title_source="auto_first_query"
     )
 
-    history = await sessions.get_history(session_id)
+    history = await _load_session_history(session_id, db, sessions)
     # Save user message with new schema
     await db.save_conversation_message(session_id, "user", request.query, message_type="chat", status="completed")
+    await _save_short_term_turn(sessions, session_id, "user", request.query)
 
     try:
         final_state = await flood_response_graph.ainvoke(
@@ -386,9 +568,31 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
     final_state.setdefault("session_id", session_id)
     final_state.setdefault("user_query", request.query)
 
+    # Req 4.4: if memory_loader short-circuited the graph because a critical
+    # store (summary / snapshot / conversation_messages) failed to read, the
+    # graph will return with ``error="memory_load_failed: <source>"`` instead
+    # of a real ``final_response``. The SSE path handles this inside
+    # ``event_stream``; the non-stream handler must mirror that contract so it
+    # does not fabricate a success reply on top of the user's question. We:
+    #   * do NOT persist an assistant message (the user message has already
+    #     been written above and keeps the audit trail intact);
+    #   * do NOT fire the background ``_persist_result`` task (no plan exists);
+    #   * raise 503 to communicate that the dependency is temporarily
+    #     unavailable rather than a generic 500.
+    error_str = str(final_state.get("error") or "")
+    if error_str.startswith("memory_load_failed:"):
+        source = error_str.split(":", 1)[1].strip() or "unknown"
+        loguru_logger.error(
+            "[{session_id}] flood_query aborted: memory load failed (source={source})",
+            session_id=session_id,
+            source=source,
+        )
+        raise HTTPException(status_code=503, detail="会话历史加载失败，请稍后重试")
+
     # Save assistant response
     response_content = final_state.get("final_response") or "处理完成"
     await db.save_conversation_message(session_id, "assistant", response_content, message_type="chat", status="completed")
+    await _save_short_term_turn(sessions, session_id, "assistant", response_content)
 
     # Persist plan and snapshot
     asyncio.create_task(_persist_result(session_id, final_state))
@@ -427,10 +631,11 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
             session_id, title, user_id=user_id, username=username, title_source="auto_first_query"
         )
 
-        history = await sessions.get_history(session_id)
+        history = await _load_session_history(session_id, db, sessions)
 
         # Save user message
         await db.save_conversation_message(session_id, "user", request.query, message_type="chat", status="completed")
+        await _save_short_term_turn(sessions, session_id, "user", request.query)
 
         # Create assistant placeholder message with streaming status
         assistant_msg_id = await db.save_conversation_message(
@@ -461,6 +666,34 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
                     continue
                 node_name, node_update = next(iter(update.items()))
                 final_state = {**(final_state or {}), **node_update}
+                # Req 4.4: if memory_loader short-circuited the graph because a
+                # critical store (summary / snapshot / conversation_messages)
+                # failed to read, surface a structured SSE ``error`` event and
+                # terminate the stream. The error string format is produced by
+                # ``memory_loader_node`` as ``"memory_load_failed: <source>"``.
+                error_str = str(final_state.get("error") or "")
+                if error_str.startswith("memory_load_failed:"):
+                    source = error_str.split(":", 1)[1].strip() or "unknown"
+                    loguru_logger.error(
+                        "[{session_id}] SSE error: memory load failed (source={source})",
+                        session_id=session_id,
+                        source=source,
+                    )
+                    try:
+                        await db.update_message_content(
+                            assistant_msg_id,
+                            "会话历史加载失败，请稍后重试",
+                            status="failed",
+                        )
+                    except Exception:
+                        pass
+                    yield _event_line({
+                        "type": "error",
+                        "message": "会话历史加载失败，请稍后重试",
+                        "code": "memory_load_failed",
+                        "recoverable": False,
+                    })
+                    return
                 for event in _build_stream_events(node_name, node_update):
                     yield _event_line(event)
                     # Track final response for persistence
@@ -472,14 +705,25 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
                 final_state.setdefault("session_id", session_id)
                 final_state.setdefault("user_query", request.query)
                 final_response = final_state.get("final_response") or accumulated_response or "处理完成"
-                # Collect execution traces for persistence
+                # Build metadata following the JSONB contract defined in design §1.
+                # reasoning_steps + tool_calls are derived from execution_traces; the
+                # execution_traces array is also persisted as-is for the audit panel.
+                # The `agent` field falls back to "final_response" when the graph state
+                # did not mark a current agent (mirrors design §8).
                 exec_traces = final_state.get("execution_traces") or []
-                trace_metadata = {"execution_traces": exec_traces} if exec_traces else None
-                # Update assistant message to completed
+                trace_metadata: dict = {
+                    "version": 1,
+                    "agent": final_state.get("current_agent") or "final_response",
+                    "reasoning_steps": _reasoning_steps_from_final_state(final_state),
+                    "execution_traces": exec_traces,
+                    "tool_calls": _tool_calls_from_traces(exec_traces),
+                }
+                # Update assistant message to completed with full metadata contract.
                 await db.update_message_content(
                     assistant_msg_id, final_response, status="completed",
                     metadata=trace_metadata,
                 )
+                await _save_short_term_turn(sessions, session_id, "assistant", final_response)
                 # Persist plan and snapshot
                 asyncio.create_task(_persist_result(session_id, final_state))
             yield _event_line({"type": "agent_update", "agent": "__done__", "status": "done"})
@@ -798,20 +1042,43 @@ async def list_memory(http_request: Request, session_id: str | None = None, limi
     user_id, _ = _get_user_from_request(http_request)
     namespaces = build_memory_namespaces(user_id, session_id or "")
     rows = await get_db_service().list_memory_items(namespaces=namespaces, limit=limit, offset=offset)
-    return [
-        MemoryItemResponse(
-            id=int(row["id"]),
-            namespace=str(row.get("namespace") or ""),
-            item_type=str(row.get("item_type") or "fact"),
-            content=str(row.get("content") or ""),
-            importance=float(row.get("importance") or 0.5),
-            confidence=float(row.get("confidence") or 0.5),
-            metadata=row.get("metadata") or {},
-            source_session_id=str(row.get("source_session_id") or "") or None,
-            updated_at=str(row.get("updated_at")) if row.get("updated_at") else None,
-        )
-        for row in rows
-    ]
+    return [_memory_item_response(row) for row in rows]
+
+
+@app.get("/api/v1/memory/user", response_model=list[MemoryItemResponse])
+async def list_user_memory(http_request: Request, limit: int = 50, offset: int = 0):
+    """List active long-term memory items owned by the current user namespace."""
+    user_id, _ = _get_user_from_request(http_request)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="缺少用户身份")
+    namespace = f"user:{user_id}:flood_assistant"
+    rows = await get_db_service().list_memory_items(namespaces=[namespace], limit=limit, offset=offset)
+    return [_memory_item_response(row) for row in rows]
+
+
+@app.patch("/api/v1/memory/{memory_id}", response_model=MemoryItemResponse)
+async def update_memory(memory_id: int, request: MemoryItemUpdateRequest, http_request: Request, session_id: str | None = None):
+    """Update or disable a memory item in the current user's visible namespace."""
+    if request.content is not None and not request.content.strip():
+        raise HTTPException(status_code=400, detail="记忆内容不能为空")
+    if request.item_type is not None and not request.item_type.strip():
+        raise HTTPException(status_code=400, detail="记忆类型不能为空")
+
+    user_id, _ = _get_user_from_request(http_request)
+    namespaces = build_memory_namespaces(user_id, session_id or "")
+    row = await get_db_service().update_memory_item(
+        memory_id,
+        namespaces=namespaces,
+        item_type=request.item_type,
+        content=request.content,
+        importance=request.importance,
+        confidence=request.confidence,
+        metadata=request.metadata,
+        status=request.status,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="记忆不存在")
+    return _memory_item_response(row)
 
 
 @app.delete("/api/v1/memory/{memory_id}")

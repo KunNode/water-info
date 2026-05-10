@@ -1,6 +1,0 @@
-{
-  "last_turn_at": "2026-04-24T12:10:10.781Z",
-  "turn_count": 2,
-  "last_progress_at": "2026-04-24T12:10:10.781Z",
-  "last_agent_output": "已完成 AI 指挥台的现代化 UI/UX 重构，dev server 也在跑：\n\n`http://localhost:5173/ai/command`\n\n**改动文件**\n- 主页面：[index.v"
-}

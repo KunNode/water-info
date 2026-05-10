@@ -7,7 +7,7 @@ from collections import defaultdict
 from app.config import get_settings
 from app.database import get_db_service
 from app.rag.embedder import get_embedding_client
-from app.rag.models import SearchResult
+from app.rag.models import MetadataFilter, SearchResult, metadata_matches_filter
 from app.rag.splitter import segment_search_text
 
 
@@ -24,6 +24,7 @@ async def hybrid_search(
     *,
     top_k: int = 5,
     source_types: list[str] | None = None,
+    metadata_filter: MetadataFilter | None = None,
 ) -> list[SearchResult]:
     query = query.strip()
     if not query:
@@ -43,6 +44,7 @@ async def hybrid_search(
                 top_n=max(top_k * 4, 20),
                 source_types=source_types,
                 model=settings.embedding_model,
+                metadata_filter=metadata_filter,
             )
         except Exception:
             vector_rows = []
@@ -53,6 +55,7 @@ async def hybrid_search(
             tokenized_query,
             top_n=max(top_k * 4, 20),
             source_types=source_types,
+            metadata_filter=metadata_filter,
         )
 
     if not vector_rows and not keyword_rows:
@@ -91,20 +94,21 @@ async def hybrid_search(
         effective_score = float(vector_score or keyword_score or fusion_scores[str(row["chunk_id"])])
         if vector_score is not None and effective_score < settings.rag_min_score:
             continue
-        results.append(
-            SearchResult(
-                chunk_id=str(row["chunk_id"]),
-                document_id=document_id,
-                document_title=str(row["document_title"]),
-                source_uri=str(row.get("source_uri") or ""),
-                content=str(row.get("content") or ""),
-                heading_path=list(row.get("heading_path") or []),
-                score=effective_score,
-                vector_score=float(vector_score) if vector_score is not None else None,
-                keyword_score=float(keyword_score) if keyword_score is not None else None,
-                metadata=dict(row.get("metadata") or {}),
-            )
+        result = SearchResult(
+            chunk_id=str(row["chunk_id"]),
+            document_id=document_id,
+            document_title=str(row["document_title"]),
+            source_uri=str(row.get("source_uri") or ""),
+            content=str(row.get("content") or ""),
+            heading_path=list(row.get("heading_path") or []),
+            score=effective_score,
+            vector_score=float(vector_score) if vector_score is not None else None,
+            keyword_score=float(keyword_score) if keyword_score is not None else None,
+            metadata=dict(row.get("metadata") or {}),
         )
+        if not metadata_matches_filter(result, metadata_filter):
+            continue
+        results.append(result)
         per_document[document_id] += 1
         if len(results) >= top_k:
             break
