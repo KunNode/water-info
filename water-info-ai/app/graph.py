@@ -13,9 +13,12 @@ from app.agents.memory import memory_loader_node, memory_writer_node
 from app.agents.notification import notification_node
 from app.agents.parallel_dispatch import parallel_dispatch_node
 from app.agents.plan_generator import plan_generator_node
+from app.agents.plan_reviewer import plan_reviewer_node
 from app.agents.resource_dispatcher import resource_dispatcher_node
 from app.agents.risk_assessor import risk_assessor_node
+from app.agents.safety_checker import safety_checker_node
 from app.agents.supervisor import supervisor_node
+from app.platform.agent_audit import audited_agent
 from app.state import FloodGraphState
 
 
@@ -28,19 +31,21 @@ def _route_from_supervisor(state: dict) -> str:
 
 def build_flood_response_graph(*, checkpointer=None, store=None):
     graph = StateGraph(FloodGraphState)
-    graph.add_node("memory_loader", memory_loader_node)
-    graph.add_node("supervisor", supervisor_node)
-    graph.add_node("conversation_assistant", conversation_assistant_node)
-    graph.add_node("data_analyst", data_analyst_node)
-    graph.add_node("risk_assessor", risk_assessor_node)
-    graph.add_node("plan_generator", plan_generator_node)
-    graph.add_node("resource_dispatcher", resource_dispatcher_node)
-    graph.add_node("notification", notification_node)
-    graph.add_node("execution_monitor", execution_monitor_node)
-    graph.add_node("parallel_dispatch", parallel_dispatch_node)
-    graph.add_node("knowledge_retriever", knowledge_retriever_node)
-    graph.add_node("final_response", final_response_node)
-    graph.add_node("memory_writer", memory_writer_node)
+    graph.add_node("memory_loader", audited_agent("memory_loader", memory_loader_node))
+    graph.add_node("supervisor", audited_agent("supervisor", supervisor_node))
+    graph.add_node("conversation_assistant", audited_agent("conversation_assistant", conversation_assistant_node))
+    graph.add_node("data_analyst", audited_agent("data_analyst", data_analyst_node))
+    graph.add_node("risk_assessor", audited_agent("risk_assessor", risk_assessor_node))
+    graph.add_node("plan_generator", audited_agent("plan_generator", plan_generator_node))
+    graph.add_node("resource_dispatcher", audited_agent("resource_dispatcher", resource_dispatcher_node))
+    graph.add_node("notification", audited_agent("notification", notification_node))
+    graph.add_node("execution_monitor", audited_agent("execution_monitor", execution_monitor_node))
+    graph.add_node("parallel_dispatch", audited_agent("parallel_dispatch", parallel_dispatch_node))
+    graph.add_node("knowledge_retriever", audited_agent("knowledge_retriever", knowledge_retriever_node))
+    graph.add_node("plan_reviewer", audited_agent("plan_reviewer", plan_reviewer_node))
+    graph.add_node("safety_checker", audited_agent("safety_checker", safety_checker_node))
+    graph.add_node("final_response", audited_agent("final_response", final_response_node))
+    graph.add_node("memory_writer", audited_agent("memory_writer", memory_writer_node))
 
     graph.add_edge(START, "memory_loader")
     graph.add_edge("memory_loader", "supervisor")
@@ -57,6 +62,8 @@ def build_flood_response_graph(*, checkpointer=None, store=None):
             "execution_monitor": "execution_monitor",
             "parallel_dispatch": "parallel_dispatch",
             "knowledge_retriever": "knowledge_retriever",
+            "plan_reviewer": "plan_reviewer",
+            "safety_checker": "safety_checker",
             "final_response": "final_response",
         },
     )
@@ -68,6 +75,8 @@ def build_flood_response_graph(*, checkpointer=None, store=None):
     graph.add_edge("notification", "supervisor")
     graph.add_edge("execution_monitor", "supervisor")
     graph.add_edge("parallel_dispatch", "supervisor")
+    graph.add_edge("plan_reviewer", "supervisor")
+    graph.add_edge("safety_checker", "supervisor")
     graph.add_conditional_edges(
         "knowledge_retriever",
         lambda s: "final_response" if s.get("rag_target", "answer") == "answer" else "supervisor",
@@ -83,9 +92,9 @@ flood_response_graph = build_flood_response_graph()
 
 def build_risk_only_graph():
     graph = StateGraph(FloodGraphState)
-    graph.add_node("data_analyst", data_analyst_node)
-    graph.add_node("risk_assessor", risk_assessor_node)
-    graph.add_node("final_response", final_response_node)
+    graph.add_node("data_analyst", audited_agent("data_analyst", data_analyst_node))
+    graph.add_node("risk_assessor", audited_agent("risk_assessor", risk_assessor_node))
+    graph.add_node("final_response", audited_agent("final_response", final_response_node))
     graph.add_edge(START, "data_analyst")
     graph.add_edge("data_analyst", "risk_assessor")
     graph.add_edge("risk_assessor", "final_response")
@@ -95,10 +104,10 @@ def build_risk_only_graph():
 
 def build_risk_event_graph():
     graph = StateGraph(FloodGraphState)
-    graph.add_node("data_analyst", data_analyst_node)
-    graph.add_node("risk_assessor", risk_assessor_node)
-    graph.add_node("plan_generator", plan_generator_node)
-    graph.add_node("final_response", final_response_node)
+    graph.add_node("data_analyst", audited_agent("data_analyst", data_analyst_node))
+    graph.add_node("risk_assessor", audited_agent("risk_assessor", risk_assessor_node))
+    graph.add_node("plan_generator", audited_agent("plan_generator", plan_generator_node))
+    graph.add_node("final_response", audited_agent("final_response", final_response_node))
     graph.add_edge(START, "data_analyst")
     graph.add_edge("data_analyst", "risk_assessor")
     graph.add_edge("risk_assessor", "plan_generator")

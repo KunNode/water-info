@@ -43,6 +43,9 @@ from app.models import (
     PlanExecuteResponse,
     SessionResponse,
 )
+from app.platform.audit_recorder import AuditRecorder, set_audit_recorder
+from app.platform.human_in_the_loop import HumanInTheLoopGateway
+from app.platform.skill_registry import get_skill_registry
 from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
@@ -375,6 +378,20 @@ async def lifespan(app: FastAPI):
             )
     except Exception as exc:
         logger.warning("数据库预热失败（服务仍可启动）: %s", exc)
+    if settings.skill_registry_enabled:
+        try:
+            registry = get_skill_registry()
+            registry.load_all()
+            app.state.skill_registry = registry
+            logger.info("SkillRegistry loaded %s skills", len(registry.skills))
+        except Exception as exc:
+            logger.warning("SkillRegistry initialization failed; continuing without skills: %s", exc)
+    app.state.audit_recorder = AuditRecorder(
+        get_platform_client(),
+        enabled=settings.audit_tables_enabled,
+    )
+    set_audit_recorder(app.state.audit_recorder)
+    app.state.hil_gateway = HumanInTheLoopGateway()
     await get_risk_scan_scheduler().start()
     yield
     await get_risk_scan_scheduler().stop()

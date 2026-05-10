@@ -9,6 +9,9 @@ import re
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
+from app.platform.skill_executor import SkillExecutor
+from app.platform.skill_registry import get_skill_registry
+from app.schemas.routing import RoutingDecision, SafetyLevel
 from app.services.llm import get_llm
 from app.state import RiskLevel
 from app.tools.trace import make_trace
@@ -82,7 +85,7 @@ class SupervisorDecision(BaseModel):
     next_agent: str = Field(
         pattern=(
             "^(conversation_assistant|data_analyst|risk_assessor|plan_generator|resource_dispatcher|"
-            "notification|execution_monitor|parallel_dispatch|knowledge_retriever|__end__)$"
+            "notification|execution_monitor|parallel_dispatch|knowledge_retriever|plan_reviewer|safety_checker|__end__)$"
         )
     )
     reasoning: str
@@ -132,6 +135,8 @@ WATER_DOMAIN_KEYWORDS = [
     *NOTIFICATION_KEYWORDS,
     *EXECUTION_KEYWORDS,
 ]
+HIGH_RISK_ACTION_KEYWORDS = ["疏散", "撤离", "封路", "道路封闭", "停运", "停课", "停工", "服务暂停"]
+ELEVATED_ACTION_KEYWORDS = ["响应升级", "提升响应", "外部通知", "发布通知", "调度", "派遣"]
 
 
 def _contains_any(text: str, keywords: list[str]) -> bool:
@@ -252,6 +257,67 @@ def _infer_focus_station_query(query: str) -> str | None:
     return None
 
 
+def _infer_safety_level(query: str, next_agent: str) -> SafetyLevel:
+    if _contains_any(query, HIGH_RISK_ACTION_KEYWORDS):
+        return SafetyLevel.CRITICAL
+    if next_agent in {"resource_dispatcher", "notification"} or _contains_any(query, ELEVATED_ACTION_KEYWORDS):
+        return SafetyLevel.HIGH
+    if next_agent in {"plan_generator", "risk_assessor", "parallel_dispatch"}:
+        return SafetyLevel.ELEVATED
+    return SafetyLevel.NORMAL
+
+
+def _required_context_for_agent(next_agent: str) -> list[str]:
+    requirements = {
+        "data_analyst": ["user_query"],
+        "risk_assessor": ["data_summary"],
+        "plan_generator": ["risk_assessment", "evidence_context"],
+        "resource_dispatcher": ["emergency_plan"],
+        "notification": ["emergency_plan"],
+        "execution_monitor": ["session_id"],
+        "knowledge_retriever": ["user_query"],
+    }
+    return requirements.get(next_agent, [])
+
+
+def _missing_context_for_agent(next_agent: str, state: dict, required_context: list[str]) -> list[str]:
+    missing: list[str] = []
+    for field in required_context:
+        if field == "evidence_context":
+            continue
+        if not state.get(field):
+            missing.append(field)
+    if next_agent == "__end__":
+        return []
+    return missing
+
+
+def _with_structured_routing(update: dict, state: dict, user_query: str) -> dict:
+    if not get_settings().structured_output_enabled:
+        return update
+
+    next_agent = str(update.get("next_agent") or "__end__")
+    intent = str(update.get("intent") or state.get("intent") or _infer_intent(user_query))
+    required_context = _required_context_for_agent(next_agent)
+    missing_context = _missing_context_for_agent(next_agent, {**state, **update}, required_context)
+    safety_level = SafetyLevel.HIGH if update.get("human_confirmation_required") else _infer_safety_level(user_query, next_agent)
+    decision = RoutingDecision(
+        intent=intent,
+        next_agent=next_agent,
+        required_context=required_context,
+        missing_context=missing_context,
+        reasoning=str(update.get("supervisor_reasoning") or "structured routing"),
+        safety_level=safety_level,
+    )
+
+    enriched = dict(update)
+    enriched["agent_run_id"] = decision.agent_run_id
+    enriched["routing_decision"] = decision.model_dump(mode="json")
+    enriched["safety_level"] = decision.safety_level.value
+    enriched["human_confirmation_required"] = bool(update.get("human_confirmation_required")) or decision.human_confirmation_required
+    return enriched
+
+
 def _deterministic_route(state: dict) -> str | None:
     query = str(state.get("user_query", ""))
     intent = str(state.get("intent") or _infer_intent(query))
@@ -342,6 +408,76 @@ def _deterministic_route(state: dict) -> str | None:
     return None
 
 
+def _agent_completed(agent: str, state: dict) -> bool:
+    if agent == "data_analyst":
+        return bool(state.get("data_summary"))
+    if agent == "risk_assessor":
+        return state.get("risk_assessment") is not None
+    if agent == "plan_generator":
+        return state.get("emergency_plan") is not None
+    if agent == "resource_dispatcher":
+        return bool(state.get("resource_plan"))
+    if agent == "notification":
+        return bool(state.get("notifications"))
+    if agent == "plan_reviewer":
+        return state.get("compliance_result") is not None
+    if agent == "safety_checker":
+        return state.get("safety_check_result") is not None
+    if agent == "execution_monitor":
+        return state.get("execution_progress") is not None
+    return False
+
+
+def _skill_route(state: dict, intent: str) -> dict | None:
+    settings = get_settings()
+    if not settings.skill_registry_enabled:
+        return None
+    registry = get_skill_registry()
+    if not registry.skills:
+        registry.load_all()
+    skill = registry.lookup_by_intent(intent)
+    if skill is None:
+        return None
+    sequence = list(state.get("skill_agent_sequence") or skill.agent_sequence)
+    for agent in sequence:
+        if not _agent_completed(agent, state):
+            return {
+                "next_agent": agent,
+                "active_skill_id": skill.id,
+                "skill_agent_sequence": sequence,
+                "allowed_tools": list(skill.required_tools),
+                "supervisor_reasoning": f"skill route: {skill.id}",
+            }
+    quality_results = SkillExecutor().evaluate_quality_gates(skill, state)
+    quality_payload = [item.model_dump(mode="json") for item in quality_results]
+    failed = [item for item in quality_results if not item.passed]
+    if failed and skill.fallback_strategy == "retry":
+        next_agent = sequence[0] if sequence else "__end__"
+    elif failed and skill.fallback_strategy == "escalate_to_human":
+        next_agent = "__end__"
+    else:
+        next_agent = "__end__"
+    update = {
+        "next_agent": next_agent,
+        "active_skill_id": skill.id,
+        "skill_agent_sequence": sequence,
+        "skill_quality_results": quality_payload,
+        "allowed_tools": list(skill.required_tools),
+        "supervisor_reasoning": f"skill complete: {skill.id}",
+    }
+    if failed and skill.fallback_strategy == "escalate_to_human":
+        update["human_confirmation_required"] = True
+        update["pending_approvals"] = [{
+            "action_type": "quality_gate_failure",
+            "action_payload": {"skill_id": skill.id, "failed_gates": quality_payload},
+            "status": "pending",
+        }]
+        update["supervisor_reasoning"] = f"skill quality gate failed: {skill.id}"
+    elif failed:
+        update["supervisor_reasoning"] = f"skill quality gate failed: {skill.id}; fallback={skill.fallback_strategy}"
+    return update
+
+
 def _guard_model_route(next_agent: str, state: dict, deterministic: str | None) -> tuple[str, str | None]:
     """Keep LLM routing as the primary path while enforcing workflow preconditions."""
     has_data = bool(state.get("data_summary"))
@@ -416,9 +552,11 @@ def _rag_preempt(
 async def supervisor_node(state: dict) -> dict:
     iteration = int(state.get("iteration", 0)) + 1
     if iteration > 8:
-        return {"next_agent": "__end__", "iteration": iteration, "current_agent": "supervisor"}
+        update = {"next_agent": "__end__", "iteration": iteration, "current_agent": "supervisor"}
+        return _with_structured_routing(update, state, str(state.get("user_query", "")))
     if state.get("error"):
-        return {"next_agent": "__end__", "iteration": iteration, "current_agent": "supervisor"}
+        update = {"next_agent": "__end__", "iteration": iteration, "current_agent": "supervisor"}
+        return _with_structured_routing(update, state, str(state.get("user_query", "")))
 
     user_query = str(state.get("user_query", ""))
     inferred_intent = str(state.get("intent") or _infer_intent(user_query))
@@ -442,7 +580,7 @@ async def supervisor_node(state: dict) -> dict:
     # General chat should not be handed back to the workflow planner just because
     # an LLM is available; otherwise simple greetings can drift into analysis.
     if inferred_intent == "general_chat" and not _is_water_domain_query(user_query):
-        return {
+        return _with_structured_routing({
             "next_agent": "conversation_assistant",
             "iteration": iteration,
             "current_agent": "supervisor",
@@ -451,10 +589,32 @@ async def supervisor_node(state: dict) -> dict:
             "answer_policy": answer_policy,
             "supervisor_reasoning": "general chat hard route",
             "execution_traces": traces,
-        }
+        }, state, user_query)
 
     llm = get_llm()
     deterministic = _deterministic_route(state)
+    skill_update = _skill_route(state, inferred_intent)
+    if skill_update is not None:
+        next_agent = str(skill_update["next_agent"])
+        preempt = _rag_preempt(
+            next_agent,
+            state,
+            deterministic,
+            inferred_intent,
+            inferred_focus_station,
+            iteration,
+            str(skill_update.get("supervisor_reasoning") or "skill route"),
+        )
+        update = preempt or skill_update
+        update.update({
+            "iteration": iteration,
+            "current_agent": "supervisor",
+            "intent": inferred_intent,
+            "focus_station_query": inferred_focus_station,
+            "answer_policy": answer_policy,
+            "execution_traces": traces,
+        })
+        return _with_structured_routing(update, state, user_query)
     if deterministic == "__end__" and (
         state.get("risk_assessment") is not None
         or state.get("emergency_plan") is not None
@@ -465,7 +625,7 @@ async def supervisor_node(state: dict) -> dict:
             phase="final_response",
             title="工作流完成，准备生成最终回答",
         ))
-        return {
+        return _with_structured_routing({
             "next_agent": "__end__",
             "iteration": iteration,
             "current_agent": "supervisor",
@@ -474,7 +634,7 @@ async def supervisor_node(state: dict) -> dict:
             "answer_policy": answer_policy,
             "supervisor_reasoning": "deterministic complete",
             "execution_traces": traces,
-        }
+        }, state, user_query)
 
     # When LLM is unavailable, fall back to deterministic routing immediately.
     if not llm.is_enabled:
@@ -484,8 +644,8 @@ async def supervisor_node(state: dict) -> dict:
             iteration, "deterministic (no llm)",
         )
         if preempt:
-            return preempt
-        return {
+            return _with_structured_routing(preempt, state, user_query)
+        return _with_structured_routing({
             "next_agent": next_agent,
             "iteration": iteration,
             "current_agent": "supervisor",
@@ -494,7 +654,7 @@ async def supervisor_node(state: dict) -> dict:
             "answer_policy": answer_policy,
             "supervisor_reasoning": "deterministic (no llm)",
             "execution_traces": traces,
-        }
+        }, state, user_query)
 
     prompt = json.dumps({
         "query": state.get("user_query", ""),
@@ -561,9 +721,9 @@ async def supervisor_node(state: dict) -> dict:
     )
     if preempt:
         preempt["execution_traces"] = traces
-        return preempt
+        return _with_structured_routing(preempt, state, user_query)
 
-    return {
+    return _with_structured_routing({
         "next_agent": next_agent,
         "iteration": iteration,
         "current_agent": "supervisor",
@@ -572,4 +732,4 @@ async def supervisor_node(state: dict) -> dict:
         "answer_policy": answer_policy,
         "supervisor_reasoning": reasoning,
         "execution_traces": traces,
-    }
+    }, state, user_query)

@@ -12,6 +12,18 @@ import asyncpg
 from app.config import get_settings
 
 
+def _metadata_filter_params(metadata_filter: Any | None) -> tuple:
+    return (
+        getattr(metadata_filter, "doc_type", None),
+        getattr(metadata_filter, "region_code", None),
+        getattr(metadata_filter, "basin_code", None),
+        getattr(metadata_filter, "station_id", None),
+        getattr(metadata_filter, "authority_level", None),
+        getattr(metadata_filter, "risk_level_applicable", None),
+        bool(getattr(metadata_filter, "include_expired", False)),
+    )
+
+
 class DatabaseService:
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -1284,6 +1296,18 @@ class DatabaseService:
                 CREATE INDEX IF NOT EXISTS idx_kb_embedding_hnsw
                     ON kb_embedding USING hnsw (embedding vector_cosine_ops)
             """)
+            await conn.execute("""
+                ALTER TABLE kb_document ADD COLUMN IF NOT EXISTS doc_type VARCHAR(32);
+                ALTER TABLE kb_document ADD COLUMN IF NOT EXISTS region_code VARCHAR(32);
+                ALTER TABLE kb_document ADD COLUMN IF NOT EXISTS basin_code VARCHAR(32);
+                ALTER TABLE kb_document ADD COLUMN IF NOT EXISTS station_id VARCHAR(64);
+                ALTER TABLE kb_document ADD COLUMN IF NOT EXISTS effective_date DATE;
+                ALTER TABLE kb_document ADD COLUMN IF NOT EXISTS expire_date DATE;
+                ALTER TABLE kb_document ADD COLUMN IF NOT EXISTS authority_level VARCHAR(32);
+                ALTER TABLE kb_document ADD COLUMN IF NOT EXISTS risk_level_applicable VARCHAR(32);
+                CREATE INDEX IF NOT EXISTS idx_kb_document_domain_metadata
+                    ON kb_document(doc_type, region_code, basin_code, authority_level, expire_date);
+            """)
 
     async def upsert_kb_document_shell(
         self,
@@ -1584,8 +1608,10 @@ class DatabaseService:
         top_n: int,
         source_types: list[str] | None,
         model: str,
+        metadata_filter: Any | None = None,
     ) -> list[dict[str, Any]]:
         vector = self._vector_literal(embedding)
+        filters = _metadata_filter_params(metadata_filter)
         rows = await self._fetch(
             """
             SELECT
@@ -1604,6 +1630,17 @@ class DatabaseService:
               AND d.status = 'ready'
               AND e.model = $2
               AND ($3::text[] IS NULL OR d.source_type = ANY($3))
+              AND ($5::text IS NULL OR COALESCE(d.doc_type, c.metadata->>'doc_type') = $5)
+              AND ($6::text IS NULL OR COALESCE(d.region_code, c.metadata->>'region_code') = $6)
+              AND ($7::text IS NULL OR COALESCE(d.basin_code, c.metadata->>'basin_code') = $7)
+              AND ($8::text IS NULL OR COALESCE(d.station_id, c.metadata->>'station_id') = $8)
+              AND ($9::text IS NULL OR COALESCE(d.authority_level, c.metadata->>'authority_level') = $9)
+              AND ($10::text IS NULL OR COALESCE(d.risk_level_applicable, c.metadata->>'risk_level_applicable') = $10)
+              AND (
+                $11::boolean = TRUE
+                OR COALESCE(d.expire_date, NULLIF(c.metadata->>'expire_date', '')::date) IS NULL
+                OR COALESCE(d.expire_date, NULLIF(c.metadata->>'expire_date', '')::date) >= CURRENT_DATE
+              )
             ORDER BY e.embedding <=> $1::vector
             LIMIT $4
             """,
@@ -1611,6 +1648,7 @@ class DatabaseService:
             model,
             source_types,
             top_n,
+            *filters,
         )
         normalized = []
         for row in rows:
@@ -1625,7 +1663,9 @@ class DatabaseService:
         *,
         top_n: int,
         source_types: list[str] | None,
+        metadata_filter: Any | None = None,
     ) -> list[dict[str, Any]]:
+        filters = _metadata_filter_params(metadata_filter)
         rows = await self._fetch(
             """
             SELECT
@@ -1642,6 +1682,17 @@ class DatabaseService:
             WHERE d.deleted = FALSE
               AND d.status = 'ready'
               AND ($2::text[] IS NULL OR d.source_type = ANY($2))
+              AND ($4::text IS NULL OR COALESCE(d.doc_type, c.metadata->>'doc_type') = $4)
+              AND ($5::text IS NULL OR COALESCE(d.region_code, c.metadata->>'region_code') = $5)
+              AND ($6::text IS NULL OR COALESCE(d.basin_code, c.metadata->>'basin_code') = $6)
+              AND ($7::text IS NULL OR COALESCE(d.station_id, c.metadata->>'station_id') = $7)
+              AND ($8::text IS NULL OR COALESCE(d.authority_level, c.metadata->>'authority_level') = $8)
+              AND ($9::text IS NULL OR COALESCE(d.risk_level_applicable, c.metadata->>'risk_level_applicable') = $9)
+              AND (
+                $10::boolean = TRUE
+                OR COALESCE(d.expire_date, NULLIF(c.metadata->>'expire_date', '')::date) IS NULL
+                OR COALESCE(d.expire_date, NULLIF(c.metadata->>'expire_date', '')::date) >= CURRENT_DATE
+              )
               AND to_tsvector('simple', c.search_text) @@ plainto_tsquery('simple', $1)
             ORDER BY keyword_score DESC
             LIMIT $3
@@ -1649,6 +1700,7 @@ class DatabaseService:
             tokenized_query,
             source_types,
             top_n,
+            *filters,
         )
         normalized = []
         for row in rows:

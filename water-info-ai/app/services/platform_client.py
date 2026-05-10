@@ -74,6 +74,15 @@ class WaterPlatformClient:
         response.raise_for_status()
         return response.json()
 
+    async def post_audit_record(self, table: str, payload: dict) -> dict:
+        response = await self._client.post(
+            self._build_url(f"/ai-audit/{table}"),
+            headers=await self._headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def close(self) -> None:
         await self._client.aclose()
 

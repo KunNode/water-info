@@ -133,6 +133,21 @@ class FloodGraphState(TypedDict, total=False):
     execution_traces: Annotated[list[dict], operator.add]
     error: str
 
+    # Platform kernel fields. These are additive to preserve existing callers.
+    agent_run_id: str
+    routing_decision: dict
+    safety_level: str
+    human_confirmation_required: bool
+    active_skill_id: str | None
+    skill_agent_sequence: list[str]
+    skill_quality_results: list[dict]
+    allowed_tools: list[str]
+    compliance_result: dict | None
+    safety_check_result: dict | None
+    pending_approvals: list[dict]
+    dispatch_orders: list[dict]
+    metadata_filter: dict | None
+
 
 FloodResponseState = FloodGraphState
 

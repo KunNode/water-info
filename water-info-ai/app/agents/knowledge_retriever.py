@@ -2,7 +2,7 @@
 
 Two modes selected by ``rag_target`` in state:
 - ``answer``: synthesize a knowledge-base-grounded reply and terminate the run.
-- ``preflight_plan`` / ``preflight_risk``: retrieve only, populate
+- ``preflight_plan`` / ``preflight_risk`` / ``validation``: retrieve only, populate
   ``evidence_context`` for a downstream agent, and return to supervisor.
 """
 
@@ -42,7 +42,11 @@ async def knowledge_retriever_node(state: dict) -> dict:
         skip_reasons.append(f"budget_exhausted:{call_count}")
     else:
         top_k = settings.rag_top_k if rag_target == "answer" else max(3, settings.rag_top_k - 1)
-        results = await search_knowledge_base(query, top_k=top_k)
+        results = await search_knowledge_base(
+            query,
+            top_k=top_k,
+            metadata_filter=state.get("metadata_filter"),
+        )
         call_count += 1
         if query_hash:
             cache[query_hash] = results

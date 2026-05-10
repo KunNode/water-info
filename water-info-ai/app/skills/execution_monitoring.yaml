@@ -1,0 +1,14 @@
+{
+  "id": "execution_monitoring",
+  "name": "执行监控",
+  "version": "1.0",
+  "trigger_intents": ["execution_status"],
+  "required_inputs": ["session_id"],
+  "required_tools": ["query_plan_status"],
+  "agent_sequence": ["execution_monitor"],
+  "output_schema": "ExecutionMonitorOutput",
+  "quality_gates": [
+    {"name": "progress_present", "check_type": "field_present", "target_field": "execution_progress.progress_pct", "condition": "is_not_none"}
+  ],
+  "fallback_strategy": "degrade"
+}

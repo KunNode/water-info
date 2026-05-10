@@ -8,8 +8,7 @@ can run its consistency validation and evidence dedup over every workflow path.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.config import get_settings
+from app.platform.dispatch_state_machine import DispatchState
+from app.platform.dispatch_validator import validate_dispatch_plan
 from app.services.llm import get_llm
 from app.state import ResourceAllocation, to_plain_data
 from app.tools.resource_tools import create_dispatch_orders, query_available_resources
@@ -64,6 +67,43 @@ async def resource_dispatcher_node(state: dict) -> dict:
             resources = refined
             message = f"已制定 {len(resources)} 项资源调度安排（库存优化）"
 
+    dispatch_orders: list[dict] = []
+    if get_settings().dispatch_state_machine_enabled and available:
+        validation = await validate_dispatch_plan(
+            [
+                {
+                    "resource_id": resource.resource_id,
+                    "quantity": resource.quantity,
+                    "status": resource.status,
+                    "source_location": resource.source_location,
+                    "target_location": resource.target_location,
+                }
+                for resource in resources
+                if resource.resource_id
+            ],
+            _InventoryAdapter(available),
+        )
+        valid_ids = {item.resource_id for item in validation.valid_allocations}
+        resources = [resource for resource in resources if not resource.resource_id or resource.resource_id in valid_ids]
+        dispatch_orders = [
+            {
+                "resource_id": item.resource_id,
+                "quantity": item.quantity,
+                "source_location": item.source_location,
+                "target_location": item.target_location,
+                "state": DispatchState.AI_DRAFT.value,
+                "history": [],
+            }
+            for item in validation.valid_allocations
+        ]
+        if validation.rejected_allocations:
+            traces.append(make_trace(
+                phase="resource_dispatch",
+                status="completed",
+                title=f"已拒绝 {len(validation.rejected_allocations)} 项无效调度候选",
+                metadata={"rejected_allocations": [item.model_dump(mode="json") for item in validation.rejected_allocations]},
+            ))
+
     dispatches_to_create = [
         {
             "resource_id": resource.resource_id,
@@ -109,10 +149,26 @@ async def resource_dispatcher_node(state: dict) -> dict:
 
     return {
         "resource_plan": resources,
+        "dispatch_orders": dispatch_orders,
         "current_agent": "resource_dispatcher",
         "messages": [{"role": "resource_dispatcher", "content": message}],
         "execution_traces": traces,
     }
+
+
+class _InventoryAdapter:
+    def __init__(self, resources: list[dict[str, Any]]):
+        self._resources = {str(item.get("id")): item for item in resources if item.get("id")}
+        self._locations = {str(item.get("location")) for item in resources if item.get("location")}
+
+    async def get_resource(self, resource_id: str) -> dict[str, Any] | None:
+        resource = self._resources.get(resource_id)
+        if resource and "status" not in resource:
+            return {**resource, "status": "available"}
+        return resource
+
+    async def is_known_location(self, location: str) -> bool:
+        return bool(location)
 
 
 def _coerce_allocations(items: list[Any]) -> list[ResourceAllocation]:

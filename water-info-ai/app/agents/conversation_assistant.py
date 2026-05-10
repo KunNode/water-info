@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import re
 
 from app.services.llm import get_llm
+from app.state import to_plain_data
 
 
 def _fallback_reply(query: str) -> str:
@@ -29,6 +31,59 @@ def _fallback_reply(query: str) -> str:
     )
 
 
+def _recent_messages(memory_context: dict) -> list[dict]:
+    messages = memory_context.get("recent_session_messages") or []
+    return [item for item in messages if isinstance(item, dict)]
+
+
+def _extract_recent_alias(messages: list[dict]) -> str | None:
+    patterns = [
+        r"你(?:现在)?叫([^，。！？\n]+)",
+        r"你的名字是([^，。！？\n]+)",
+    ]
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = str(message.get("content") or "")
+        for pattern in patterns:
+            match = re.search(pattern, content)
+            if match:
+                alias = match.group(1).strip()
+                return alias or None
+    return None
+
+
+def _extract_recent_secret(messages: list[dict], query: str) -> str | None:
+    if not any(keyword in query for keyword in ["刚才", "上一轮", "这轮会话", "前面", "口令", "密码"]):
+        return None
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = str(message.get("content") or "").strip()
+        if not content or content == query:
+            continue
+        for pattern in [
+            r"(?:临时)?口令是([^，。！？\n]+)",
+            r"(?:密码|暗号)是([^，。！？\n]+)",
+        ]:
+            match = re.search(pattern, content)
+            if match:
+                return match.group(1).strip()
+    return None
+
+
+def _reply_from_recent_session(query: str, memory_context: dict) -> str | None:
+    messages = _recent_messages(memory_context)
+    if not messages:
+        return None
+    alias = _extract_recent_alias(messages)
+    if alias and any(keyword in query for keyword in ["你是谁", "你叫什么", "名字"]):
+        return f"这轮会话里你让我叫我“{alias}”。"
+    secret = _extract_recent_secret(messages, query)
+    if secret:
+        return f"刚才这轮会话里你提到的临时口令是“{secret}”。"
+    return None
+
 
 async def conversation_assistant_node(state: dict) -> dict:
     query = str(state.get("user_query", ""))
@@ -36,6 +91,21 @@ async def conversation_assistant_node(state: dict) -> dict:
     memory_context = state.get("memory_context", {})
     llm = get_llm()
     reply = _fallback_reply(query)
+
+    recent_reply = _reply_from_recent_session(query, memory_context)
+    if recent_reply is not None:
+        return {
+            "current_agent": "conversation_assistant",
+            "final_response_draft": recent_reply,
+            "messages": [{"role": "conversation_assistant", "content": recent_reply}],
+        }
+
+    if any(keyword in query for keyword in ["你是谁", "你叫什么", "名字"]):
+        return {
+            "current_agent": "conversation_assistant",
+            "final_response_draft": reply,
+            "messages": [{"role": "conversation_assistant", "content": reply}],
+        }
 
     if llm.is_enabled:
         try:
@@ -51,7 +121,7 @@ async def conversation_assistant_node(state: dict) -> dict:
                             "has_plan": bool(state.get("emergency_plan")),
                             "focus_station_query": state.get("focus_station_query"),
                         },
-                        "memory_context": memory_context,
+                        "memory_context": to_plain_data(memory_context),
                         "evidence": [item.__dict__ for item in evidence],
                     },
                     ensure_ascii=False,

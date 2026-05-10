@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.database import get_db_service
 from app.rag.embedder import get_embedding_client
 from app.rag.loader import detect_mime, load_plain_document, load_uploaded_document
-from app.rag.models import SearchResult
+from app.rag.models import MetadataFilter, SearchResult
 from app.rag.retriever import hybrid_search
 from app.rag.splitter import split_loaded_document
 from app.state import Evidence
@@ -185,9 +185,16 @@ class KnowledgeBaseService:
             await db.finish_kb_ingest_job(job_id, "failed", error=str(exc))
             raise
 
-    async def search(self, query: str, *, top_k: int = 5, source_types: list[str] | None = None) -> list[SearchResult]:
+    async def search(
+        self,
+        query: str,
+        *,
+        top_k: int = 5,
+        source_types: list[str] | None = None,
+        metadata_filter: MetadataFilter | None = None,
+    ) -> list[SearchResult]:
         try:
-            return await hybrid_search(query, top_k=top_k, source_types=source_types)
+            return await hybrid_search(query, top_k=top_k, source_types=source_types, metadata_filter=metadata_filter)
         except Exception as exc:
             logger.warning("knowledge search fallback to empty result: %s", exc)
             return []
@@ -198,12 +205,16 @@ async def search_knowledge_base(
     *,
     top_k: int | None = None,
     source_types: list[str] | None = None,
+    metadata_filter: MetadataFilter | dict | None = None,
 ) -> list[dict]:
     settings = get_settings()
+    if isinstance(metadata_filter, dict):
+        metadata_filter = MetadataFilter.model_validate(metadata_filter)
     results = await get_knowledge_base_service().search(
         query,
         top_k=top_k or settings.rag_top_k,
         source_types=source_types,
+        metadata_filter=metadata_filter,
     )
     return [asdict(result) for result in results]
 

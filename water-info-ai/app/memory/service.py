@@ -57,6 +57,33 @@ def _normalize_chat_messages(rows: list[dict], *, limit: int = 10) -> list[dict[
     return messages[-limit:]
 
 
+def _normalize_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    """Convert a raw conversation_snapshot row into a JSON-safe prompt payload.
+
+    asyncpg returns `updated_at` as a `datetime` and the JSONB columns may
+    arrive as serialised strings depending on the driver. Callers downstream
+    (supervisor, conversation_assistant, etc.) embed this dict into
+    ``json.dumps`` payloads, so keep everything primitive here.
+    """
+    def _decode_json(value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except Exception:
+                return value
+        return value
+
+    updated_at = row.get("updated_at")
+    return {
+        "session_id": str(row.get("session_id") or ""),
+        "risk_level": str(row.get("risk_level") or "none"),
+        "plan_info": _decode_json(row.get("plan_info")) or {},
+        "agent_status_summary": _decode_json(row.get("agent_status_summary")) or {},
+        "query_count": int(row.get("query_count") or 0),
+        "updated_at": updated_at.isoformat() if hasattr(updated_at, "isoformat") else (str(updated_at) if updated_at else None),
+    }
+
+
 class MemoryService:
     """Loads concise memory context and writes high-value memories after turns."""
 
@@ -85,7 +112,8 @@ class MemoryService:
             logger.debug("[%s] memory summary load skipped: %s", session_id, exc)
 
         try:
-            snapshot = await db.get_conversation_snapshot(session_id)
+            raw_snapshot = await db.get_conversation_snapshot(session_id)
+            snapshot = _normalize_snapshot(raw_snapshot) if raw_snapshot else None
         except Exception as exc:
             logger.debug("[%s] memory snapshot load skipped: %s", session_id, exc)
 

@@ -1,0 +1,14 @@
+{
+  "id": "resource_dispatch",
+  "name": "资源调度",
+  "version": "1.0",
+  "trigger_intents": ["resource_dispatch"],
+  "required_inputs": ["user_query", "emergency_plan"],
+  "required_tools": ["query_available_resources", "create_dispatch_orders"],
+  "agent_sequence": ["data_analyst", "risk_assessor", "plan_generator", "resource_dispatcher", "safety_checker"],
+  "output_schema": "ResourceDispatcherOutput",
+  "quality_gates": [
+    {"name": "resource_plan_present", "check_type": "field_present", "target_field": "resource_plan", "condition": "is_not_none"}
+  ],
+  "fallback_strategy": "escalate_to_human"
+}

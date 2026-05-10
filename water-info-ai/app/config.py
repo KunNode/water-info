@@ -61,6 +61,20 @@ class Settings:
     risk_scan_event_debounce_seconds: int = 60
     langgraph_postgres_enabled: bool = False
 
+    # Platform Kernel Feature Flags (default-off for incremental rollout)
+    structured_output_enabled: bool = False
+    skill_registry_enabled: bool = False
+    dispatch_state_machine_enabled: bool = False
+    audit_tables_enabled: bool = False
+    plan_reviewer_enabled: bool = False
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -101,4 +115,9 @@ def get_settings() -> Settings:
         risk_scan_periodic_enabled=os.environ.get("RISK_SCAN_PERIODIC_ENABLED", "true").lower() == "true",
         risk_scan_event_debounce_seconds=int(os.environ.get("RISK_SCAN_EVENT_DEBOUNCE_SECONDS", "60")),
         langgraph_postgres_enabled=os.environ.get("LANGGRAPH_POSTGRES_ENABLED", "false").lower() == "true",
+        structured_output_enabled=_env_bool("STRUCTURED_OUTPUT_ENABLED"),
+        skill_registry_enabled=_env_bool("SKILL_REGISTRY_ENABLED"),
+        dispatch_state_machine_enabled=_env_bool("DISPATCH_STATE_MACHINE_ENABLED"),
+        audit_tables_enabled=_env_bool("AUDIT_TABLES_ENABLED"),
+        plan_reviewer_enabled=_env_bool("PLAN_REVIEWER_ENABLED"),
     )
