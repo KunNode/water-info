@@ -1000,9 +1000,17 @@ class DatabaseService:
                     status      VARCHAR(32) NOT NULL DEFAULT 'draft',
                     session_id  VARCHAR(128) NOT NULL DEFAULT '',
                     summary     TEXT NOT NULL DEFAULT '',
+                    version     INT NOT NULL DEFAULT 0,
                     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+            """)
+            # Optimistic-lock column for human-review workflow (plan-human-review Req 1.5/3.8).
+            await conn.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE emergency_plan ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;
+                EXCEPTION WHEN others THEN NULL;
+                END $$;
             """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS emergency_action (
@@ -1044,6 +1052,92 @@ class DatabaseService:
                 )
             """)
 
+            # ── Audit tables (plan-human-review Req 7.1, 7.2, 7.8) ──
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS plan_audit_record (
+                    id                BIGSERIAL PRIMARY KEY,
+                    plan_id           VARCHAR(64) NOT NULL
+                                      REFERENCES emergency_plan(plan_id) ON DELETE CASCADE,
+                    action            VARCHAR(32) NOT NULL,
+                    reviewer_user_id  VARCHAR(64) NOT NULL,
+                    reviewer_username VARCHAR(255) NOT NULL,
+                    reviewed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    opinion           TEXT,
+                    from_status       VARCHAR(32) NOT NULL,
+                    to_status         VARCHAR(32) NOT NULL,
+                    from_version      INT NOT NULL,
+                    to_version        INT NOT NULL
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_plan_audit_plan_time
+                    ON plan_audit_record(plan_id, reviewed_at DESC)
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS plan_audit_change (
+                    id              BIGSERIAL PRIMARY KEY,
+                    audit_id        BIGINT NOT NULL
+                                    REFERENCES plan_audit_record(id) ON DELETE CASCADE,
+                    field_path      VARCHAR(255) NOT NULL,
+                    change_type     VARCHAR(16)  NOT NULL,
+                    old_value       TEXT,
+                    new_value       TEXT,
+                    old_index       INT,
+                    new_index       INT
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_plan_audit_change_audit
+                    ON plan_audit_change(audit_id)
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS plan_audit_draft (
+                    id              BIGSERIAL PRIMARY KEY,
+                    plan_id         VARCHAR(64) NOT NULL
+                                    REFERENCES emergency_plan(plan_id) ON DELETE CASCADE,
+                    buffered_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    reviewer_user_id  VARCHAR(64) NOT NULL,
+                    reviewer_username VARCHAR(255) NOT NULL,
+                    field_path      VARCHAR(255) NOT NULL,
+                    change_type     VARCHAR(16)  NOT NULL,
+                    old_value       TEXT,
+                    new_value       TEXT,
+                    old_index       INT,
+                    new_index       INT
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_plan_audit_draft_plan
+                    ON plan_audit_draft(plan_id, buffered_at)
+            """)
+
+            # ── Immutability triggers (plan-human-review Req 7.8, Property P5) ──
+            await conn.execute("""
+                CREATE OR REPLACE FUNCTION plan_audit_no_update()
+                RETURNS trigger AS $$
+                BEGIN
+                  RAISE EXCEPTION 'plan_audit_record is immutable';
+                END; $$ LANGUAGE plpgsql
+            """)
+            await conn.execute("""
+                DROP TRIGGER IF EXISTS trg_plan_audit_record_immutable
+                    ON plan_audit_record
+            """)
+            await conn.execute("""
+                CREATE TRIGGER trg_plan_audit_record_immutable
+                BEFORE UPDATE OR DELETE ON plan_audit_record
+                FOR EACH ROW EXECUTE FUNCTION plan_audit_no_update()
+            """)
+            await conn.execute("""
+                DROP TRIGGER IF EXISTS trg_plan_audit_change_immutable
+                    ON plan_audit_change
+            """)
+            await conn.execute("""
+                CREATE TRIGGER trg_plan_audit_change_immutable
+                BEFORE UPDATE OR DELETE ON plan_audit_change
+                FOR EACH ROW EXECUTE FUNCTION plan_audit_no_update()
+            """)
+
     # ── Plan write ────────────────────────────────────────────────────────────
 
     async def save_emergency_plan(
@@ -1062,8 +1156,8 @@ class DatabaseService:
             async with conn.transaction():
                 await conn.execute("""
                     INSERT INTO emergency_plan
-                        (plan_id, plan_name, risk_level, trigger_conditions, status, session_id, summary)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        (plan_id, plan_name, risk_level, trigger_conditions, status, session_id, summary, version)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
                     ON CONFLICT (plan_id) DO UPDATE SET
                         plan_name = EXCLUDED.plan_name, risk_level = EXCLUDED.risk_level,
                         trigger_conditions = EXCLUDED.trigger_conditions, status = EXCLUDED.status,
@@ -1115,7 +1209,7 @@ class DatabaseService:
     async def get_emergency_plan(self, plan_id: str) -> dict | None:
         return await self._fetchrow("""
             SELECT plan_id, plan_name, risk_level, trigger_conditions, status,
-                   session_id, summary, created_at, updated_at
+                   session_id, summary, version, created_at, updated_at
             FROM emergency_plan WHERE plan_id = $1
         """, plan_id)
 
@@ -1128,20 +1222,21 @@ class DatabaseService:
 
     async def get_plan_resources(self, plan_id: str) -> list[dict]:
         return await self._fetch("""
-            SELECT resource_type, resource_name, quantity, source_location,
+            SELECT id, resource_type, resource_name, quantity, source_location,
                    target_location, eta_minutes, created_at
             FROM resource_allocation WHERE plan_id = $1
         """, plan_id)
 
     async def get_plan_notifications(self, plan_id: str) -> list[dict]:
         return await self._fetch("""
-            SELECT target, channel, content, status, sent_at, created_at
+            SELECT id, target, channel, content, status, sent_at, created_at
             FROM notification_record WHERE plan_id = $1
         """, plan_id)
 
     async def get_plans(self, limit: int = 20, offset: int = 0) -> list[dict]:
         return await self._fetch("""
-            SELECT plan_id, plan_name, risk_level, status, session_id, summary, created_at
+            SELECT plan_id, plan_name, risk_level, status, session_id, summary,
+                   version, created_at, updated_at
             FROM emergency_plan ORDER BY created_at DESC LIMIT $1 OFFSET $2
         """, limit, offset)
 
@@ -1155,6 +1250,44 @@ class DatabaseService:
                 "UPDATE emergency_plan SET status = $1, updated_at = NOW() WHERE plan_id = $2",
                 status, plan_id,
             )
+
+    async def user_exists(self, user_id: str) -> bool:
+        return bool(await self._fetchval('SELECT EXISTS(SELECT 1 FROM sys_user WHERE id = $1)', user_id))
+
+    async def list_plan_audits(self, plan_id: str) -> dict:
+        records = await self._fetch("""
+            SELECT id, action, reviewer_user_id, reviewer_username, reviewed_at,
+                   opinion, from_status, to_status, from_version, to_version
+            FROM plan_audit_record
+            WHERE plan_id = $1
+            ORDER BY reviewed_at DESC
+        """, plan_id)
+        if not records:
+            return {"plan_id": plan_id, "records": []}
+
+        audit_ids = [record["id"] for record in records]
+        changes = await self._fetch("""
+            SELECT id, audit_id, field_path, change_type, old_value, new_value,
+                   old_index, new_index
+            FROM plan_audit_change
+            WHERE audit_id = ANY($1::bigint[])
+            ORDER BY id ASC
+        """, audit_ids)
+        changes_by_audit: dict[int, list[dict]] = {}
+        for change in changes:
+            changes_by_audit.setdefault(change["audit_id"], []).append(change)
+
+        return {
+            "plan_id": plan_id,
+            "records": [
+                {
+                    **record,
+                    "reviewed_at": record["reviewed_at"].isoformat() if record.get("reviewed_at") else None,
+                    "changes": changes_by_audit.get(record["id"], []),
+                }
+                for record in records
+            ],
+        }
 
     async def update_action_status(self, plan_id: str, action_id: str, status: str) -> None:
         pool = await self._get_pool()

@@ -48,10 +48,12 @@ class PlanDetailResponse(BaseModel):
     status: str
     session_id: str
     summary: str
+    version: int = 0
     actions: list[dict]
     resources: list[dict]
     notifications: list[dict]
     created_at: str | None = None
+    updated_at: str | None = None
 
 
 class PlanExecuteRequest(BaseModel):

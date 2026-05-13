@@ -15,6 +15,7 @@ public class FloodPlanResponse {
     private String riskLevel;
     private String summary;
     private String status;
+    private Integer version;
     private List<PlanAction> actions;
     private List<PlanResource> resources;
     private List<PlanNotification> notifications;

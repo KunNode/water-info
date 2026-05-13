@@ -47,7 +47,7 @@
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="queryParams.status" placeholder="全部" clearable style="width: 140px">
-            <el-option label="草稿" value="draft" />
+            <el-option label="草案" value="draft" />
             <el-option label="已批准" value="approved" />
             <el-option label="执行中" value="executing" />
             <el-option label="已完成" value="completed" />
@@ -87,17 +87,9 @@
         </el-table-column>
         <el-table-column prop="status" label="状态" width="130" align="center">
           <template #default="{ row }">
-            <el-select
-              v-model="row.status"
-              size="small"
-              style="width: 110px"
-              @change="(val: string) => handleStatusChange(row, val)"
-            >
-              <el-option label="草稿" value="draft" />
-              <el-option label="已批准" value="approved" />
-              <el-option label="执行中" value="executing" />
-              <el-option label="已完成" value="completed" />
-            </el-select>
+            <el-tag :type="statusTagType(row.status)" size="small">
+              {{ statusLabel(row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="行动数" width="90" align="center">
@@ -116,10 +108,11 @@
               <el-icon><Document /></el-icon> 详情
             </el-button>
             <el-button 
+              v-if="isReviewer"
               link 
               type="success" 
               size="small" 
-              :disabled="row.status === 'completed' || row.status === 'executing'"
+              :disabled="row.status !== 'approved'"
               @click="handleExecute(row)"
             >
               <el-icon><VideoPlay /></el-icon> 执行
@@ -143,8 +136,18 @@
     </div>
 
     <!-- Detail Drawer -->
-    <el-drawer v-model="drawerVisible" title="应急预案详情" size="50%" destroy-on-close>
+    <el-drawer v-model="drawerVisible" title="应急预案详情" size="50%" destroy-on-close :before-close="handleDrawerClose">
       <div v-loading="detailLoading" v-if="currentPlan" class="plan-detail">
+        <div class="detail-header-bar mb-4">
+          <el-tag v-if="editMode" type="warning">编辑中</el-tag>
+          <el-button v-if="canEditCurrentPlan && !editMode" size="small" @click="enterEditMode">编辑</el-button>
+          <el-button v-if="canApproveCurrentPlan && !editMode" size="small" type="success" @click="openApprovalDialog">
+            批准
+          </el-button>
+        </div>
+
+        <el-tabs v-model="detailTab" @tab-change="handleDetailTabChange">
+          <el-tab-pane label="详情" name="detail">
         <el-descriptions title="基本信息" :column="2" border class="mb-4">
           <el-descriptions-item label="预案 ID">{{ currentPlan.id }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ formatTime(currentPlan.createdAt) }}</el-descriptions-item>
@@ -154,88 +157,264 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-select
-              v-model="currentPlan.status"
-              size="small"
-              style="width: 120px"
-              @change="(val: string) => handleStatusChange(currentPlan!, val)"
-            >
-              <el-option label="草稿" value="draft" />
-              <el-option label="已批准" value="approved" />
-              <el-option label="执行中" value="executing" />
-              <el-option label="已完成" value="completed" />
-            </el-select>
+            <el-tag :type="statusTagType(currentPlan.status)" size="small">
+              {{ statusLabel(currentPlan.status) }}
+            </el-tag>
           </el-descriptions-item>
         </el-descriptions>
 
-        <section class="summary-panel mb-4">
-          <div class="summary-panel-header">
-            <div>
-              <div class="summary-panel-eyebrow">AI 研判摘要</div>
-              <div class="summary-panel-title">{{ getSummaryTitle(currentPlan.summary) }}</div>
+        <!-- View Mode: read-only summary -->
+        <template v-if="!editMode">
+          <section class="summary-panel mb-4">
+            <div class="summary-panel-header">
+              <div>
+                <div class="summary-panel-eyebrow">AI 研判摘要</div>
+                <div class="summary-panel-title">{{ getSummaryTitle(currentPlan.summary) }}</div>
+              </div>
+              <el-tag :type="getRiskTagType(currentPlan.riskLevel)" effect="plain" round>
+                {{ getRiskLabel(currentPlan.riskLevel) }}
+              </el-tag>
             </div>
-            <el-tag :type="getRiskTagType(currentPlan.riskLevel)" effect="plain" round>
-              {{ getRiskLabel(currentPlan.riskLevel) }}
-            </el-tag>
+            <div class="summary-panel-divider" />
+            <div class="summary-markdown markdown-body" v-html="renderPlanSummary(currentPlan.summary)" />
+          </section>
+
+          <div class="section-title">应急行动列表 ({{ currentPlan.actions?.length || 0 }})</div>
+          <el-table :data="currentPlan.actions || []" border size="small" class="mb-4" empty-text="暂无应急行动">
+            <el-table-column type="index" label="#" width="50" align="center" />
+            <el-table-column prop="description" label="行动描述" />
+            <el-table-column prop="priority" label="优先级" width="90" align="center" />
+            <el-table-column prop="assignee" label="责任人" width="120" />
+            <el-table-column prop="status" label="状态" width="100" align="center" />
+          </el-table>
+
+          <div class="section-title">资源清单 ({{ currentPlan.resources?.length || 0 }})</div>
+          <el-table :data="currentPlan.resources || []" border size="small" class="mb-4" empty-text="暂无资源项">
+            <el-table-column type="index" label="#" width="50" align="center" />
+            <el-table-column prop="type" label="资源类型" width="120" />
+            <el-table-column prop="name" label="资源名称" />
+            <el-table-column prop="quantity" label="数量" width="100" align="center" />
+            <el-table-column prop="location" label="位置" />
+          </el-table>
+
+          <div class="section-title">通知方案 ({{ currentPlan.notifications?.length || 0 }})</div>
+          <el-table :data="currentPlan.notifications || []" border size="small" class="mb-4" empty-text="暂无通知方案">
+            <el-table-column type="index" label="#" width="50" align="center" />
+            <el-table-column prop="channel" label="渠道" width="100" align="center" />
+            <el-table-column prop="target" label="通知对象" width="140" />
+            <el-table-column prop="message" label="通知内容" />
+            <el-table-column prop="status" label="状态" width="100" align="center" />
+          </el-table>
+        </template>
+
+        <!-- Edit Mode: editable forms -->
+        <template v-if="editMode && draftPlan">
+          <div class="section-title">摘要 (Markdown)</div>
+          <el-input
+            v-model="draftPlan.summary"
+            type="textarea"
+            :autosize="{ minRows: 10, maxRows: 40 }"
+            placeholder="请输入预案摘要（支持 Markdown）"
+            class="mb-4"
+          />
+
+          <div class="section-title">
+            应急行动列表 ({{ draftPlan.actions?.length || 0 }})
+            <el-button size="small" type="primary" class="section-add-btn" @click="addAction">新增行</el-button>
           </div>
-          <div class="summary-panel-divider" />
-          <div class="summary-markdown markdown-body" v-html="renderPlanSummary(currentPlan.summary)" />
-        </section>
+          <el-table :data="draftPlan.actions || []" border size="small" class="mb-4" empty-text="暂无应急行动">
+            <el-table-column type="index" label="#" width="50" align="center" />
+            <el-table-column label="行动描述" min-width="180">
+              <template #default="{ row }">
+                <el-input v-model="row.description" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="优先级" width="100" align="center">
+              <template #default="{ row }">
+                <el-input v-model="row.priority" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="责任人" width="120">
+              <template #default="{ row }">
+                <el-input v-model="row.assignee" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="100" align="center">
+              <template #default="{ row }">
+                <el-input v-model="row.status" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="70" align="center">
+              <template #default="{ $index }">
+                <el-button link type="danger" size="small" @click="removeAction($index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
 
-        <div class="section-title">应急行动列表 ({{ currentPlan.actions?.length || 0 }})</div>
-        <el-table :data="currentPlan.actions || []" border size="small" class="mb-4">
-          <el-table-column type="index" label="#" width="50" align="center" />
-          <el-table-column prop="description" label="行动描述" />
-          <el-table-column prop="priority" label="优先级" width="90" align="center" />
-          <el-table-column prop="assignee" label="责任人" width="120" />
-          <el-table-column prop="status" label="状态" width="100" align="center" />
-        </el-table>
+          <div class="section-title">
+            资源清单 ({{ draftPlan.resources?.length || 0 }})
+            <el-button size="small" type="primary" class="section-add-btn" @click="addResource">新增行</el-button>
+          </div>
+          <el-table :data="draftPlan.resources || []" border size="small" class="mb-4" empty-text="暂无资源项">
+            <el-table-column type="index" label="#" width="50" align="center" />
+            <el-table-column label="资源类型" width="120">
+              <template #default="{ row }">
+                <el-input v-model="row.type" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="资源名称" min-width="140">
+              <template #default="{ row }">
+                <el-input v-model="row.name" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="数量" width="100" align="center">
+              <template #default="{ row }">
+                <el-input-number v-model="row.quantity" size="small" :min="0" controls-position="right" />
+              </template>
+            </el-table-column>
+            <el-table-column label="位置" min-width="140">
+              <template #default="{ row }">
+                <el-input v-model="row.location" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="70" align="center">
+              <template #default="{ $index }">
+                <el-button link type="danger" size="small" @click="removeResource($index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
 
-        <div class="section-title">资源清单 ({{ currentPlan.resources?.length || 0 }})</div>
-        <el-table :data="currentPlan.resources || []" border size="small" class="mb-4">
-          <el-table-column type="index" label="#" width="50" align="center" />
-          <el-table-column prop="type" label="资源类型" width="120" />
-          <el-table-column prop="name" label="资源名称" />
-          <el-table-column prop="quantity" label="数量" width="100" align="center" />
-          <el-table-column prop="location" label="位置" />
-        </el-table>
-
-        <div class="section-title">通知方案 ({{ currentPlan.notifications?.length || 0 }})</div>
-        <el-table :data="currentPlan.notifications || []" border size="small" class="mb-4">
-          <el-table-column type="index" label="#" width="50" align="center" />
-          <el-table-column prop="channel" label="渠道" width="100" align="center" />
-          <el-table-column prop="target" label="通知对象" width="140" />
-          <el-table-column prop="message" label="通知内容" />
-          <el-table-column prop="status" label="状态" width="100" align="center" />
-        </el-table>
+          <div class="section-title">
+            通知方案 ({{ draftPlan.notifications?.length || 0 }})
+            <el-button size="small" type="primary" class="section-add-btn" @click="addNotification">新增行</el-button>
+          </div>
+          <el-table :data="draftPlan.notifications || []" border size="small" class="mb-4" empty-text="暂无通知方案">
+            <el-table-column type="index" label="#" width="50" align="center" />
+            <el-table-column label="渠道" width="100" align="center">
+              <template #default="{ row }">
+                <el-input v-model="row.channel" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="通知对象" width="140">
+              <template #default="{ row }">
+                <el-input v-model="row.target" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="通知内容" min-width="180">
+              <template #default="{ row }">
+                <el-input v-model="row.message" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="100" align="center">
+              <template #default="{ row }">
+                <el-input v-model="row.status" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="70" align="center">
+              <template #default="{ $index }">
+                <el-button link type="danger" size="small" @click="removeNotification($index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
+          </el-tab-pane>
+          <el-tab-pane v-if="showAuditTab" label="审计记录" name="audits">
+            <div v-loading="auditLoading" class="audit-panel">
+              <el-empty v-if="!auditLoading && auditRecords.length === 0" description="暂无审计记录" />
+              <el-timeline v-else>
+                <el-timeline-item
+                  v-for="record in auditRecords"
+                  :key="record.id"
+                  :timestamp="formatTime(record.reviewedAt)"
+                  placement="top"
+                >
+                  <div class="audit-record">
+                    <div class="audit-record__head">
+                      <strong>{{ formatAuditAction(record.action) }}</strong>
+                      <span>{{ record.reviewerUsername }}</span>
+                    </div>
+                    <p v-if="record.opinion" class="audit-opinion">{{ record.opinion }}</p>
+                    <el-table :data="record.changes || []" size="small" border empty-text="无内容修改">
+                      <el-table-column prop="fieldPath" label="字段" min-width="150" />
+                      <el-table-column prop="changeType" label="类型" width="90" />
+                      <el-table-column label="修改前" min-width="160">
+                        <template #default="{ row }">{{ formatChangeValue(row.oldValue) }}</template>
+                      </el-table-column>
+                      <el-table-column label="修改后" min-width="160">
+                        <template #default="{ row }">{{ formatChangeValue(row.newValue) }}</template>
+                      </el-table-column>
+                    </el-table>
+                  </div>
+                </el-timeline-item>
+              </el-timeline>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
       </div>
       
       <template #footer>
         <div style="flex: auto">
-          <el-button @click="drawerVisible = false">关闭</el-button>
-          <el-button 
-            type="success" 
-            :loading="executing" 
-            :disabled="!currentPlan || currentPlan.status === 'completed' || currentPlan.status === 'executing'"
-            @click="executeCurrentPlan"
-          >
-            <el-icon><VideoPlay /></el-icon> 执行预案
-          </el-button>
+          <template v-if="editMode">
+            <el-button @click="cancelEdit">取消</el-button>
+            <el-button type="primary" :loading="saving" :disabled="saving" @click="handleSave">保存</el-button>
+          </template>
+          <template v-else>
+            <el-button @click="drawerVisible = false">关闭</el-button>
+            <el-button 
+              v-if="canExecuteCurrentPlan"
+              type="success" 
+              :loading="executing" 
+              :disabled="executing"
+              @click="executeCurrentPlan"
+            >
+              <el-icon><VideoPlay /></el-icon> 执行预案
+            </el-button>
+          </template>
         </div>
       </template>
     </el-drawer>
+
+    <el-dialog v-model="approvalDialogVisible" title="批准草案" width="520px" :close-on-click-modal="!approvalLoading">
+      <el-form label-position="top">
+        <el-form-item label="审核意见" required>
+          <el-input
+            v-model="approvalOpinion"
+            type="textarea"
+            :maxlength="500"
+            show-word-limit
+            :rows="5"
+            :disabled="approvalLoading"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button :disabled="approvalLoading" @click="approvalDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="approvalLoading"
+          :disabled="!opinionValid || approvalLoading"
+          @click="handleApprove"
+        >
+          确认批准
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { Search, Document, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { getPlans, getPlan, executePlan, updatePlanStatus } from '@/api/flood'
-import type { FloodPlan } from '@/types'
+import { getPlans, getPlan, executePlan, updatePlan, approvePlan, getPlanAudits } from '@/api/flood'
+import { useUserStore } from '@/stores/user'
+import type { FloodPlan, PlanAuditRecord, PlanEditRequest } from '@/types'
+import { statusLabel } from './statusLabel'
 
+const userStore = useUserStore()
 const loading = ref(false)
 const tableData = ref<FloodPlan[]>([])
 const total = ref(0)
@@ -251,11 +430,44 @@ const drawerVisible = ref(false)
 const detailLoading = ref(false)
 const currentPlan = ref<FloodPlan | null>(null)
 const executing = ref(false)
+const saving = ref(false)
+const detailTab = ref('detail')
+const auditLoading = ref(false)
+const auditLoaded = ref(false)
+const auditRecords = ref<PlanAuditRecord[]>([])
+const approvalDialogVisible = ref(false)
+const approvalOpinion = ref('')
+const approvalLoading = ref(false)
+
+// Edit mode state
+const editMode = ref(false)
+const draftPlan = ref<FloodPlan | null>(null)
+const isDirty = computed(() => {
+  if (!editMode.value || !draftPlan.value || !currentPlan.value) return false
+  return JSON.stringify(draftPlan.value) !== JSON.stringify(currentPlan.value)
+})
 
 const executingCount = computed(() => tableData.value.filter((item) => item.status === 'executing').length)
 const approvedCount = computed(() => tableData.value.filter((item) => item.status === 'approved').length)
 const actionCount = computed(() => {
   return tableData.value.reduce((sum, item) => sum + (item.actions?.length || 0), 0)
+})
+const isReviewer = computed(() => userStore.roles.some((role) => role === 'ADMIN' || role === 'OPERATOR'))
+const canEditCurrentPlan = computed(() => {
+  return !!currentPlan.value && isReviewer.value && ['draft', 'approved'].includes(currentPlan.value.status)
+})
+const canApproveCurrentPlan = computed(() => {
+  return !!currentPlan.value && isReviewer.value && currentPlan.value.status === 'draft'
+})
+const canExecuteCurrentPlan = computed(() => {
+  return !!currentPlan.value && isReviewer.value && currentPlan.value.status === 'approved'
+})
+const showAuditTab = computed(() => {
+  return !!currentPlan.value && ['approved', 'executing', 'completed'].includes(currentPlan.value.status)
+})
+const opinionValid = computed(() => {
+  const len = approvalOpinion.value.trim().length
+  return len >= 1 && len <= 500
 })
 
 const fetchData = async () => {
@@ -323,6 +535,11 @@ const openDetail = async (row: FloodPlan) => {
   drawerVisible.value = true
   detailLoading.value = true
   currentPlan.value = row // initial data
+  editMode.value = false
+  draftPlan.value = null
+  detailTab.value = 'detail'
+  auditLoaded.value = false
+  auditRecords.value = []
   
   try {
     const res = await getPlan(row.id)
@@ -330,6 +547,7 @@ const openDetail = async (row: FloodPlan) => {
       currentPlan.value = res.data
     }
   } catch (err: unknown) {
+    currentPlan.value = null
     if (err instanceof Error) {
       ElMessage.error(err.message || '获取预案详情失败')
     } else {
@@ -340,20 +558,268 @@ const openDetail = async (row: FloodPlan) => {
   }
 }
 
-const handleStatusChange = async (row: FloodPlan, newStatus: string) => {
-  const prevStatus = row.status
-  try {
-    await updatePlanStatus(row.id, newStatus)
-    ElMessage.success('状态已更新')
-    if (currentPlan.value?.id === row.id) {
-      currentPlan.value.status = newStatus as FloodPlan['status']
+// Edit mode functions
+const enterEditMode = () => {
+  if (!canEditCurrentPlan.value || !currentPlan.value) return
+  draftPlan.value = JSON.parse(JSON.stringify(currentPlan.value))
+  editMode.value = true
+  detailTab.value = 'detail'
+}
+
+const cancelEdit = async () => {
+  if (isDirty.value) {
+    try {
+      await ElMessageBox.confirm('存在未保存修改，确认放弃？')
+    } catch {
+      return
     }
-  } catch {
-    row.status = prevStatus
+  }
+  editMode.value = false
+  draftPlan.value = null
+}
+
+const handleDrawerClose = async (done: () => void) => {
+  if (editMode.value && isDirty.value) {
+    try {
+      await ElMessageBox.confirm('存在未保存修改，确认放弃？')
+    } catch {
+      return
+    }
+  }
+  editMode.value = false
+  draftPlan.value = null
+  done()
+}
+
+const handleDetailTabChange = (name: string | number) => {
+  if (name === 'audits') {
+    loadAudits()
   }
 }
 
+onBeforeRouteLeave(async () => {
+  if (editMode.value && isDirty.value) {
+    try {
+      await ElMessageBox.confirm('存在未保存修改，确认放弃？')
+    } catch {
+      return false
+    }
+  }
+  return true
+})
+
+const addAction = () => {
+  if (!draftPlan.value) return
+  if (!draftPlan.value.actions) draftPlan.value.actions = []
+  draftPlan.value.actions.push({ id: '', description: '', priority: '3', assignee: '', status: 'pending' })
+}
+
+const removeAction = (index: number) => {
+  if (!draftPlan.value?.actions) return
+  draftPlan.value.actions.splice(index, 1)
+}
+
+const addResource = () => {
+  if (!draftPlan.value) return
+  if (!draftPlan.value.resources) draftPlan.value.resources = []
+  draftPlan.value.resources.push({ type: '', name: '', quantity: 0, location: '' })
+}
+
+const removeResource = (index: number) => {
+  if (!draftPlan.value?.resources) return
+  draftPlan.value.resources.splice(index, 1)
+}
+
+const addNotification = () => {
+  if (!draftPlan.value) return
+  if (!draftPlan.value.notifications) draftPlan.value.notifications = []
+  draftPlan.value.notifications.push({ channel: '', target: '', message: '', status: 'pending' })
+}
+
+const removeNotification = (index: number) => {
+  if (!draftPlan.value?.notifications) return
+  draftPlan.value.notifications.splice(index, 1)
+}
+
+const handleSave = async () => {
+  if (!currentPlan.value || !draftPlan.value) return
+  saving.value = true
+  try {
+    const payload: PlanEditRequest = { version: currentPlan.value.version }
+
+    // Diff summary
+    if (draftPlan.value.summary !== currentPlan.value.summary) {
+      payload.summary = draftPlan.value.summary
+    }
+
+    // Diff actions
+    const oldActions = currentPlan.value.actions || []
+    const newActions = draftPlan.value.actions || []
+    const newActionIds = new Set(newActions.map((a) => a.id).filter(Boolean))
+    const actionsUpsert = newActions
+      .filter((a) => {
+        if (!a.id) return true // new item
+        const old = oldActions.find((o) => o.id === a.id)
+        if (!old) return true
+        return (
+          a.description !== old.description ||
+          a.priority !== old.priority ||
+          a.assignee !== old.assignee ||
+          a.status !== old.status
+        )
+      })
+      .map((a) => ({
+        actionId: a.id || null,
+        description: a.description,
+        priority: Number(a.priority) || 0,
+        assignee: a.assignee,
+        status: a.status,
+      }))
+    const actionsDelete = oldActions.filter((a) => a.id && !newActionIds.has(a.id)).map((a) => a.id)
+    if (actionsUpsert.length || actionsDelete.length) {
+      payload.actions = {
+        upsert: actionsUpsert.length ? actionsUpsert : undefined,
+        delete: actionsDelete.length ? actionsDelete : undefined,
+      }
+    }
+
+    // Diff resources
+    const oldResources = currentPlan.value.resources || []
+    const newResources = draftPlan.value.resources || []
+    const newResourceIds = new Set(newResources.map((r) => (r as any).id).filter(Boolean))
+    const resourcesUpsert = newResources
+      .filter((r) => {
+        const rid = (r as any).id
+        if (!rid) return true // new item
+        const old = oldResources.find((o) => (o as any).id === rid)
+        if (!old) return true
+        return r.type !== old.type || r.name !== old.name || r.quantity !== old.quantity || r.location !== old.location
+      })
+      .map((r) => ({
+        resourceId: (r as any).id ? Number((r as any).id) : 0,
+        type: r.type,
+        name: r.name,
+        quantity: r.quantity,
+        location: r.location,
+      }))
+    const resourcesDelete = oldResources
+      .filter((r) => (r as any).id && !newResourceIds.has((r as any).id))
+      .map((r) => Number((r as any).id))
+    if (resourcesUpsert.length || resourcesDelete.length) {
+      payload.resources = {
+        upsert: resourcesUpsert.length ? resourcesUpsert : undefined,
+        delete: resourcesDelete.length ? resourcesDelete : undefined,
+      }
+    }
+
+    // Diff notifications
+    const oldNotifications = currentPlan.value.notifications || []
+    const newNotifications = draftPlan.value.notifications || []
+    const newNotifIds = new Set(newNotifications.map((n) => (n as any).id).filter(Boolean))
+    const notificationsUpsert = newNotifications
+      .filter((n) => {
+        const nid = (n as any).id
+        if (!nid) return true // new item
+        const old = oldNotifications.find((o) => (o as any).id === nid)
+        if (!old) return true
+        return (
+          n.channel !== old.channel || n.target !== old.target || n.message !== old.message || n.status !== old.status
+        )
+      })
+      .map((n) => ({
+        notificationId: (n as any).id ? Number((n as any).id) : 0,
+        channel: n.channel,
+        target: n.target,
+        message: n.message,
+        status: n.status,
+      }))
+    const notificationsDelete = oldNotifications
+      .filter((n) => (n as any).id && !newNotifIds.has((n as any).id))
+      .map((n) => Number((n as any).id))
+    if (notificationsUpsert.length || notificationsDelete.length) {
+      payload.notifications = {
+        upsert: notificationsUpsert.length ? notificationsUpsert : undefined,
+        delete: notificationsDelete.length ? notificationsDelete : undefined,
+      }
+    }
+
+    const res = await updatePlan(currentPlan.value.id, payload)
+    if (res && res.data) {
+      currentPlan.value = res.data
+      draftPlan.value = JSON.parse(JSON.stringify(res.data))
+      ElMessage.success({ message: '保存成功', duration: 2000 })
+      editMode.value = false
+      draftPlan.value = null
+    }
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      ElMessage.error(err.message || '保存失败')
+    } else {
+      ElMessage.error('保存失败')
+    }
+  } finally {
+    saving.value = false
+  }
+}
+
+const openApprovalDialog = () => {
+  if (!canApproveCurrentPlan.value) return
+  approvalDialogVisible.value = true
+  approvalOpinion.value = ''
+}
+
+const handleApprove = async () => {
+  if (!currentPlan.value || !opinionValid.value) return
+  approvalLoading.value = true
+  try {
+    const res = await approvePlan(currentPlan.value.id, {
+      version: currentPlan.value.version,
+      opinion: approvalOpinion.value.trim(),
+    })
+    if (res?.data) {
+      currentPlan.value.status = 'approved'
+      currentPlan.value.version = res.data.version
+      approvalDialogVisible.value = false
+      approvalOpinion.value = ''
+      auditLoaded.value = false
+      ElMessage.success({ message: '批准成功', duration: 2000 })
+      const detail = await getPlan(currentPlan.value.id)
+      if (detail?.data) currentPlan.value = detail.data
+      fetchData()
+    }
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      ElMessage.error(err.message || '批准失败')
+    } else {
+      ElMessage.error('批准失败')
+    }
+  } finally {
+    approvalLoading.value = false
+  }
+}
+
+const loadAudits = async () => {
+  if (!currentPlan.value || auditLoaded.value || auditLoading.value) return
+  auditLoading.value = true
+  try {
+    const res = await getPlanAudits(currentPlan.value.id)
+    auditRecords.value = res.data.records || []
+    auditLoaded.value = true
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      ElMessage.error(err.message || '获取审计记录失败')
+    } else {
+      ElMessage.error('获取审计记录失败')
+    }
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+
+
 const handleExecute = (row: FloodPlan) => {
+  if (!isReviewer.value || row.status !== 'approved') return
   ElMessageBox.confirm(`确定要执行预案吗？该操作将分发行动任务并发送通知。`, '执行确认', {
     confirmButtonText: '确定执行',
     cancelButtonText: '取消',
@@ -374,7 +840,7 @@ const handleExecute = (row: FloodPlan) => {
 }
 
 const executeCurrentPlan = async () => {
-  if (!currentPlan.value) return
+  if (!canExecuteCurrentPlan.value || !currentPlan.value) return
   executing.value = true
   try {
     await executePlan(currentPlan.value.id)
@@ -472,6 +938,29 @@ const getRiskTagType = (level: string): any => {
   return map[level] || 'info'
 }
 
+const statusTagType = (status: string): any => {
+  const map: Record<string, string> = {
+    draft: 'info',
+    approved: 'success',
+    executing: 'warning',
+    completed: ''
+  }
+  return map[status] || 'info'
+}
+
+const formatAuditAction = (action: string) => {
+  const map: Record<string, string> = {
+    approve: '批准',
+    edit_after_approve: '批准后编辑',
+  }
+  return map[action] || action
+}
+
+const formatChangeValue = (value: string | null) => {
+  if (value === null || value === undefined) return '-'
+  return value.length > 120 ? `${value.slice(0, 120)}...` : value
+}
+
 </script>
 
 <style scoped>
@@ -509,6 +998,12 @@ const getRiskTagType = (level: string): any => {
 
 .plan-detail {
   padding: 0 16px;
+}
+
+.detail-header-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .summary-panel {
@@ -567,6 +1062,10 @@ const getRiskTagType = (level: string): any => {
   color: var(--fm-fg);
   padding-left: 10px;
   position: relative;
+}
+
+.section-title .section-add-btn {
+  margin-left: 12px;
 }
 
 .section-title::before {

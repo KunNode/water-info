@@ -50,6 +50,7 @@ from app.platform.skill_registry import get_skill_registry
 from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
+from app.services.plan_review import PlanReviewError, PlanReviewService, Reviewer, StateConflictError
 from app.services.plan_persistence import SOURCE_MANUAL, build_trigger_conditions, should_persist_plan
 from app.services.platform_client import get_platform_client
 from app.services.risk_scan_scheduler import get_risk_scan_scheduler
@@ -73,6 +74,36 @@ def _get_user_from_request(request: Request) -> tuple[str, str]:
     user_id = request.headers.get(HEADER_USER_ID, "")
     username = request.headers.get(HEADER_USERNAME, "")
     return user_id, username
+
+
+def _plan_review_http_error(exc: PlanReviewError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={
+            "errorCode": exc.error_code,
+            "message": exc.message,
+            **(exc.details or {}),
+        },
+    )
+
+
+async def _get_reviewer_from_request(request: Request) -> Reviewer:
+    user_id, username = _get_user_from_request(request)
+    if not user_id or not username or len(user_id) > 255 or len(username) > 255:
+        raise HTTPException(
+            status_code=400,
+            detail={"errorCode": "MISSING_IDENTITY", "message": "身份信息缺失或无效"},
+        )
+    if not await get_db_service().user_exists(user_id):
+        raise HTTPException(
+            status_code=400,
+            detail={"errorCode": "UNKNOWN_REVIEWER", "message": "审核人身份无法识别"},
+        )
+    return Reviewer(user_id=user_id, username=username)
+
+
+async def _get_plan_review_service() -> PlanReviewService:
+    return PlanReviewService(await get_db_service()._get_pool())
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -876,10 +907,12 @@ async def get_plan(plan_id: str):
             status=plan["status"],
             session_id=plan["session_id"],
             summary=plan["summary"],
+            version=plan.get("version") or 0,
             actions=await db.get_plan_actions(plan_id),
             resources=await db.get_plan_resources(plan_id),
             notifications=await db.get_plan_notifications(plan_id),
             created_at=str(plan["created_at"]) if plan.get("created_at") else None,
+            updated_at=str(plan["updated_at"]) if plan.get("updated_at") else None,
         )
     except HTTPException:
         raise
@@ -913,17 +946,50 @@ async def execute_plan(plan_id: str, background_tasks: BackgroundTasks, request:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.patch("/api/v1/plans/{plan_id}/status")
-async def update_plan_status_endpoint(plan_id: str, body: dict):
-    valid_statuses = {"draft", "approved", "executing", "completed"}
-    status = body.get("status", "")
-    if status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"无效状态，有效值: {sorted(valid_statuses)}")
+@app.patch("/api/v1/plans/{plan_id}")
+async def update_plan_content(plan_id: str, body: dict, http_request: Request):
+    reviewer = await _get_reviewer_from_request(http_request)
+    version = body.get("version")
+    if version is None:
+        raise HTTPException(status_code=400, detail={"errorCode": "BAD_VERSION", "message": "version 必填"})
+
     db = get_db_service()
-    if not await db.get_emergency_plan(plan_id):
-        raise HTTPException(status_code=404, detail="预案不存在")
-    await db.update_plan_status(plan_id, status)
-    return {"plan_id": plan_id, "status": status}
+    plan = await db.get_emergency_plan(plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail={"errorCode": "PLAN_NOT_FOUND", "message": "预案不存在"})
+
+    patch = {key: value for key, value in body.items() if key != "version"}
+    service = await _get_plan_review_service()
+    try:
+        if plan["status"] == "draft":
+            return await service.edit_draft(plan_id, int(version), patch, reviewer)
+        if plan["status"] == "approved":
+            return await service.edit_approved(plan_id, int(version), patch, reviewer)
+        raise StateConflictError(plan["status"], ["draft", "approved"])
+    except PlanReviewError as exc:
+        raise _plan_review_http_error(exc) from exc
+
+
+@app.post("/api/v1/plans/{plan_id}/approve")
+async def approve_plan(plan_id: str, body: dict, http_request: Request):
+    reviewer = await _get_reviewer_from_request(http_request)
+    version = body.get("version")
+    if version is None:
+        raise HTTPException(status_code=400, detail={"errorCode": "BAD_VERSION", "message": "version 必填"})
+
+    try:
+        service = await _get_plan_review_service()
+        return await service.approve(plan_id, int(version), str(body.get("opinion") or ""), reviewer)
+    except PlanReviewError as exc:
+        raise _plan_review_http_error(exc) from exc
+
+
+@app.get("/api/v1/plans/{plan_id}/audits")
+async def list_plan_audits(plan_id: str, http_request: Request):
+    await _get_reviewer_from_request(http_request)
+    if not await get_db_service().get_emergency_plan(plan_id):
+        raise HTTPException(status_code=404, detail={"errorCode": "PLAN_NOT_FOUND", "message": "预案不存在"})
+    return await get_db_service().list_plan_audits(plan_id)
 
 
 @app.delete("/api/v1/plans/{plan_id}")
