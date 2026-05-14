@@ -232,24 +232,4 @@ CREATE TRIGGER update_threshold_rule_updated_at BEFORE UPDATE ON threshold_rule 
 DROP TRIGGER IF EXISTS update_alarm_updated_at ON alarm;
 CREATE TRIGGER update_alarm_updated_at BEFORE UPDATE ON alarm FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ============================================================
--- Legacy seed data
--- ============================================================
-
-INSERT INTO sys_role (id, code, name, description)
-SELECT gen_random_uuid()::text, 'ADMIN', 'Administrator', 'Full system access'
-WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code = 'ADMIN');
-
-INSERT INTO sys_role (id, code, name, description)
-SELECT gen_random_uuid()::text, 'OPERATOR', 'Operator', 'Can manage data, alarms, and resources'
-WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code = 'OPERATOR');
-
-INSERT INTO sys_role (id, code, name, description)
-SELECT gen_random_uuid()::text, 'VIEWER', 'Viewer', 'Read-only access'
-WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code = 'VIEWER');
-
-INSERT INTO sys_org (id, code, name, region)
-SELECT gen_random_uuid()::text, 'DEFAULT_ORG', 'Default Organization', 'Default Region'
-WHERE NOT EXISTS (SELECT 1 FROM sys_org WHERE code = 'DEFAULT_ORG');
-
 COMMIT;

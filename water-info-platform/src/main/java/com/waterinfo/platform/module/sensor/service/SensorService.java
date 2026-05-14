@@ -51,7 +51,7 @@ public class SensorService extends ServiceImpl<SensorMapper, Sensor> {
                 .type(request.getType())
                 .unit(request.getUnit())
                 .samplingIntervalSec(request.getSamplingIntervalSec() != null ? request.getSamplingIntervalSec() : 300)
-                .status("ACTIVE")
+                .status("ONLINE")
                 .meta(request.getMeta())
                 .build();
 
@@ -108,6 +108,7 @@ public class SensorService extends ServiceImpl<SensorMapper, Sensor> {
             throw new BusinessException(ErrorCode.SENSOR_NOT_FOUND);
         }
 
+        sensor.setStatus("ONLINE");
         sensor.setLastSeenAt(LocalDateTime.now());
         updateById(sensor);
     }

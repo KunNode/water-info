@@ -53,6 +53,7 @@ spring:
     baseline-on-migrate: true
     baseline-version: 0
     validate-on-migrate: true
+    ignore-migration-patterns: "*:missing"
 
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss

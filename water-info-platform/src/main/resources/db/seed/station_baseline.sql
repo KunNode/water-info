@@ -1,0 +1,53 @@
+-- Baseline station catalog only. This keeps the original stations and sensor
+-- configuration without loading observations, alarms, thresholds, or plans.
+
+BEGIN;
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+INSERT INTO station (
+  id, code, name, type, river_basin, admin_region,
+  lat, lon, elevation, status, created_at, updated_at
+) VALUES
+  ('93000000-0000-0000-0000-000000000101', 'ST_RAIN_CP_01', '翠屏北溪雨量站', 'RAIN_GAUGE',    '翠屏湖流域', '翠屏市', 30.5632100, 120.3128100, 38.20, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('93000000-0000-0000-0000-000000000102', 'ST_RAIN_CP_02', '翠屏南溪雨量站', 'RAIN_GAUGE',    '翠屏湖流域', '翠屏市', 30.5416200, 120.2943500, 62.40, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('93000000-0000-0000-0000-000000000103', 'ST_WL_CP_01',   '翠屏湖心水位站', 'WATER_LEVEL',   '翠屏湖流域', '翠屏市', 30.5524100, 120.3277300, 27.10, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('93000000-0000-0000-0000-000000000104', 'ST_WL_CP_02',   '翠屏北岸水位站', 'WATER_LEVEL',   '翠屏湖流域', '翠屏市', 30.5579800, 120.3361100, 24.80, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('93000000-0000-0000-0000-000000000105', 'ST_FLOW_CP_01', '翠屏出湖流量站', 'FLOW',          '翠屏湖流域', '翠屏市', 30.5455100, 120.3496600, 22.60, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('93000000-0000-0000-0000-000000000106', 'ST_RES_CP_01',  '翠屏水库站',     'RESERVOIR',     '翠屏湖流域', '翠屏市', 30.5511700, 120.3238800, 31.50, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('93000000-0000-0000-0000-000000000107', 'ST_GATE_CP_01', '翠屏闸站',       'GATE',          '翠屏湖流域', '翠屏市', 30.5437200, 120.3529400, 21.80, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('93000000-0000-0000-0000-000000000108', 'ST_PUMP_CP_01', '翠屏城区泵站',   'PUMP_STATION',  '翠屏湖流域', '翠屏市', 30.5586400, 120.3418200, 23.40, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name,
+  type = EXCLUDED.type,
+  river_basin = EXCLUDED.river_basin,
+  admin_region = EXCLUDED.admin_region,
+  lat = EXCLUDED.lat,
+  lon = EXCLUDED.lon,
+  elevation = EXCLUDED.elevation,
+  status = EXCLUDED.status,
+  updated_at = CURRENT_TIMESTAMP;
+
+INSERT INTO sensor (
+  id, station_id, type, unit, sampling_interval_sec, status,
+  last_seen_at, meta, created_at, updated_at
+) VALUES
+  ('94000000-0000-0000-0000-000000000101', '93000000-0000-0000-0000-000000000101', 'RAINFALL',        'mm',   300, 'ONLINE', CURRENT_TIMESTAMP - INTERVAL '3 minute', '{"zone":"北溪入湖口","model":"CP-RG-01"}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('94000000-0000-0000-0000-000000000102', '93000000-0000-0000-0000-000000000102', 'RAINFALL',        'mm',   300, 'ONLINE', CURRENT_TIMESTAMP - INTERVAL '4 minute', '{"zone":"南溪山区","model":"CP-RG-02"}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('94000000-0000-0000-0000-000000000103', '93000000-0000-0000-0000-000000000103', 'WATER_LEVEL',     'm',     60, 'ONLINE', CURRENT_TIMESTAMP - INTERVAL '1 minute', '{"zone":"湖心","model":"CP-WL-01"}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('94000000-0000-0000-0000-000000000104', '93000000-0000-0000-0000-000000000104', 'WATER_LEVEL',     'm',     60, 'ONLINE', CURRENT_TIMESTAMP - INTERVAL '2 minute', '{"zone":"北岸城区段","model":"CP-WL-02"}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('94000000-0000-0000-0000-000000000105', '93000000-0000-0000-0000-000000000105', 'FLOW',            'm3/s', 120, 'ONLINE', CURRENT_TIMESTAMP - INTERVAL '5 minute', '{"zone":"出湖口","model":"CP-FM-01"}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('94000000-0000-0000-0000-000000000106', '93000000-0000-0000-0000-000000000106', 'RESERVOIR_LEVEL', 'm',    300, 'ONLINE', CURRENT_TIMESTAMP - INTERVAL '6 minute', '{"zone":"湖心水库","model":"CP-RL-01"}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('94000000-0000-0000-0000-000000000107', '93000000-0000-0000-0000-000000000107', 'GATE_OPENING',    'm',    600, 'ONLINE', CURRENT_TIMESTAMP - INTERVAL '8 minute', '{"zone":"出湖泄洪闸","model":"CP-GT-01"}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  ('94000000-0000-0000-0000-000000000108', '93000000-0000-0000-0000-000000000108', 'PUMP_POWER',      'kW',   300, 'ONLINE', CURRENT_TIMESTAMP - INTERVAL '2 minute', '{"zone":"北岸城区泵站","model":"CP-PP-01"}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (id) DO UPDATE SET
+  station_id = EXCLUDED.station_id,
+  type = EXCLUDED.type,
+  unit = EXCLUDED.unit,
+  sampling_interval_sec = EXCLUDED.sampling_interval_sec,
+  status = EXCLUDED.status,
+  last_seen_at = EXCLUDED.last_seen_at,
+  meta = EXCLUDED.meta,
+  updated_at = CURRENT_TIMESTAMP;
+
+COMMIT;

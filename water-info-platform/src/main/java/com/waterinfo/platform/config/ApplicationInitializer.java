@@ -41,7 +41,31 @@ public class ApplicationInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        initializeDefaultRoles();
         initializeDefaultAdmin();
+    }
+
+    private void initializeDefaultRoles() {
+        ensureRole("ADMIN", "Administrator", "Full system access");
+        ensureRole("OPERATOR", "Operator", "Can manage data, alarms, and resources");
+        ensureRole("VIEWER", "Viewer", "Read-only access");
+    }
+
+    private void ensureRole(String code, String name, String description) {
+        SysRole existingRole = roleMapper.selectOne(
+                new LambdaQueryWrapper<SysRole>().eq(SysRole::getCode, code));
+
+        if (existingRole != null) {
+            return;
+        }
+
+        SysRole role = SysRole.builder()
+                .code(code)
+                .name(name)
+                .description(description)
+                .build();
+        roleMapper.insert(role);
+        log.info("Created default role: {}", code);
     }
 
     private void initializeDefaultAdmin() {
