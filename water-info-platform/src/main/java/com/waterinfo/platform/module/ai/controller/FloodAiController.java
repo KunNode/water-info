@@ -127,6 +127,36 @@ public class FloodAiController {
                 .map(ApiResponse::success);
     }
 
+    @Operation(summary = "获取预案执行进度", description = "获取预案执行的实时进度（行动项状态）")
+    @GetMapping("/plans/{id}/progress")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<JsonNode>> getPlanProgress(@PathVariable String id) {
+        log.debug("Get plan progress request: {}", id);
+        return aiServiceClient.getPlanProgress(id)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "更新行动项状态", description = "执行中手动更新某个行动项的状态")
+    @PatchMapping("/plans/{planId}/actions/{actionId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<JsonNode>> updateActionStatus(
+            @PathVariable String planId,
+            @PathVariable String actionId,
+            @RequestBody java.util.Map<String, String> body) {
+        log.info("Update action status: {}/{} -> {}", planId, actionId, body.get("status"));
+        return aiServiceClient.updateActionStatus(planId, actionId, body.getOrDefault("status", ""))
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "取消预案执行", description = "取消正在执行的预案")
+    @PostMapping("/plans/{id}/cancel")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<JsonNode>> cancelPlan(@PathVariable String id) {
+        log.info("Cancel plan request: {}", id);
+        return aiServiceClient.cancelPlan(id)
+                .map(ApiResponse::success);
+    }
+
     @Operation(summary = "获取会话历史", description = "根据会话ID获取历史消息记录")
     @GetMapping("/sessions/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")

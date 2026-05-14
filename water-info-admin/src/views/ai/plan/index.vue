@@ -51,6 +51,8 @@
             <el-option label="已批准" value="approved" />
             <el-option label="执行中" value="executing" />
             <el-option label="已完成" value="completed" />
+            <el-option label="执行失败" value="failed" />
+            <el-option label="已取消" value="cancelled" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -107,15 +109,15 @@
             <el-button link type="primary" size="small" @click="openDetail(row)">
               <el-icon><Document /></el-icon> 详情
             </el-button>
-            <el-button 
+            <el-button
               v-if="isReviewer"
-              link 
-              type="success" 
-              size="small" 
-              :disabled="row.status !== 'approved'"
+              link
+              type="success"
+              size="small"
+              :disabled="!['approved', 'failed', 'cancelled'].includes(row.status)"
               @click="handleExecute(row)"
             >
-              <el-icon><VideoPlay /></el-icon> 执行
+              <el-icon><VideoPlay /></el-icon> {{ ['failed', 'cancelled'].includes(row.status) ? '重新执行' : '执行' }}
             </el-button>
           </template>
         </el-table-column>
@@ -179,13 +181,34 @@
             <div class="summary-markdown markdown-body" v-html="renderPlanSummary(currentPlan.summary)" />
           </section>
 
-          <div class="section-title">应急行动列表 ({{ currentPlan.actions?.length || 0 }})</div>
-          <el-table :data="currentPlan.actions || []" border size="small" class="mb-4" empty-text="暂无应急行动">
+          <div class="section-title">
+            应急行动列表 ({{ displayActions.length }})
+            <span v-if="isExecutingCurrentPlan" style="font-size: 12px; color: #e6a23c; margin-left: 8px">执行中 · 每 3 秒刷新</span>
+          </div>
+          <el-table :data="displayActions" border size="small" class="mb-4" empty-text="暂无应急行动">
             <el-table-column type="index" label="#" width="50" align="center" />
             <el-table-column prop="description" label="行动描述" />
             <el-table-column prop="priority" label="优先级" width="90" align="center" />
-            <el-table-column prop="assignee" label="责任人" width="120" />
-            <el-table-column prop="status" label="状态" width="100" align="center" />
+            <el-table-column prop="responsible_dept" label="责任部门" width="120" />
+            <el-table-column label="状态" width="140" align="center">
+              <template #default="{ row }">
+                <el-select
+                  v-if="isExecutingCurrentPlan"
+                  :model-value="row.status"
+                  size="small"
+                  style="width: 120px"
+                  @change="(val: string) => handleActionStatusChange(row.action_id, val)"
+                >
+                  <el-option label="待执行" value="pending" />
+                  <el-option label="执行中" value="in_progress" />
+                  <el-option label="已完成" value="completed" />
+                  <el-option label="已失败" value="failed" />
+                </el-select>
+                <el-tag v-else :type="actionStatusTagType(row.status)" size="small">
+                  {{ actionStatusLabel(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
           </el-table>
 
           <div class="section-title">资源清单 ({{ currentPlan.resources?.length || 0 }})</div>
@@ -360,14 +383,22 @@
           </template>
           <template v-else>
             <el-button @click="drawerVisible = false">关闭</el-button>
-            <el-button 
+            <el-button
+              v-if="canCancelCurrentPlan"
+              type="danger"
+              @click="cancelCurrentPlan"
+            >
+              <el-icon><VideoPause /></el-icon> 取消执行
+            </el-button>
+            <el-button
               v-if="canExecuteCurrentPlan"
-              type="success" 
-              :loading="executing" 
+              type="success"
+              :loading="executing"
               :disabled="executing"
               @click="executeCurrentPlan"
             >
-              <el-icon><VideoPlay /></el-icon> 执行预案
+              <el-icon><VideoPlay /></el-icon>
+              {{ currentPlan?.status === 'approved' ? '执行预案' : '重新执行' }}
             </el-button>
           </template>
         </div>
@@ -403,15 +434,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { Search, Document, VideoPlay } from '@element-plus/icons-vue'
+import { Search, Document, VideoPlay, VideoPause } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { getPlans, getPlan, executePlan, updatePlan, approvePlan, getPlanAudits } from '@/api/flood'
+import {
+  getPlans, getPlan, executePlan, updatePlan, approvePlan, getPlanAudits,
+  getPlanProgress, updateActionStatus, cancelPlan,
+} from '@/api/flood'
 import { useUserStore } from '@/stores/user'
-import type { FloodPlan, PlanAuditRecord, PlanEditRequest } from '@/types'
+import type { FloodPlan, PlanAuditRecord, PlanEditRequest, ActionProgress } from '@/types'
 import { statusLabel } from './statusLabel'
 
 const userStore = useUserStore()
@@ -447,6 +481,45 @@ const isDirty = computed(() => {
   return JSON.stringify(draftPlan.value) !== JSON.stringify(currentPlan.value)
 })
 
+// Execution progress polling
+const progressData = ref<ActionProgress[]>([])
+const progressLoading = ref(false)
+let progressTimer: ReturnType<typeof setInterval> | null = null
+
+const startProgressPolling = (planId: string) => {
+  stopProgressPolling()
+  const poll = async () => {
+    try {
+      const res = await getPlanProgress(planId)
+      if (res && res.data) {
+        progressData.value = res.data.actions || []
+        // Stop polling if plan reached a terminal state
+        const ps = res.data.plan_status
+        if (ps === 'completed' || ps === 'failed' || ps === 'cancelled') {
+          stopProgressPolling()
+          if (currentPlan.value) {
+            currentPlan.value.status = ps as FloodPlan['status']
+          }
+          fetchData()
+        }
+      }
+    } catch {
+      // ignore polling errors
+    }
+  }
+  poll()
+  progressTimer = setInterval(poll, 3000)
+}
+
+const stopProgressPolling = () => {
+  if (progressTimer) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
+}
+
+onBeforeUnmount(() => stopProgressPolling())
+
 const executingCount = computed(() => tableData.value.filter((item) => item.status === 'executing').length)
 const approvedCount = computed(() => tableData.value.filter((item) => item.status === 'approved').length)
 const actionCount = computed(() => {
@@ -460,15 +533,50 @@ const canApproveCurrentPlan = computed(() => {
   return !!currentPlan.value && isReviewer.value && currentPlan.value.status === 'draft'
 })
 const canExecuteCurrentPlan = computed(() => {
-  return !!currentPlan.value && isReviewer.value && currentPlan.value.status === 'approved'
+  return !!currentPlan.value && isReviewer.value
+    && ['approved', 'failed', 'cancelled'].includes(currentPlan.value.status)
+})
+const canCancelCurrentPlan = computed(() => {
+  return !!currentPlan.value && isReviewer.value && currentPlan.value.status === 'executing'
+})
+const isExecutingCurrentPlan = computed(() => {
+  return !!currentPlan.value && currentPlan.value.status === 'executing'
 })
 const showAuditTab = computed(() => {
-  return !!currentPlan.value && ['approved', 'executing', 'completed'].includes(currentPlan.value.status)
+  return !!currentPlan.value && ['approved', 'executing', 'completed', 'failed', 'cancelled'].includes(currentPlan.value.status)
 })
 const opinionValid = computed(() => {
   const len = approvalOpinion.value.trim().length
   return len >= 1 && len <= 500
 })
+
+// Actions displayed in the detail table: use live progress data when executing, otherwise plan actions
+const displayActions = computed(() => {
+  if (progressData.value.length > 0) {
+    return progressData.value
+  }
+  return currentPlan.value?.actions || []
+})
+
+const actionStatusTagType = (status: string): 'info' | 'warning' | 'success' | 'danger' => {
+  const map: Record<string, 'info' | 'warning' | 'success' | 'danger'> = {
+    pending: 'info',
+    in_progress: 'warning',
+    completed: 'success',
+    failed: 'danger',
+  }
+  return map[status] || 'info'
+}
+
+const actionStatusLabel = (status: string): string => {
+  const map: Record<string, string> = {
+    pending: '待执行',
+    in_progress: '执行中',
+    completed: '已完成',
+    failed: '已失败',
+  }
+  return map[status] || status || '未知'
+}
 
 const fetchData = async () => {
   loading.value = true
@@ -540,11 +648,17 @@ const openDetail = async (row: FloodPlan) => {
   detailTab.value = 'detail'
   auditLoaded.value = false
   auditRecords.value = []
-  
+  progressData.value = []
+  stopProgressPolling()
+
   try {
     const res = await getPlan(row.id)
     if (res && res.data) {
       currentPlan.value = res.data
+      // Start progress polling if plan is executing
+      if (res.data.status === 'executing') {
+        startProgressPolling(res.data.id)
+      }
     }
   } catch (err: unknown) {
     currentPlan.value = null
@@ -588,6 +702,8 @@ const handleDrawerClose = async (done: () => void) => {
   }
   editMode.value = false
   draftPlan.value = null
+  stopProgressPolling()
+  progressData.value = []
   done()
 }
 
@@ -819,8 +935,11 @@ const loadAudits = async () => {
 
 
 const handleExecute = (row: FloodPlan) => {
-  if (!isReviewer.value || row.status !== 'approved') return
-  ElMessageBox.confirm(`确定要执行预案吗？该操作将分发行动任务并发送通知。`, '执行确认', {
+  if (!isReviewer.value || !['approved', 'failed', 'cancelled'].includes(row.status)) return
+  const msg = row.status === 'approved'
+    ? '确定要执行预案吗？该操作将分发行动任务并发送通知。'
+    : '确定要重新执行预案吗？将重置所有行动状态并重新执行。'
+  ElMessageBox.confirm(msg, '执行确认', {
     confirmButtonText: '确定执行',
     cancelButtonText: '取消',
     type: 'warning'
@@ -846,6 +965,8 @@ const executeCurrentPlan = async () => {
     await executePlan(currentPlan.value.id)
     ElMessage.success('预案执行已启动')
     currentPlan.value.status = 'executing'
+    progressData.value = []
+    startProgressPolling(currentPlan.value.id)
     fetchData()
   } catch (err: unknown) {
     if (err instanceof Error) {
@@ -855,6 +976,47 @@ const executeCurrentPlan = async () => {
     }
   } finally {
     executing.value = false
+  }
+}
+
+const cancelCurrentPlan = async () => {
+  if (!canCancelCurrentPlan.value || !currentPlan.value) return
+  try {
+    await ElMessageBox.confirm('确定要取消正在执行的预案吗？', '取消确认', {
+      confirmButtonText: '确定取消',
+      cancelButtonText: '继续执行',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await cancelPlan(currentPlan.value.id)
+    ElMessage.success('取消指令已发送')
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      ElMessage.error(err.message || '取消预案失败')
+    } else {
+      ElMessage.error('取消预案失败')
+    }
+  }
+}
+
+const handleActionStatusChange = async (actionId: string, newStatus: string) => {
+  if (!currentPlan.value) return
+  try {
+    await updateActionStatus(currentPlan.value.id, actionId, newStatus)
+    // Update local progress data
+    const action = progressData.value.find((a) => a.action_id === actionId)
+    if (action) {
+      action.status = newStatus as ActionProgress['status']
+    }
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      ElMessage.error(err.message || '更新行动状态失败')
+    } else {
+      ElMessage.error('更新行动状态失败')
+    }
   }
 }
 
@@ -943,7 +1105,9 @@ const statusTagType = (status: string): any => {
     draft: 'info',
     approved: 'success',
     executing: 'warning',
-    completed: ''
+    completed: '',
+    failed: 'danger',
+    cancelled: 'info'
   }
   return map[status] || 'info'
 }

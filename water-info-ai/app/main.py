@@ -42,6 +42,7 @@ from app.models import (
     PlanDetailResponse,
     PlanExecuteRequest,
     PlanExecuteResponse,
+    PlanProgressResponse,
     SessionResponse,
 )
 from app.platform.audit_recorder import AuditRecorder, set_audit_recorder
@@ -67,6 +68,9 @@ logger = logging.getLogger(__name__)
 HEADER_USER_ID = "X-User-Id"
 HEADER_USERNAME = "X-Username"
 STREAM_KEEPALIVE_INTERVAL = 15
+
+# Cancel events for in-flight plan executions (plan_id -> asyncio.Event)
+_plan_cancel_events: dict[str, asyncio.Event] = {}
 
 
 def _get_user_from_request(request: Request) -> tuple[str, str]:
@@ -465,9 +469,21 @@ def _serialize_kb_document(row: dict) -> dict:
 async def _do_execute_plan(plan_id: str, actions: list[dict]) -> None:
     db = get_db_service()
     platform = get_platform_client()
+    cancel_event = _plan_cancel_events.get(plan_id)
     failed = 0
+    cancelled = False
     for action in actions:
         action_id = action.get("action_id", "")
+        # Check cancel flag
+        if cancel_event and cancel_event.is_set():
+            cancelled = True
+            break
+        # Skip actions already manually updated to a terminal state
+        current = await db.get_action_status(plan_id, action_id)
+        if current in ("completed", "failed"):
+            if current == "failed":
+                failed += 1
+            continue
         try:
             await db.update_action_status(plan_id, action_id, "in_progress")
             if action.get("action_type") == "notification":
@@ -484,7 +500,14 @@ async def _do_execute_plan(plan_id: str, actions: list[dict]) -> None:
             except Exception:
                 pass
             failed += 1
-    await db.update_plan_status(plan_id, "completed" if failed == 0 else "executing")
+    # Clean up cancel event
+    _plan_cancel_events.pop(plan_id, None)
+    if cancelled:
+        await db.update_plan_status(plan_id, "cancelled")
+    elif failed > 0:
+        await db.update_plan_status(plan_id, "failed")
+    else:
+        await db.update_plan_status(plan_id, "completed")
 
 
 # ── lifespan ──────────────────────────────────────────────────────────────────
@@ -928,9 +951,17 @@ async def execute_plan(plan_id: str, background_tasks: BackgroundTasks, request:
         plan = await db.get_emergency_plan(plan_id)
         if not plan:
             raise HTTPException(status_code=404, detail="预案不存在")
+        status = plan["status"]
+        if status not in ("approved", "failed", "cancelled"):
+            raise HTTPException(status_code=409, detail=f"当前状态 '{status}' 不允许执行，需为 approved/failed/cancelled")
+        # Reset actions if re-executing from a terminal state
+        if status in ("failed", "cancelled"):
+            await db.reset_plan_actions(plan_id)
         actions = await db.get_plan_actions(plan_id)
         if request and request.action_ids:
             actions = [a for a in actions if a.get("action_id") in request.action_ids]
+        # Register cancel event (cleared on success or explicit cancel)
+        _plan_cancel_events[plan_id] = asyncio.Event()
         await db.update_plan_status(plan_id, "executing")
         background_tasks.add_task(_do_execute_plan, plan_id, actions)
         return PlanExecuteResponse(
@@ -943,6 +974,75 @@ async def execute_plan(plan_id: str, background_tasks: BackgroundTasks, request:
         raise
     except Exception as exc:
         logger.exception("execute plan %s: %s", plan_id, exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/plans/{plan_id}/progress", response_model=PlanProgressResponse)
+async def get_plan_progress(plan_id: str):
+    try:
+        db = get_db_service()
+        plan = await db.get_emergency_plan(plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="预案不存在")
+        actions = await db.get_plan_actions(plan_id)
+        completed = sum(1 for a in actions if a.get("status") == "completed")
+        failed = sum(1 for a in actions if a.get("status") == "failed")
+        return PlanProgressResponse(
+            plan_id=plan_id,
+            plan_status=plan["status"],
+            actions=actions,
+            total=len(actions),
+            completed=completed,
+            failed=failed,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("get plan progress %s: %s", plan_id, exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.patch("/api/v1/plans/{plan_id}/actions/{action_id}")
+async def update_action_status_during_execution(plan_id: str, action_id: str, body: dict):
+    new_status = body.get("status")
+    if new_status not in ("pending", "in_progress", "completed", "failed"):
+        raise HTTPException(status_code=400, detail="status 必须为 pending/in_progress/completed/failed")
+    try:
+        db = get_db_service()
+        plan = await db.get_emergency_plan(plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="预案不存在")
+        if plan["status"] != "executing":
+            raise HTTPException(status_code=409, detail="仅执行中的预案可修改行动状态")
+        await db.update_action_status(plan_id, action_id, new_status)
+        return {"plan_id": plan_id, "action_id": action_id, "status": new_status}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("update action status %s/%s: %s", plan_id, action_id, exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/plans/{plan_id}/cancel")
+async def cancel_plan(plan_id: str):
+    try:
+        db = get_db_service()
+        plan = await db.get_emergency_plan(plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="预案不存在")
+        if plan["status"] != "executing":
+            raise HTTPException(status_code=409, detail="仅执行中的预案可取消")
+        cancel_event = _plan_cancel_events.get(plan_id)
+        if cancel_event:
+            cancel_event.set()
+        else:
+            # Background task not tracked; set status directly
+            await db.update_plan_status(plan_id, "cancelled")
+        return {"plan_id": plan_id, "status": "cancelling"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("cancel plan %s: %s", plan_id, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

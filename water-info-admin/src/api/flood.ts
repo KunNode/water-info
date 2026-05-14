@@ -11,6 +11,7 @@ import type {
   PlanAuditListResponse,
   PlanEditRequest,
   PlanExecuteResult,
+  PlanProgressResponse,
 } from '@/types'
 
 export function queryFlood(data: { message: string; sessionId?: string; stream?: boolean }) {
@@ -27,6 +28,22 @@ export function getPlan(id: string) {
 
 export function executePlan(id: string) {
   return post<PlanExecuteResult>(`/plans/${id}/execute`, undefined, withAuth())
+}
+
+export function getPlanProgress(id: string) {
+  return get<PlanProgressResponse>(`/plans/${id}/progress`, undefined, withAuth())
+}
+
+export function updateActionStatus(planId: string, actionId: string, status: string) {
+  return patch<{ plan_id: string; action_id: string; status: string }>(
+    `/plans/${planId}/actions/${actionId}`,
+    { status },
+    withAuth(),
+  )
+}
+
+export function cancelPlan(id: string) {
+  return post<{ plan_id: string; status: string }>(`/plans/${id}/cancel`, undefined, withAuth())
 }
 
 export function updatePlan(id: string, body: PlanEditRequest) {

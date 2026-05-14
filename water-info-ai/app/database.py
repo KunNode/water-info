@@ -1297,6 +1297,20 @@ class DatabaseService:
                 status, plan_id, action_id,
             )
 
+    async def get_action_status(self, plan_id: str, action_id: str) -> str | None:
+        return await self._fetchval(
+            "SELECT status FROM emergency_action WHERE plan_id = $1 AND action_id = $2",
+            plan_id, action_id,
+        )
+
+    async def reset_plan_actions(self, plan_id: str) -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE emergency_action SET status = 'pending' WHERE plan_id = $1",
+                plan_id,
+            )
+
     async def get_plans_by_session(self, session_id: str) -> list[dict]:
         return await self._fetch("""
             SELECT plan_id, plan_name, risk_level, status, created_at

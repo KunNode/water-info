@@ -368,7 +368,7 @@ export interface FloodPlan {
   actions: PlanAction[]
   resources: PlanResource[]
   notifications: PlanNotification[]
-  status: 'draft' | 'approved' | 'executing' | 'completed'
+  status: 'draft' | 'approved' | 'executing' | 'completed' | 'failed' | 'cancelled'
   version: number
   createdAt: string
   updatedAt: string
@@ -379,6 +379,26 @@ export interface PlanExecuteResult {
   status: string
   executedActions: number
   message: string
+}
+
+export interface ActionProgress {
+  action_id: string
+  action_type: string
+  description: string
+  priority: number
+  responsible_dept: string
+  deadline_minutes: number | null
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  created_at: string
+}
+
+export interface PlanProgressResponse {
+  plan_id: string
+  plan_status: string
+  actions: ActionProgress[]
+  total: number
+  completed: number
+  failed: number
 }
 
 export interface FloodSession {

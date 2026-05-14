@@ -73,6 +73,15 @@ class PlanExecuteResponse(BaseModel):
     message: str
 
 
+class PlanProgressResponse(BaseModel):
+    plan_id: str
+    plan_status: str
+    actions: list[dict]
+    total: int
+    completed: int
+    failed: int
+
+
 class SessionResponse(BaseModel):
     session_id: str
     plans: list[dict]

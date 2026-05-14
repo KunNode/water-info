@@ -264,6 +264,50 @@ public class AiServiceClient {
     }
 
     /**
+     * Get execution progress for a plan (action-level statuses).
+     */
+    public Mono<JsonNode> getPlanProgress(String id) {
+        log.debug("Fetching plan progress from AI service: {}", id);
+
+        return webClient.get()
+                .uri("/api/v1/plans/{id}/progress", id)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(error -> log.error("Error fetching plan progress {}: {}", id, error.getMessage()));
+    }
+
+    /**
+     * Update action status during plan execution.
+     */
+    public Mono<JsonNode> updateActionStatus(String planId, String actionId, String status) {
+        log.debug("Updating action status on AI service: {}/{} -> {}", planId, actionId, status);
+
+        java.util.Map<String, String> body = java.util.Map.of("status", status);
+        return webClient.patch()
+                .uri("/api/v1/plans/{planId}/actions/{actionId}", planId, actionId)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(error -> log.error("Error updating action status {}/{}: {}", planId, actionId, error.getMessage()));
+    }
+
+    /**
+     * Cancel an executing plan.
+     */
+    public Mono<JsonNode> cancelPlan(String id) {
+        log.debug("Cancelling plan on AI service: {}", id);
+
+        return webClient.post()
+                .uri("/api/v1/plans/{id}/cancel", id)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(error -> log.error("Error cancelling plan {}: {}", id, error.getMessage()));
+    }
+
+    /**
      * Get session history
      */
     public Mono<SessionResponse> getSession(String id) {
