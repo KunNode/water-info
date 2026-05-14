@@ -9,6 +9,10 @@ import com.waterinfo.platform.module.ai.dto.FloodPlanPageResponse;
 import com.waterinfo.platform.module.ai.dto.FloodPlanResponse;
 import com.waterinfo.platform.module.ai.dto.FloodQueryRequest;
 import com.waterinfo.platform.module.ai.dto.FloodQueryResponse;
+import com.waterinfo.platform.module.ai.dto.PlanApproveRequest;
+import com.waterinfo.platform.module.ai.dto.PlanApproveResponse;
+import com.waterinfo.platform.module.ai.dto.PlanAuditListResponse;
+import com.waterinfo.platform.module.ai.dto.PlanEditRequest;
 import com.waterinfo.platform.module.ai.dto.PlanExecuteResponse;
 import com.waterinfo.platform.module.ai.dto.SessionResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -89,6 +93,37 @@ public class FloodAiController {
     public Mono<ApiResponse<PlanExecuteResponse>> executePlan(@PathVariable String id) {
         log.info("Execute plan request: {}", id);
         return aiServiceClient.executePlan(id)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "编辑应急预案", description = "编辑应急预案内容（摘要、行动、资源、通知）")
+    @PatchMapping("/plans/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<FloodPlanResponse>> updatePlan(
+            @PathVariable String id,
+            @Valid @RequestBody PlanEditRequest request) {
+        log.info("Update plan request: {}", id);
+        return aiServiceClient.updatePlan(id, request)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "批准应急预案", description = "批准草案预案（draft → approved）")
+    @PostMapping("/plans/{id}/approve")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR')")
+    public Mono<ApiResponse<PlanApproveResponse>> approvePlan(
+            @PathVariable String id,
+            @Valid @RequestBody PlanApproveRequest request) {
+        log.info("Approve plan request: {}", id);
+        return aiServiceClient.approvePlan(id, request)
+                .map(ApiResponse::success);
+    }
+
+    @Operation(summary = "获取预案审计记录", description = "按时间倒序返回预案的审计记录列表")
+    @GetMapping("/plans/{id}/audits")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPERATOR', 'VIEWER')")
+    public Mono<ApiResponse<PlanAuditListResponse>> listPlanAudits(@PathVariable String id) {
+        log.debug("List plan audits request: {}", id);
+        return aiServiceClient.listPlanAudits(id)
                 .map(ApiResponse::success);
     }
 

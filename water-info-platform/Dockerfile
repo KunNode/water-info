@@ -9,7 +9,7 @@ COPY settings.xml /root/.m2/settings.xml
 RUN mvn dependency:go-offline -B
 
 COPY src src
-RUN mvn package -DskipTests -B && \
+RUN mvn package -Dmaven.test.skip=true -B && \
     java -Djarmode=layertools -jar target/*.jar extract --destination extracted
 
 # ---- Runtime Stage ----

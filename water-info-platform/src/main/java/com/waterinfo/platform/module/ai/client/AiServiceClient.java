@@ -12,6 +12,10 @@ import com.waterinfo.platform.module.ai.dto.FloodPlanPageResponse;
 import com.waterinfo.platform.module.ai.dto.FloodPlanResponse;
 import com.waterinfo.platform.module.ai.dto.FloodQueryRequest;
 import com.waterinfo.platform.module.ai.dto.FloodQueryResponse;
+import com.waterinfo.platform.module.ai.dto.PlanApproveRequest;
+import com.waterinfo.platform.module.ai.dto.PlanApproveResponse;
+import com.waterinfo.platform.module.ai.dto.PlanAuditListResponse;
+import com.waterinfo.platform.module.ai.dto.PlanEditRequest;
 import com.waterinfo.platform.module.ai.dto.PlanExecuteResponse;
 import com.waterinfo.platform.module.ai.dto.SessionResponse;
 import jakarta.annotation.PostConstruct;
@@ -206,6 +210,57 @@ public class AiServiceClient {
                 .map(this::mapPlanExecuteResponse)
                 .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
                 .doOnError(error -> log.error("Error executing plan {}: {}", id, error.getMessage()));
+    }
+
+    /**
+     * Update (edit) a plan's content.
+     */
+    public Mono<FloodPlanResponse> updatePlan(String id, PlanEditRequest request) {
+        log.debug("Updating plan on AI service: {}", id);
+
+        UserInfo user = userContext.getCurrentServletUser();
+        return webClient.patch()
+                .uri("/api/v1/plans/{id}", id)
+                .headers(h -> addUserHeaders(h, user))
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .map(this::mapPlanDetail)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(error -> log.error("Error updating plan {}: {}", id, error.getMessage()));
+    }
+
+    /**
+     * Approve a draft plan (draft → approved).
+     */
+    public Mono<PlanApproveResponse> approvePlan(String id, PlanApproveRequest request) {
+        log.debug("Approving plan on AI service: {}", id);
+
+        UserInfo user = userContext.getCurrentServletUser();
+        return webClient.post()
+                .uri("/api/v1/plans/{id}/approve", id)
+                .headers(h -> addUserHeaders(h, user))
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono(PlanApproveResponse.class)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(error -> log.error("Error approving plan {}: {}", id, error.getMessage()));
+    }
+
+    /**
+     * List audit records for a plan.
+     */
+    public Mono<PlanAuditListResponse> listPlanAudits(String id) {
+        log.debug("Fetching plan audits from AI service: {}", id);
+
+        UserInfo user = userContext.getCurrentServletUser();
+        return webClient.get()
+                .uri("/api/v1/plans/{id}/audits", id)
+                .headers(h -> addUserHeaders(h, user))
+                .retrieve()
+                .bodyToMono(PlanAuditListResponse.class)
+                .timeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .doOnError(error -> log.error("Error fetching plan audits {}: {}", id, error.getMessage()));
     }
 
     /**
@@ -665,11 +720,12 @@ public class AiServiceClient {
 
     private FloodPlanResponse mapPlanSummary(JsonNode node) {
         FloodPlanResponse plan = new FloodPlanResponse();
-        plan.setId(text(node, "plan_id", "id"));
+        plan.setId(text(node, "plan_id", "planId", "id"));
         plan.setSessionId(text(node, "session_id", "sessionId"));
         plan.setRiskLevel(text(node, "risk_level", "riskLevel"));
         plan.setSummary(text(node, "summary"));
         plan.setStatus(text(node, "status"));
+        plan.setVersion(integer(node, "version"));
         plan.setCreatedAt(text(node, "created_at", "createdAt"));
         plan.setUpdatedAt(text(node, "updated_at", "updatedAt"));
         return plan;
@@ -690,7 +746,7 @@ public class AiServiceClient {
         }
         node.forEach(item -> {
             FloodPlanResponse.PlanAction action = new FloodPlanResponse.PlanAction();
-            action.setId(text(item, "action_id", "id"));
+            action.setId(text(item, "action_id", "actionId", "id"));
             action.setDescription(text(item, "description"));
             action.setPriority(text(item, "priority"));
             action.setAssignee(text(item, "responsible_dept", "assignee"));
@@ -708,7 +764,7 @@ public class AiServiceClient {
         }
         node.forEach(item -> {
             FloodPlanResponse.PlanResource resource = new FloodPlanResponse.PlanResource();
-            resource.setId(text(item, "id"));
+            resource.setId(text(item, "id", "resourceId"));
             resource.setType(text(item, "resource_type", "type"));
             resource.setName(text(item, "resource_name", "name"));
             resource.setQuantity(integer(item, "quantity"));
@@ -730,7 +786,7 @@ public class AiServiceClient {
         }
         node.forEach(item -> {
             FloodPlanResponse.PlanNotification notification = new FloodPlanResponse.PlanNotification();
-            notification.setId(text(item, "id"));
+            notification.setId(text(item, "id", "notificationId"));
             notification.setType(text(item, "type", "channel"));
             notification.setTarget(text(item, "target"));
             notification.setMessage(text(item, "content", "message"));

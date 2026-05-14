@@ -316,9 +316,17 @@ class DatabaseService:
                     status      VARCHAR(32) NOT NULL DEFAULT 'draft',
                     session_id  VARCHAR(128) NOT NULL DEFAULT '',
                     summary     TEXT NOT NULL DEFAULT '',
+                    version     INT NOT NULL DEFAULT 0,
                     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+            """)
+            # Optimistic-lock column for human-review workflow (plan-human-review Req 1.5/3.8).
+            await conn.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE emergency_plan ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 0;
+                EXCEPTION WHEN others THEN NULL;
+                END $$;
             """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS emergency_action (
@@ -359,6 +367,92 @@ class DatabaseService:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+
+            # ── Audit tables (plan-human-review Req 7.1, 7.2, 7.8) ──
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS plan_audit_record (
+                    id                BIGSERIAL PRIMARY KEY,
+                    plan_id           VARCHAR(64) NOT NULL
+                                      REFERENCES emergency_plan(plan_id) ON DELETE CASCADE,
+                    action            VARCHAR(32) NOT NULL,
+                    reviewer_user_id  VARCHAR(64) NOT NULL,
+                    reviewer_username VARCHAR(255) NOT NULL,
+                    reviewed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    opinion           TEXT,
+                    from_status       VARCHAR(32) NOT NULL,
+                    to_status         VARCHAR(32) NOT NULL,
+                    from_version      INT NOT NULL,
+                    to_version        INT NOT NULL
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_plan_audit_plan_time
+                    ON plan_audit_record(plan_id, reviewed_at DESC)
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS plan_audit_change (
+                    id              BIGSERIAL PRIMARY KEY,
+                    audit_id        BIGINT NOT NULL
+                                    REFERENCES plan_audit_record(id) ON DELETE CASCADE,
+                    field_path      VARCHAR(255) NOT NULL,
+                    change_type     VARCHAR(16)  NOT NULL,
+                    old_value       TEXT,
+                    new_value       TEXT,
+                    old_index       INT,
+                    new_index       INT
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_plan_audit_change_audit
+                    ON plan_audit_change(audit_id)
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS plan_audit_draft (
+                    id              BIGSERIAL PRIMARY KEY,
+                    plan_id         VARCHAR(64) NOT NULL
+                                    REFERENCES emergency_plan(plan_id) ON DELETE CASCADE,
+                    buffered_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    reviewer_user_id  VARCHAR(64) NOT NULL,
+                    reviewer_username VARCHAR(255) NOT NULL,
+                    field_path      VARCHAR(255) NOT NULL,
+                    change_type     VARCHAR(16)  NOT NULL,
+                    old_value       TEXT,
+                    new_value       TEXT,
+                    old_index       INT,
+                    new_index       INT
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_plan_audit_draft_plan
+                    ON plan_audit_draft(plan_id, buffered_at)
+            """)
+
+            # ── Immutability triggers (plan-human-review Req 7.8, Property P5) ──
+            await conn.execute("""
+                CREATE OR REPLACE FUNCTION plan_audit_no_update()
+                RETURNS trigger AS $$
+                BEGIN
+                  RAISE EXCEPTION 'plan_audit_record is immutable';
+                END; $$ LANGUAGE plpgsql
+            """)
+            await conn.execute("""
+                DROP TRIGGER IF EXISTS trg_plan_audit_record_immutable
+                    ON plan_audit_record
+            """)
+            await conn.execute("""
+                CREATE TRIGGER trg_plan_audit_record_immutable
+                BEFORE UPDATE OR DELETE ON plan_audit_record
+                FOR EACH ROW EXECUTE FUNCTION plan_audit_no_update()
+            """)
+            await conn.execute("""
+                DROP TRIGGER IF EXISTS trg_plan_audit_change_immutable
+                    ON plan_audit_change
+            """)
+            await conn.execute("""
+                CREATE TRIGGER trg_plan_audit_change_immutable
+                BEFORE UPDATE OR DELETE ON plan_audit_change
+                FOR EACH ROW EXECUTE FUNCTION plan_audit_no_update()
+            """)
             logger.info("预案持久化表已就绪")
 
     # ──────────────────────────────────────
@@ -381,8 +475,8 @@ class DatabaseService:
         async with pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute("""
-                    INSERT INTO emergency_plan (plan_id, plan_name, risk_level, trigger_conditions, status, session_id, summary)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    INSERT INTO emergency_plan (plan_id, plan_name, risk_level, trigger_conditions, status, session_id, summary, version)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
                     ON CONFLICT (plan_id) DO UPDATE SET
                         plan_name = EXCLUDED.plan_name,
                         risk_level = EXCLUDED.risk_level,

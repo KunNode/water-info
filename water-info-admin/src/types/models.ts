@@ -51,7 +51,7 @@ export interface CreateStationRequest {
   elevation?: number
 }
 
-export interface UpdateStationRequest extends Partial<CreateStationRequest> {}
+export interface UpdateStationRequest extends Partial<CreateStationRequest> { }
 
 export interface StationQuery {
   page?: number
@@ -369,6 +369,7 @@ export interface FloodPlan {
   resources: PlanResource[]
   notifications: PlanNotification[]
   status: 'draft' | 'approved' | 'executing' | 'completed'
+  version: number
   createdAt: string
   updatedAt: string
 }
@@ -450,6 +451,7 @@ export interface PlanAction {
 }
 
 export interface PlanResource {
+  id?: string
   type: string
   name: string
   quantity: number
@@ -457,10 +459,82 @@ export interface PlanResource {
 }
 
 export interface PlanNotification {
+  id?: string
   channel: string
   target: string
   message: string
   status: string
+}
+
+// ─── Plan Review ───
+export interface ActionUpsert {
+  actionId: string | null
+  description: string
+  priority: number
+  assignee: string
+  status: string
+}
+
+export interface ResourceUpsert {
+  resourceId: number
+  type: string
+  name: string
+  quantity: number
+  location: string
+}
+
+export interface NotificationUpsert {
+  notificationId: number
+  channel: string
+  target: string
+  message: string
+  status: string
+}
+
+export interface PlanEditRequest {
+  version: number
+  summary?: string
+  actions?: { upsert?: ActionUpsert[]; delete?: string[] }
+  resources?: { upsert?: ResourceUpsert[]; delete?: number[] }
+  notifications?: { upsert?: NotificationUpsert[]; delete?: number[] }
+}
+
+export interface PlanApproveRequest {
+  version: number
+  opinion: string
+}
+
+export interface PlanApproveResponse {
+  planId: string
+  status: string
+  version: number
+  auditRecordId: number
+}
+
+export interface PlanAuditChange {
+  id: number
+  auditId: number
+  fieldPath: string
+  changeType: string
+  oldValue: string | null
+  newValue: string | null
+  oldIndex: number | null
+  newIndex: number | null
+}
+
+export interface PlanAuditRecord {
+  id: number
+  action: string
+  reviewerUserId: string
+  reviewerUsername: string
+  reviewedAt: string
+  opinion: string | null
+  changes: PlanAuditChange[]
+}
+
+export interface PlanAuditListResponse {
+  planId: string
+  records: PlanAuditRecord[]
 }
 
 // ─── Resource ───

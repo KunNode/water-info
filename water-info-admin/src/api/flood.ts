@@ -6,6 +6,10 @@ import type {
   FloodPlan,
   FloodSession,
   PageResponse,
+  PlanApproveRequest,
+  PlanApproveResponse,
+  PlanAuditListResponse,
+  PlanEditRequest,
   PlanExecuteResult,
 } from '@/types'
 
@@ -25,8 +29,16 @@ export function executePlan(id: string) {
   return post<PlanExecuteResult>(`/plans/${id}/execute`, undefined, withAuth())
 }
 
-export function updatePlanStatus(id: string, status: string) {
-  return patch<{ plan_id: string; status: string }>(`/plans/${id}/status`, { status }, withAuth())
+export function updatePlan(id: string, body: PlanEditRequest) {
+  return patch<FloodPlan>(`/plans/${id}`, body, withAuth())
+}
+
+export function approvePlan(id: string, body: PlanApproveRequest) {
+  return post<PlanApproveResponse>(`/plans/${id}/approve`, body, withAuth())
+}
+
+export function getPlanAudits(id: string) {
+  return get<PlanAuditListResponse>(`/plans/${id}/audits`, undefined, withAuth())
 }
 
 export function getSession(id: string) {

@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -247,6 +248,19 @@ public class GlobalExceptionHandler {
     public ApiResponse<String> handleIllegalArgumentException(IllegalArgumentException e) {
         log.warn("Illegal argument: {}", e.getMessage());
         return ApiResponse.error(ErrorCode.PARAM_INVALID.getCode(), e.getMessage());
+    }
+
+    /**
+     * Handle WebClient response exceptions from downstream AI service
+     */
+    @ExceptionHandler(WebClientResponseException.class)
+    public ResponseEntity<ApiResponse<String>> handleWebClientResponseException(WebClientResponseException e, HttpServletRequest request) {
+        log.warn("[{}] Downstream service error: {} - {}", request.getRequestURI(), e.getStatusCode(), e.getResponseBodyAsString());
+        HttpStatus status = HttpStatus.resolve(e.getStatusCode().value());
+        if (status == null) {
+            status = HttpStatus.BAD_GATEWAY;
+        }
+        return ResponseEntity.status(status).body(ApiResponse.error(status.value(), e.getResponseBodyAsString()));
     }
 
     /**
