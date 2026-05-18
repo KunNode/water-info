@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -20,6 +21,35 @@ logger = logging.getLogger(__name__)
 
 _EVIDENCE_HEADING = "## 证据片段"
 _PLAN_RESPONSE_INTENTS = {"plan_generation"}
+_SECTION_RE = re.compile(r"^##\s+", re.MULTILINE)
+
+
+def _deduplicate_sections(text: str) -> str:
+    """Remove repeated sections from LLM output.
+
+    When the LLM generates multiple versions of the same response
+    (e.g. multiple '## 结论' blocks), keep only the first occurrence
+    of each section through to the next section header.
+    """
+    # Find all section header positions
+    headers = list(_SECTION_RE.finditer(text))
+    if len(headers) <= 1:
+        return text
+
+    # Collect unique section names in order; if a name repeats, truncate there
+    seen_starts: dict[str, int] = {}
+    for match in headers:
+        # Get the text from this header to the next line break as the section name
+        line_end = text.find("\n", match.start())
+        if line_end == -1:
+            line_end = len(text)
+        header_line = text[match.start():line_end].strip()
+        if header_line in seen_starts:
+            # Duplicate found — truncate at this header
+            return text[:match.start()].rstrip()
+        seen_starts[header_line] = match.start()
+
+    return text
 
 
 class FinalResponsePayload(BaseModel):
@@ -393,6 +423,7 @@ async def final_response_node(state: dict) -> dict:
                     "和可用 RAG 证据生成；不要声称未使用模型。"
                     "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
                     "若存在异常信息，需要在结尾单独提醒。"
+                    "【重要】只输出一份完整回答。结论、要点、建议、提醒各出现一次，绝对不要重复任何章节。"
                 )
             else:
                 # Non-streaming mode: output JSON for structured parsing
@@ -424,12 +455,14 @@ async def final_response_node(state: dict) -> dict:
                     llm_prompt,
                     system_prompt=system_prompt,
                     temperature=0.0,
+                    max_tokens=2048,
                     # No JSON format for streaming - output plain text
                 ):
                     content_parts.append(token)
                     await stream_queue.put(token)
                 content = "".join(content_parts).strip()
-                # For streaming, the content is the final text (already formatted)
+                # Deduplicate repeated sections (LLM sometimes generates multiple versions)
+                content = _deduplicate_sections(content)
                 final_text = _append_evidence_if_missing(content, evidence)
             else:
                 # Non-streaming mode: use JSON format for structured parsing

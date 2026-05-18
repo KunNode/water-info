@@ -178,6 +178,7 @@ class OpenAICompatibleLLM:
         response_format: dict | None = None,
         timeout: float | None = None,
         max_retries: int = 3,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
         """Stream LLM response token by token."""
         if not self.is_enabled:
@@ -196,6 +197,8 @@ class OpenAICompatibleLLM:
         }
         if response_format:
             payload["response_format"] = response_format
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
 
         headers = {
             "Authorization": f"Bearer {self._settings.openai_api_key}",
