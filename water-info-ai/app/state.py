@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import operator
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 
 class RiskLevel(str, Enum):
@@ -147,6 +148,10 @@ class FloodGraphState(TypedDict, total=False):
     pending_approvals: list[dict]
     dispatch_orders: list[dict]
     metadata_filter: dict | None
+    human_review: dict
+
+    # Streaming support: asyncio.Queue for token-level streaming to SSE
+    stream_queue: Any  # asyncio.Queue[str] | None
 
 
 FloodResponseState = FloodGraphState

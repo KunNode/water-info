@@ -21,6 +21,9 @@ from app.graph import build_flood_response_graph, flood_response_graph
 from app.langgraph_persistence import get_langgraph_persistence
 from app.memory.service import build_memory_namespaces
 from app.models import (
+    ApprovalRequest,
+    ApprovalResponse,
+    CheckpointSummary,
     ConversationDetailResponse,
     ConversationFullResponse,
     ConversationItem,
@@ -43,6 +46,8 @@ from app.models import (
     PlanExecuteRequest,
     PlanExecuteResponse,
     PlanProgressResponse,
+    ResumeRequest,
+    ResumeResponse,
     SessionResponse,
 )
 from app.platform.audit_recorder import AuditRecorder, set_audit_recorder
@@ -51,8 +56,8 @@ from app.platform.skill_registry import get_skill_registry
 from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
-from app.services.plan_review import PlanReviewError, PlanReviewService, Reviewer, StateConflictError
 from app.services.plan_persistence import SOURCE_MANUAL, build_trigger_conditions, should_persist_plan
+from app.services.plan_review import PlanReviewError, PlanReviewService, Reviewer, StateConflictError
 from app.services.platform_client import get_platform_client
 from app.services.risk_scan_scheduler import get_risk_scan_scheduler
 from app.state import RiskAssessment, to_plain_data
@@ -517,6 +522,15 @@ async def _do_execute_plan(plan_id: str, actions: list[dict]) -> None:
 async def lifespan(app: FastAPI):
     global flood_response_graph
     logger.info("启动水务AI多 Agent 应急服务")
+
+    # OTel tracer init (Task 9.7)
+    if settings.otel_enabled:
+        try:
+            from app.observability.otel import init_tracer_provider
+            init_tracer_provider()
+        except Exception as exc:
+            logger.warning("OTel init failed (non-fatal): %s", exc)
+
     db = get_db_service()
     sessions = session_service.get_session_service()
     persistence = get_langgraph_persistence()
@@ -582,6 +596,32 @@ app.add_middleware(
 app.include_router(risk_scan_router)
 
 
+# ── OTel trace-id middleware (Task 9.6) ───────────────────────────────────
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+
+
+class TraceIdMiddleware(BaseHTTPMiddleware):
+    """Inject ``X-Trace-Id`` header on flood query endpoints when OTel is active."""
+
+    _FLOOD_PATHS = ("/api/v1/flood/query", "/api/v1/flood/query/stream")
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path in self._FLOOD_PATHS:
+            from app.observability.otel import current_trace_id_hex
+
+            trace_id = current_trace_id_hex()
+            if trace_id:
+                response.headers["X-Trace-Id"] = trace_id
+        return response
+
+
+if settings.otel_enabled:
+    app.add_middleware(TraceIdMiddleware)
+
+
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 
@@ -621,6 +661,32 @@ async def flood_query(request: FloodQueryRequest, http_request: Request) -> Floo
         raise HTTPException(status_code=500, detail=f"处理失败: {exc}") from exc
     final_state.setdefault("session_id", session_id)
     final_state.setdefault("user_query", request.query)
+
+    # HITL interrupt detection (Task 20.4 — non-streaming)
+    if final_state.get("next_agent") == "__interrupt__":
+        approval_info = final_state.get("human_review") or {}
+        approval_id = approval_info.get("approval_id") or str(uuid.uuid4())
+        try:
+            from app.platform.approvals import PendingApprovalRow, get_approvals_dao
+
+            dao = await get_approvals_dao()
+            await dao.insert_pending(PendingApprovalRow(
+                approval_id=approval_id,
+                session_id=session_id,
+                approval_type="critical_action_review",
+                payload_json={"original_next_agent": approval_info.get("original_next_agent", ""), "query": request.query},
+            ))
+        except Exception as exc:
+            logger.warning("[%s] failed to persist pending approval: %s", session_id, exc)
+        raise HTTPException(
+            status_code=202,
+            detail={
+                "status": "approval_required",
+                "approval_id": approval_id,
+                "session_id": session_id,
+                "message": "操作需要人工审核，请审批后继续",
+            },
+        )
 
     # Req 4.4: if memory_loader short-circuited the graph because a critical
     # store (summary / snapshot / conversation_messages) failed to read, the
@@ -699,14 +765,48 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
         final_state = None
         accumulated_response = ""
 
+        # Create streaming queue for token-level streaming
+        stream_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        answer_started = False
+
         try:
             yield _event_line({"type": "session_init", "sessionId": session_id})
+
+            # Build initial state with stream_queue
+            initial_state = _build_initial_state(
+                session_id, request.query, history, user_id=user_id, username=username
+            )
+            initial_state["stream_queue"] = stream_queue
+
             graph_iter = flood_response_graph.astream(
-                _build_initial_state(session_id, request.query, history, user_id=user_id, username=username),
+                initial_state,
                 {"configurable": {"thread_id": session_id}},
                 stream_mode="updates",
             ).__aiter__()
+
+            # Background task to drain stream queue
+            queue_exhausted = asyncio.Event()
+            pending_queue_lines: list[str] = []
+
+            async def drain_queue():
+                """Consume tokens from queue, buffer SSE lines."""
+                nonlocal answer_started, accumulated_response
+                while True:
+                    token = await stream_queue.get()
+                    if token is None:  # Sentinel: streaming complete
+                        break
+                    if not answer_started:
+                        answer_started = True
+                        pending_queue_lines.append(_event_line({"type": "answer_start"}))
+                    accumulated_response += token
+                    pending_queue_lines.append(_event_line({"type": "answer_delta", "delta": token}))
+                queue_exhausted.set()
+
+            drain_task = asyncio.create_task(drain_queue())
+
+            # Run graph updates and queue draining concurrently
             pending_update = asyncio.create_task(graph_iter.__anext__())
+
             while True:
                 try:
                     update = await asyncio.wait_for(
@@ -748,12 +848,66 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
                         "recoverable": False,
                     })
                     return
+
+                # Yield any buffered streaming tokens first
+                while pending_queue_lines:
+                    yield pending_queue_lines.pop(0)
+
                 for event in _build_stream_events(node_name, node_update):
-                    yield _event_line(event)
-                    # Track final response for persistence
-                    if event.get("type") == "agent_message" and event.get("agent") == "final_response":
+                    # Skip agent_message for final_response if we're streaming tokens
+                    if (
+                        event.get("type") == "agent_message"
+                        and event.get("agent") == "final_response"
+                        and answer_started
+                    ):
                         accumulated_response = event.get("response", "")
+                        continue
+                    yield _event_line(event)
                 pending_update = asyncio.create_task(graph_iter.__anext__())
+
+            # Signal queue exhaustion and wait for drain to complete
+            await stream_queue.put(None)  # Send sentinel
+            await drain_task
+
+            # Yield any remaining buffered lines
+            while pending_queue_lines:
+                yield pending_queue_lines.pop(0)
+
+            # Send answer_end if we streamed tokens
+            if answer_started:
+                yield _event_line({"type": "answer_end"})
+
+            # HITL interrupt detection (Task 20.4)
+            if final_state and final_state.get("next_agent") == "__interrupt__":
+                approval_info = final_state.get("human_review") or {}
+                approval_id = approval_info.get("approval_id") or str(uuid.uuid4())
+                # Persist pending approval to DB
+                try:
+                    from app.platform.approvals import get_approvals_dao
+
+                    dao = await get_approvals_dao()
+                    from app.platform.approvals import PendingApprovalRow
+
+                    await dao.insert_pending(PendingApprovalRow(
+                        approval_id=approval_id,
+                        session_id=session_id,
+                        approval_type="critical_action_review",
+                        payload_json={
+                            "original_next_agent": approval_info.get("original_next_agent", ""),
+                            "query": request.query,
+                        },
+                    ))
+                except Exception as exc:
+                    logger.warning("[%s] failed to persist pending approval: %s", session_id, exc)
+                yield _event_line({
+                    "type": "approval_required",
+                    "approval_id": approval_id,
+                    "session_id": session_id,
+                    "approval_type": "critical_action_review",
+                    "message": "操作需要人工审核，请审批后继续",
+                })
+                yield _event_line({"type": "agent_update", "agent": "__done__", "status": "interrupted"})
+                return
 
             if final_state:
                 final_state.setdefault("session_id", session_id)
@@ -1381,3 +1535,246 @@ async def get_session(session_id: str):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ── checkpoint / resume endpoints (supervisor-autogen-enhancements F4) ────
+
+
+@app.get("/api/v1/flood/sessions/{session_id}/checkpoints", response_model=list[CheckpointSummary])
+async def list_checkpoints(session_id: str):
+    """List up to 50 most recent checkpoints for a session.
+
+    Returns 503 when LANGGRAPH_POSTGRES_ENABLED is false.
+    """
+    settings = get_settings()
+    if not settings.langgraph_postgres_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "persistence_disabled", "message": "Checkpoint persistence is not enabled"},
+        )
+    persistence = get_langgraph_persistence()
+    if not persistence.enabled or persistence.checkpointer is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "persistence_disabled", "message": "Checkpoint persistence is not available"},
+        )
+
+    config = {"configurable": {"thread_id": session_id}}
+    summaries: list[CheckpointSummary] = []
+    async for checkpoint_tuple in persistence.checkpointer.alist(config, limit=50):
+        state = checkpoint_tuple.checkpoint.get("channel_values", {})
+        cp_config = checkpoint_tuple.config
+        checkpoint_id = cp_config.get("configurable", {}).get("checkpoint_id", "")
+        created_at = checkpoint_tuple.metadata.get("created_at", "") if checkpoint_tuple.metadata else ""
+        summaries.append(CheckpointSummary(
+            checkpoint_id=str(checkpoint_id),
+            last_completed_agent=str(state.get("current_agent", "")),
+            created_at=str(created_at),
+            current_state_summary={
+                "intent": state.get("intent", ""),
+                "safety_level": state.get("safety_level", ""),
+                "has_data_summary": bool(state.get("data_summary")),
+                "has_risk_assessment": state.get("risk_assessment") is not None,
+                "has_emergency_plan": state.get("emergency_plan") is not None,
+                "has_resource_plan": bool(state.get("resource_plan")),
+                "has_notifications": bool(state.get("notifications")),
+            },
+        ))
+    return summaries
+
+
+@app.post("/api/v1/flood/sessions/{session_id}/resume", response_model=ResumeResponse)
+async def resume_session(session_id: str, body: ResumeRequest):
+    """Resume a graph execution from a checkpoint.
+
+    Returns 503 when persistence disabled, 404 when checkpoint not found,
+    409 when duplicate resume is in progress, 200 on success.
+    """
+    settings = get_settings()
+    if not settings.langgraph_postgres_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "persistence_disabled", "message": "Checkpoint persistence is not enabled"},
+        )
+    persistence = get_langgraph_persistence()
+    if not persistence.enabled or persistence.checkpointer is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "persistence_disabled", "message": "Checkpoint persistence is not available"},
+        )
+
+    # Find the target checkpoint
+    config = {"configurable": {"thread_id": session_id}}
+    target_checkpoint = None
+
+    if body.checkpoint_id:
+        # Look for specific checkpoint
+        async for checkpoint_tuple in persistence.checkpointer.alist(config, limit=50):
+            cp_id = checkpoint_tuple.config.get("configurable", {}).get("checkpoint_id", "")
+            if str(cp_id) == body.checkpoint_id:
+                target_checkpoint = checkpoint_tuple
+                break
+        if target_checkpoint is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "checkpoint_not_found", "message": f"Checkpoint {body.checkpoint_id} not found"},
+            )
+    else:
+        # Use most recent checkpoint
+        async for checkpoint_tuple in persistence.checkpointer.alist(config, limit=1):
+            target_checkpoint = checkpoint_tuple
+            break
+        if target_checkpoint is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"error_code": "no_checkpoints_for_session", "message": f"No checkpoints found for session {session_id}"},
+            )
+
+    # Check idempotency
+    import hashlib
+
+    state_json = json.dumps(target_checkpoint.checkpoint.get("channel_values", {}), sort_keys=True, default=str)
+    state_sha1 = hashlib.sha1(state_json.encode()).hexdigest()
+    checkpoint_id = str(target_checkpoint.config.get("configurable", {}).get("checkpoint_id", ""))
+
+    from app.platform.resume_idempotency import get_resume_idempotency_cache
+
+    cache = get_resume_idempotency_cache()
+    if not await cache.try_acquire(checkpoint_id, state_sha1):
+        raise HTTPException(
+            status_code=409,
+            detail={"error_code": "resume_already_in_progress", "message": "A resume with this checkpoint is already in progress"},
+        )
+
+    # Build the resume state
+    run_id = str(uuid.uuid4())
+    state = dict(target_checkpoint.checkpoint.get("channel_values", {}))
+    state["agent_run_id"] = run_id
+    state["session_id"] = session_id
+
+    # Apply override_next_agent if provided
+    if body.override_next_agent:
+        state["next_agent"] = body.override_next_agent
+
+    # Add resume trace
+    last_agent = state.get("current_agent", "unknown")
+    state.setdefault("execution_traces", []).append({
+        "phase": "data_query",
+        "status": "completed",
+        "title": f"resumed from {last_agent}",
+        "detail": f"checkpoint_id={checkpoint_id}",
+        "tool_name": None,
+        "metadata": {},
+    })
+
+    try:
+        # Resume the graph from the checkpoint
+        resume_config = {
+            "configurable": {
+                "thread_id": session_id,
+                "checkpoint_id": checkpoint_id,
+            }
+        }
+        await flood_response_graph.ainvoke(state, resume_config)
+    finally:
+        await cache.release(checkpoint_id, state_sha1)
+
+    return ResumeResponse(
+        status="resumed",
+        run_id=run_id,
+        checkpoint_id=checkpoint_id,
+    )
+
+
+# ── HITL approval endpoint (supervisor-autogen-enhancements F5) ────────────
+
+
+@app.post("/api/v1/flood/approvals/{approval_id}", response_model=ApprovalResponse)
+async def resolve_approval(approval_id: str, body: ApprovalRequest):
+    """Resolve a pending HITL approval.
+
+    Approve: resume graph from the interrupted state.
+    Reject: resume to __end__ (skip downstream).
+    Modify: resume with override_next_agent.
+    """
+    if not settings.hitl_enabled:
+        raise HTTPException(status_code=503, detail="HITL is not enabled")
+
+    from app.platform.approvals import get_approvals_dao
+
+    dao = await get_approvals_dao()
+    row = await dao.get(approval_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Approval {approval_id} not found")
+
+    if row.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Approval already {row.status}")
+
+    # CAS resolve
+    resolution = body.decision
+    if body.comment:
+        resolution = f"{body.decision}: {body.comment}"
+
+    updated = await dao.cas_resolve(
+        approval_id,
+        new_status=body.decision + "d" if body.decision == "approve" else body.decision + "ed",
+        resolution=resolution,
+        resolved_by="",
+    )
+    if not updated:
+        raise HTTPException(status_code=409, detail="Approval was already resolved (CAS)")
+
+    # Resume the graph
+    session_id = row.session_id
+    resume_state: dict = {
+        "session_id": session_id,
+        "approval_id": approval_id,
+    }
+
+    if body.decision == "reject":
+        resume_state["next_agent"] = "__end__"
+        resume_state["human_review"] = {"approval_id": approval_id, "status": "rejected"}
+    elif body.decision == "modify" and body.override_next_agent:
+        resume_state["next_agent"] = body.override_next_agent
+        resume_state["human_review"] = {"approval_id": approval_id, "status": "modified"}
+    else:
+        # approve — resume with original next_agent from payload
+        original = (row.payload_json or {}).get("original_next_agent", "__end__")
+        resume_state["next_agent"] = original
+        resume_state["human_review"] = {"approval_id": approval_id, "status": "approved"}
+
+    # Persist decision log
+    try:
+        from app.platform.audit_recorder import get_audit_recorder
+
+        recorder = get_audit_recorder()
+        if recorder is not None:
+            from app.platform.audit_models import DecisionLogRecord
+
+            await recorder.record_decision(DecisionLogRecord(
+                session_id=session_id,
+                decision_type="human_review",
+                decision_json={
+                    "approval_id": approval_id,
+                    "decision": body.decision,
+                    "comment": body.comment,
+                    "override_next_agent": body.override_next_agent,
+                },
+                evidence_ids=[],
+                human_approved=body.decision == "approve",
+            ))
+    except Exception as exc:
+        logger.warning("Failed to record approval decision log: %s", exc)
+
+    # Resume graph execution in background
+    try:
+        config = {"configurable": {"thread_id": session_id}}
+        asyncio.create_task(flood_response_graph.ainvoke(resume_state, config))
+    except Exception as exc:
+        logger.warning("Failed to resume graph after approval: %s", exc)
+
+    return ApprovalResponse(
+        status=body.decision + "d" if body.decision == "approve" else body.decision + "ed",
+        approval_id=approval_id,
+        resolution=resolution,
+    )
