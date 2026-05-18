@@ -18,6 +18,8 @@ AGENT_DEPENDENCIES: dict[str, list[str]] = {
     "plan_reviewer": ["emergency_plan"],
     "safety_checker": ["emergency_plan"],
     "parallel_dispatch": ["risk_assessment", "emergency_plan"],
+    "risk_analysis_parallel": ["data_summary"],
+    "validation_parallel": ["emergency_plan"],
     "conversation_assistant": [],
     "knowledge_retriever": [],
     "execution_monitor": [],
@@ -40,6 +42,8 @@ COMPLETION_FIELD: dict[str, str] = {
     "plan_reviewer": "compliance_result",
     "safety_checker": "safety_check_result",
     "execution_monitor": "execution_progress",
+    "risk_analysis_parallel": "risk_assessment",
+    "validation_parallel": "compliance_result",
 }
 
 

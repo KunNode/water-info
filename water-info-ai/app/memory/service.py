@@ -32,6 +32,46 @@ class MemoryLoadError(RuntimeError):
 
 CONTEXT_HISTORY_LIMIT: int = get_settings().memory_context_history_limit
 
+_SUMMARIZE_SYSTEM_PROMPT = (
+    "把以下防汛助手会话压缩为结构化摘要。"
+    "按以下格式输出（中文，不超过 500 字）：\n"
+    "【用户目标】用户想了解/解决什么\n"
+    "【关键站点】提及的水库、堤防、泵站等（如有）\n"
+    "【风险等级】当前评估的风险级别（如有）\n"
+    "【关键决策】已做出的决定或建议（如有）\n"
+    "【待办事项】尚未完成的任务（如有）"
+)
+
+
+async def _summarize_messages(messages: list[dict[str, str]]) -> str:
+    """Generate structured summary from older conversation messages via LLM."""
+    llm = get_llm()
+    if not llm.is_enabled:
+        return _simple_summary_from_messages(messages)
+
+    try:
+        response = await llm.ainvoke(
+            json.dumps({"messages": messages}, ensure_ascii=False),
+            system_prompt=_SUMMARIZE_SYSTEM_PROMPT,
+            temperature=0.0,
+        )
+        content = getattr(response, "content", "").strip()
+        if content:
+            return content[:1500]
+    except Exception as exc:
+        logger.warning("Structured summary generation failed: %s", exc)
+
+    return _simple_summary_from_messages(messages)
+
+
+def _simple_summary_from_messages(messages: list[dict[str, str]]) -> str:
+    snippets = []
+    for msg in messages[-12:]:
+        role = msg.get("role", "")
+        content = str(msg.get("content") or "").replace("\n", " ")
+        snippets.append(f"{role}: {content[:120]}")
+    return "；".join(snippets)[:1200]
+
 
 def _clamp(value: Any, default: float = 0.5) -> float:
     try:
@@ -152,13 +192,23 @@ class MemoryService:
         # ``recent_messages`` from in-memory graph state, so a Loaded_Session
         # receives the same payload as live streaming.
         try:
-            rows = await db.get_conversation_messages(session_id, limit=CONTEXT_HISTORY_LIMIT)
+            rows = await db.get_conversation_messages(session_id, limit=CONTEXT_HISTORY_LIMIT * 3)
         except Exception as exc:
             logger.warning("[%s] recent messages load failed: %s", session_id, exc)
             raise MemoryLoadError("conversation_messages") from exc
 
         db_messages = _normalize_chat_messages(rows, limit=CONTEXT_HISTORY_LIMIT)
         if db_messages:
+            # If there are older messages beyond the limit, summarize them
+            # so the current turn has access to earlier context.
+            all_normalized = _normalize_chat_messages(rows, limit=CONTEXT_HISTORY_LIMIT * 3)
+            if len(all_normalized) > CONTEXT_HISTORY_LIMIT:
+                older = all_normalized[:-CONTEXT_HISTORY_LIMIT]
+                # Only summarize if there's no existing DB summary covering these
+                if not summary:
+                    inline_summary = await _summarize_messages(older)
+                    if inline_summary:
+                        summary = inline_summary
             recent_session_messages = db_messages
         else:
             # DB is authoritative but empty: fall back to caller-provided context
@@ -352,12 +402,12 @@ class MemoryService:
                         {"messages": [{"role": row["role"], "content": row["content"]} for row in rows]},
                         ensure_ascii=False,
                     ),
-                    system_prompt="把这段防汛助手会话压缩成不超过 300 字的上下文摘要，保留用户目标、站点、风险、预案和未完成事项。",
+                    system_prompt=_SUMMARIZE_SYSTEM_PROMPT,
                     temperature=0.0,
                 )
                 content = getattr(response, "content", "").strip()
                 if content:
-                    summary = content[:1200]
+                    summary = content[:1500]
             except Exception:
                 pass
 

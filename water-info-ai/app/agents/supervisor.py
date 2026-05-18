@@ -87,7 +87,8 @@ class SupervisorDecision(BaseModel):
     next_agent: str = Field(
         pattern=(
             "^(conversation_assistant|data_analyst|risk_assessor|plan_generator|resource_dispatcher|"
-            "notification|execution_monitor|parallel_dispatch|knowledge_retriever|plan_reviewer|safety_checker|__end__)$"
+            "notification|execution_monitor|parallel_dispatch|knowledge_retriever|plan_reviewer|safety_checker|"
+            "risk_analysis_parallel|validation_parallel|__end__)$"
         )
     )
     reasoning: str
@@ -248,9 +249,11 @@ def _required_context_for_agent(next_agent: str) -> list[str]:
     requirements = {
         "data_analyst": ["user_query"],
         "risk_assessor": ["data_summary"],
+        "risk_analysis_parallel": ["data_summary"],
         "plan_generator": ["risk_assessment", "evidence_context"],
         "resource_dispatcher": ["emergency_plan"],
         "notification": ["emergency_plan"],
+        "validation_parallel": ["emergency_plan"],
         "execution_monitor": ["session_id"],
         "knowledge_retriever": ["user_query"],
     }
@@ -398,13 +401,13 @@ def _deterministic_route(state: dict) -> str | None:
     # Declarative intent → agent dependency chain.
     # Walk the chain; return the first agent whose completion check fails.
     _WORKFLOW_CHAINS: dict[str, list[str]] = {
-        "station_status":    ["data_analyst", "risk_assessor"],
-        "overview":          ["data_analyst", "risk_assessor"],
-        "alarm_overview":    ["data_analyst", "risk_assessor"],
-        "risk_assessment":   ["data_analyst", "risk_assessor"],
-        "plan_generation":   ["data_analyst", "risk_assessor", "plan_generator", "resource_dispatcher", "notification"],
-        "resource_dispatch": ["data_analyst", "risk_assessor", "plan_generator", "resource_dispatcher"],
-        "notification":      ["data_analyst", "risk_assessor", "plan_generator", "notification"],
+        "station_status":    ["data_analyst", "risk_analysis_parallel"],
+        "overview":          ["data_analyst", "risk_analysis_parallel"],
+        "alarm_overview":    ["data_analyst", "risk_analysis_parallel"],
+        "risk_assessment":   ["data_analyst", "risk_analysis_parallel"],
+        "plan_generation":   ["data_analyst", "risk_analysis_parallel", "plan_generator", "validation_parallel", "parallel_dispatch"],
+        "resource_dispatch": ["data_analyst", "risk_analysis_parallel", "plan_generator", "resource_dispatcher"],
+        "notification":      ["data_analyst", "risk_analysis_parallel", "plan_generator", "notification"],
         "execution_status":  ["execution_monitor"],
     }
     chain = _WORKFLOW_CHAINS.get(intent)
@@ -491,7 +494,7 @@ def _rag_preempt(
     base_reasoning: str,
 ) -> dict | None:
     """If the RAG gate fires for the planned next agent, redirect to knowledge_retriever."""
-    if next_agent in {"__end__", "conversation_assistant", "execution_monitor", "knowledge_retriever"}:
+    if next_agent in {"__end__", "conversation_assistant", "execution_monitor", "knowledge_retriever", "risk_analysis_parallel"}:
         if next_agent != "knowledge_retriever":
             return None
     decision = _should_invoke_rag(state, next_agent)
@@ -511,9 +514,39 @@ def _rag_preempt(
 
 async def supervisor_node(state: dict) -> dict:
     iteration = int(state.get("iteration", 0)) + 1
-    if iteration > 8:
+
+    # Dynamic iteration limits based on intent
+    intent_iteration_limits = {
+        "general_chat": 2,
+        "station_status": 4,
+        "alarm_overview": 4,
+        "risk_assessment": 6,
+        "overview": 6,
+        "plan_generation": 10,
+        "resource_dispatch": 8,
+        "notification": 8,
+    }
+    # Get intent early to determine limit
+    preliminary_intent = str(state.get("intent") or _infer_intent(str(state.get("user_query", ""))))
+    max_iterations = intent_iteration_limits.get(preliminary_intent, 8)
+
+    if iteration > max_iterations:
+        logger.warning("Iteration limit reached for intent=%s: %d/%d", preliminary_intent, iteration, max_iterations)
         update = {"next_agent": "__end__", "iteration": iteration, "current_agent": "supervisor"}
         return _with_structured_routing(update, state, str(state.get("user_query", "")))
+
+    # Convergence detection: check if we're making progress
+    if iteration > 2:
+        prev_traces = state.get("execution_traces", [])
+        if len(prev_traces) >= 2:
+            # Check if the last two traces are from the same agent (no progress)
+            last_trace_phase = prev_traces[-1].get("phase", "")
+            second_last_phase = prev_traces[-2].get("phase", "")
+            if last_trace_phase == second_last_phase == "data_query":
+                logger.warning("Convergence detection: stuck in data_query phase")
+                update = {"next_agent": "__end__", "iteration": iteration, "current_agent": "supervisor"}
+                return _with_structured_routing(update, state, str(state.get("user_query", "")))
+
     if state.get("error"):
         update = {"next_agent": "__end__", "iteration": iteration, "current_agent": "supervisor"}
         return _with_structured_routing(update, state, str(state.get("user_query", "")))
@@ -652,7 +685,7 @@ async def supervisor_node(state: dict) -> dict:
         "answer_policy": answer_policy,
         "guardrails": [
             "防汛业务问题必须先有 data_analyst 提供监测数据 grounding，除非是闲聊或知识库问答。",
-            "预案、资源、通知必须建立在 risk_assessor 的风险评估之后。",
+            "预案、资源、通知必须建立在 risk_assessor 或 risk_analysis_parallel 的风险评估之后。",
             "资源调度和通知必须建立在 plan_generator 的预案之后。",
             "涉及刚才、上一轮、前面说的、我叫什么等同会话上下文问题，"
             "可根据 memory_context.recent_session_messages 选择 conversation_assistant。",
@@ -669,10 +702,11 @@ async def supervisor_node(state: dict) -> dict:
                 "你的主任务是根据用户真实意图和当前 workflow_state 选择唯一 next_agent；"
                 "规则只作为安全边界，不是让你照关键词机械路由。"
                 "如果用户问制度、手册、规范、流程、依据等知识内容，优先选择 knowledge_retriever。"
-                "如果用户问数据/站点状态，选择 data_analyst 或在已有数据后进入 risk_assessor。"
-                "如果用户要风险、预案、资源、通知，按 grounding -> risk -> plan -> dispatch/notification 的依赖推进。"
+                "如果用户问数据/站点状态，选择 data_analyst 或在已有数据后进入 risk_analysis_parallel（并行风险评估+知识检索）。"
+                "如果用户要风险、预案、资源、通知，按 grounding -> risk_analysis_parallel -> plan -> dispatch/notification 的依赖推进。"
+                "plan_generator 之后优先使用 validation_parallel（并行预案审查+安全检查）。"
                 "只返回 JSON："
-                '{"next_agent":"conversation_assistant|data_analyst|risk_assessor|plan_generator|resource_dispatcher|notification|execution_monitor|parallel_dispatch|knowledge_retriever|__end__",'
+                '{"next_agent":"conversation_assistant|data_analyst|risk_assessor|plan_generator|resource_dispatcher|notification|execution_monitor|parallel_dispatch|knowledge_retriever|risk_analysis_parallel|validation_parallel|__end__",'
                 '"intent":"general_chat|knowledge_qa|station_status|overview|alarm_overview|risk_assessment|plan_generation|resource_dispatch|notification|execution_status",'
                 '"focus_station_query":"站点名称或编码，可为空",'
                 '"reasoning":"简短原因"}'

@@ -76,6 +76,10 @@ class Settings:
     dynamic_topology_enabled: bool = False
     hitl_enabled: bool = False
 
+    # RAG Enhancements
+    rag_query_rewriting_enabled: bool = True
+    rag_reranker_enabled: bool = False
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
@@ -133,4 +137,6 @@ def get_settings() -> Settings:
         agent_contracts_enabled=_env_bool("AGENT_CONTRACTS_ENABLED"),
         dynamic_topology_enabled=_env_bool("DYNAMIC_TOPOLOGY_ENABLED"),
         hitl_enabled=_env_bool("HITL_ENABLED"),
+        rag_query_rewriting_enabled=_env_bool("RAG_QUERY_REWRITING_ENABLED", True),
+        rag_reranker_enabled=_env_bool("RAG_RERANKER_ENABLED"),
     )
