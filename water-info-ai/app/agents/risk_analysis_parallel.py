@@ -1,6 +1,7 @@
 """Parallel risk analysis node.
 
 Runs risk_assessor and knowledge_retriever concurrently when both are needed.
+knowledge_retriever runs in preflight mode (retrieval only, no answer synthesis).
 """
 
 from __future__ import annotations
@@ -20,9 +21,14 @@ async def risk_analysis_parallel_node(state: FloodResponseState) -> dict:
     """Run risk_assessor and knowledge_retriever concurrently."""
     logger.info("Starting parallel risk analysis + knowledge retrieval")
 
+    # Force knowledge_retriever into preflight mode (retrieval only).
+    # In this parallel context, risk_assessor owns the analysis —
+    # knowledge_retriever should only supply evidence, not synthesize an answer.
+    parallel_state = {**state, "rag_target": "preflight_risk"}
+
     tasks = {
         "risk": asyncio.create_task(risk_assessor_node(state)),
-        "knowledge": asyncio.create_task(knowledge_retriever_node(state)),
+        "knowledge": asyncio.create_task(knowledge_retriever_node(parallel_state)),
     }
 
     results = await asyncio.gather(*tasks.values(), return_exceptions=True)
