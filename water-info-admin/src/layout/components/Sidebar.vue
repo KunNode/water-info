@@ -52,6 +52,10 @@ import {
   Key,
   OfficeBuilding,
   Notebook,
+  Box,
+  Van,
+  UserFilled,
+  List,
 } from '@element-plus/icons-vue'
 
 // Map icon name → component. markRaw avoids Vue trying to make the icon reactive.
@@ -71,6 +75,10 @@ const iconMap: Record<string, unknown> = {
   Key: markRaw(Key),
   OfficeBuilding: markRaw(OfficeBuilding),
   Notebook: markRaw(Notebook),
+  Box: markRaw(Box),
+  Van: markRaw(Van),
+  UserFilled: markRaw(UserFilled),
+  List: markRaw(List),
 }
 
 interface NavItem {
@@ -109,6 +117,15 @@ const NAV_GROUPS: NavGroup[] = [
       { path: '/data/observation', label: '观测数据', icon: 'DataAnalysis' },
       { path: '/warning/alarm', label: '告警管理', icon: 'Bell' },
       { path: '/warning/threshold', label: '阈值规则', icon: 'Setting', roles: ['ADMIN', 'OPERATOR'] },
+    ],
+  },
+  {
+    group: '资源管理',
+    items: [
+      { path: '/resource/material', label: '物资管理', icon: 'Box' },
+      { path: '/resource/personnel', label: '人员管理', icon: 'UserFilled' },
+      { path: '/resource/vehicle', label: '车辆设备', icon: 'Van' },
+      { path: '/resource/dispatch', label: '调度记录', icon: 'List' },
     ],
   },
   {
