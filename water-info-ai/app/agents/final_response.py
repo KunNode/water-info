@@ -311,12 +311,18 @@ async def final_response_node(state: dict) -> dict:
     answer_policy = state.get("answer_policy") or {}
     is_plan_response = intent in _PLAN_RESPONSE_INTENTS and state.get("emergency_plan") is not None
 
+    # Analytical intents where risk_assessment must take precedence over RAG draft
+    _ANALYTICAL_INTENTS = {"risk_assessment", "station_status", "overview", "alarm_overview"}
+    has_risk_assessment = state.get("risk_assessment") is not None
+
     if is_plan_response:
         final_text = _build_plan_response(state)
-    elif draft:
+    elif draft and not (intent in _ANALYTICAL_INTENTS and has_risk_assessment):
         # Upstream agent (conversation_assistant / knowledge_retriever answer mode) already
         # produced the answer text. Use it as-is, skip the heavy LLM rewrite, but still run
         # validation and unified evidence appending so the heading appears at most once.
+        # EXCEPT: when analytical intent has risk_assessment, the draft from RAG preflight
+        # may not reflect the computed risk level — fall through to LLM rewrite instead.
         final_text = _append_evidence_if_missing(draft, evidence)
     elif answer_policy.get("data_only") and state.get("data_summary"):
         final_text = str(state.get("data_summary") or "").strip()
@@ -327,7 +333,8 @@ async def final_response_node(state: dict) -> dict:
 
     llm = get_llm()
     stream_queue = get_stream_queue()
-    if llm.is_enabled and not draft and not answer_policy.get("data_only") and not is_plan_response:
+    draft_overridden = draft and intent in _ANALYTICAL_INTENTS and has_risk_assessment
+    if llm.is_enabled and (not draft or draft_overridden) and not answer_policy.get("data_only") and not is_plan_response:
         try:
             response_style = "自然、友好的助手对话"
             if intent in {"plan_generation", "resource_dispatch", "notification"}:
