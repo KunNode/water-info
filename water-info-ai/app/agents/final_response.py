@@ -485,24 +485,24 @@ async def final_response_node(state: dict) -> dict:
 
             # Use streaming if queue is available, otherwise fallback to non-streaming
             if stream_queue is not None:
-                # Streaming mode: collect tokens and send to queue
-                content_parts = []
-                async for token in llm.astream(
+                # Generate first (non-streaming), then stream normalized result to client.
+                # This ensures the client sees a clean, de-duplicated response.
+                response = await llm.ainvoke(
                     llm_prompt,
                     system_prompt=system_prompt,
                     temperature=0.0,
-                    max_tokens=2048,
-                    # No JSON format for streaming - output plain text
-                ):
-                    content_parts.append(token)
-                    await stream_queue.put(token)
-                content = "".join(content_parts).strip()
-                # If LLM generated duplicate sections, call it again to normalize
+                )
+                content = getattr(response, "content", "").strip()
+                # Normalize: de-duplicate repeated sections if present
                 if _has_duplicate_sections(content):
-                    logger.info("Detected duplicate sections in streaming output, normalizing via LLM")
+                    logger.info("Detected duplicate sections, normalizing via LLM")
                     content = await _normalize_response(llm, content)
                 else:
                     content = _deduplicate_sections(content)
+                # Stream the normalized content to client
+                for i in range(0, len(content), 20):
+                    chunk = content[i:i + 20]
+                    await stream_queue.put(chunk)
                 final_text = _append_evidence_if_missing(content, evidence)
             else:
                 # Non-streaming mode: use JSON format for structured parsing
