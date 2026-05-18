@@ -15,8 +15,11 @@ from app.agents.parallel_dispatch import parallel_dispatch_node
 from app.agents.plan_generator import plan_generator_node
 from app.agents.plan_reviewer import plan_reviewer_node
 from app.agents.resource_dispatcher import resource_dispatcher_node
+from app.agents.risk_analysis_parallel import risk_analysis_parallel_node
 from app.agents.risk_assessor import risk_assessor_node
 from app.agents.safety_checker import safety_checker_node
+from app.agents.state_pruner import state_pruner_node
+from app.agents.validation_parallel import validation_parallel_node
 from app.agents.supervisor import supervisor_node
 from app.platform.agent_audit import audited_agent
 from app.state import FloodGraphState
@@ -64,8 +67,11 @@ def build_flood_response_graph(*, checkpointer=None, store=None):
     graph.add_node("knowledge_retriever", audited_agent("knowledge_retriever", knowledge_retriever_node))
     graph.add_node("plan_reviewer", audited_agent("plan_reviewer", plan_reviewer_node))
     graph.add_node("safety_checker", audited_agent("safety_checker", safety_checker_node))
+    graph.add_node("risk_analysis_parallel", audited_agent("risk_analysis_parallel", risk_analysis_parallel_node))
+    graph.add_node("validation_parallel", audited_agent("validation_parallel", validation_parallel_node))
     graph.add_node("final_response", audited_agent("final_response", final_response_node))
     graph.add_node("memory_writer", audited_agent("memory_writer", memory_writer_node))
+    graph.add_node("state_pruner", audited_agent("state_pruner", state_pruner_node))
 
     graph.add_edge(START, "memory_loader")
     graph.add_conditional_edges(
@@ -88,6 +94,8 @@ def build_flood_response_graph(*, checkpointer=None, store=None):
             "knowledge_retriever": "knowledge_retriever",
             "plan_reviewer": "plan_reviewer",
             "safety_checker": "safety_checker",
+            "risk_analysis_parallel": "risk_analysis_parallel",
+            "validation_parallel": "validation_parallel",
             "final_response": "final_response",
             "__interrupt__": END,
         },
@@ -102,13 +110,16 @@ def build_flood_response_graph(*, checkpointer=None, store=None):
     graph.add_edge("parallel_dispatch", "supervisor")
     graph.add_edge("plan_reviewer", "supervisor")
     graph.add_edge("safety_checker", "supervisor")
+    graph.add_edge("risk_analysis_parallel", "supervisor")
+    graph.add_edge("validation_parallel", "supervisor")
     graph.add_conditional_edges(
         "knowledge_retriever",
         lambda s: "final_response" if s.get("rag_target", "answer") == "answer" else "supervisor",
         {"final_response": "final_response", "supervisor": "supervisor"},
     )
     graph.add_edge("final_response", "memory_writer")
-    graph.add_edge("memory_writer", END)
+    graph.add_edge("memory_writer", "state_pruner")
+    graph.add_edge("state_pruner", END)
     return graph.compile(checkpointer=checkpointer, store=store)
 
 
