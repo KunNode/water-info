@@ -57,6 +57,7 @@ from app.rag.service import get_knowledge_base_service
 from app.services import session as session_service
 from app.services.llm import get_llm
 from app.services.plan_persistence import SOURCE_MANUAL, build_trigger_conditions, should_persist_plan
+from app.state import set_stream_queue
 from app.services.plan_review import PlanReviewError, PlanReviewService, Reviewer, StateConflictError
 from app.services.platform_client import get_platform_client
 from app.services.risk_scan_scheduler import get_risk_scan_scheduler
@@ -772,14 +773,11 @@ async def flood_query_stream(request: FloodQueryRequest, http_request: Request):
         try:
             yield _event_line({"type": "session_init", "sessionId": session_id})
 
-            # Build initial state with stream_queue
-            initial_state = _build_initial_state(
-                session_id, request.query, history, user_id=user_id, username=username
-            )
-            initial_state["stream_queue"] = stream_queue
+            # Set stream queue in context (avoids pickle issues)
+            set_stream_queue(stream_queue)
 
             graph_iter = flood_response_graph.astream(
-                initial_state,
+                _build_initial_state(session_id, request.query, history, user_id=user_id, username=username),
                 {"configurable": {"thread_id": session_id}},
                 stream_mode="updates",
             ).__aiter__()

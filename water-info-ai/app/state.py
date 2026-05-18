@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
+import contextvars
 import operator
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Any, TypedDict
+
+# Context variable for streaming queue (avoids pickle issues with asyncio.Queue)
+_stream_queue_ctx: contextvars.ContextVar[Any] = contextvars.ContextVar('_stream_queue_ctx', default=None)
 
 
 class RiskLevel(str, Enum):
@@ -150,11 +153,18 @@ class FloodGraphState(TypedDict, total=False):
     metadata_filter: dict | None
     human_review: dict
 
-    # Streaming support: asyncio.Queue for token-level streaming to SSE
-    stream_queue: Any  # asyncio.Queue[str] | None
-
 
 FloodResponseState = FloodGraphState
+
+
+def set_stream_queue(queue: Any) -> None:
+    """Set the streaming queue in the current context."""
+    _stream_queue_ctx.set(queue)
+
+
+def get_stream_queue() -> Any:
+    """Get the streaming queue from the current context."""
+    return _stream_queue_ctx.get()
 
 
 def to_plain_data(value):

@@ -12,7 +12,7 @@ from app.agents.output_validator import validate_final_response
 from app.agents._prompt import session_context_payload
 from app.rag.service import format_evidence_markdown
 from app.services.llm import get_llm
-from app.state import to_plain_data
+from app.state import get_stream_queue, to_plain_data
 from app.tools.trace import make_trace
 from app.utils.llm_output_harness import StructuredOutputHarness
 
@@ -326,7 +326,7 @@ async def final_response_node(state: dict) -> dict:
     pre_report = validate_final_response(final_text, state)
 
     llm = get_llm()
-    stream_queue = state.get("stream_queue")
+    stream_queue = get_stream_queue()
     if llm.is_enabled and not draft and not answer_policy.get("data_only") and not is_plan_response:
         try:
             response_style = "自然、友好的助手对话"
