@@ -52,6 +52,42 @@ def _deduplicate_sections(text: str) -> str:
     return text
 
 
+def _has_duplicate_sections(text: str) -> bool:
+    """Quick check whether text contains repeated section headers."""
+    headers = list(_SECTION_RE.finditer(text))
+    if len(headers) <= 1:
+        return False
+    seen: set[str] = set()
+    for match in headers:
+        line_end = text.find("\n", match.start())
+        if line_end == -1:
+            line_end = len(text)
+        header_line = text[match.start():line_end].strip()
+        if header_line in seen:
+            return True
+        seen.add(header_line)
+    return False
+
+
+async def _normalize_response(llm, raw_text: str) -> str:
+    """Call LLM to de-duplicate and consolidate a response that has repeated sections."""
+    try:
+        response = await llm.ainvoke(
+            raw_text,
+            system_prompt=(
+                "以下防汛助手回答包含重复内容（相同章节出现了多次）。"
+                "请合并去重，只保留一份最完整、最准确的回答。"
+                "保留 Markdown 格式、数据引用 [1][2] 和关键数据。"
+                "不要添加新内容，不要改变结论和数据。直接输出去重后的回答。"
+            ),
+            temperature=0.0,
+        )
+        content = getattr(response, "content", "").strip()
+        return content if content else _deduplicate_sections(raw_text)
+    except Exception:
+        return _deduplicate_sections(raw_text)
+
+
 class FinalResponsePayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -461,8 +497,12 @@ async def final_response_node(state: dict) -> dict:
                     content_parts.append(token)
                     await stream_queue.put(token)
                 content = "".join(content_parts).strip()
-                # Deduplicate repeated sections (LLM sometimes generates multiple versions)
-                content = _deduplicate_sections(content)
+                # If LLM generated duplicate sections, call it again to normalize
+                if _has_duplicate_sections(content):
+                    logger.info("Detected duplicate sections in streaming output, normalizing via LLM")
+                    content = await _normalize_response(llm, content)
+                else:
+                    content = _deduplicate_sections(content)
                 final_text = _append_evidence_if_missing(content, evidence)
             else:
                 # Non-streaming mode: use JSON format for structured parsing
