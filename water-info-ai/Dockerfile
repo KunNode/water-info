@@ -1,5 +1,5 @@
 # ── Build ──────────────────────────────────────────────────────────────────────
-ARG DOCKER_REGISTRY_PREFIX=docker.m.daocloud.io/library/
+ARG DOCKER_REGISTRY_PREFIX=docker.1panel.live/library/
 FROM ${DOCKER_REGISTRY_PREFIX}python:3.11-slim AS builder
 WORKDIR /build
 

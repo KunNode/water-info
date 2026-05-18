@@ -140,6 +140,8 @@ const stationPieRef = ref<HTMLElement>()
 const recentAlarms = ref<Alarm[]>([])
 const totalStations = ref(0)
 let charts: echarts.ECharts[] = []
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+const REFRESH_INTERVAL = 30_000 // 30s
 
 const statsCards = ref<StatsCard[]>([
   { title: '在线站点', value: '—', icon: MapLocation, color: '#49e1ff' },
@@ -448,10 +450,12 @@ onMounted(() => {
   initRainfallChart()
   initStationPieChart()
   loadData()
+  refreshTimer = setInterval(loadData, REFRESH_INTERVAL)
   window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
   charts.forEach((c) => c.dispose())
   charts = []
   window.removeEventListener('resize', handleResize)

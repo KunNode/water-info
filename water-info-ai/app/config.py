@@ -69,6 +69,13 @@ class Settings:
     audit_tables_enabled: bool = False
     plan_reviewer_enabled: bool = False
 
+    # Supervisor Autogen Enhancements Feature Flags (default-off; see
+    # .kiro/specs/supervisor-autogen-enhancements/design.md flag matrix)
+    otel_enabled: bool = False
+    agent_contracts_enabled: bool = False
+    dynamic_topology_enabled: bool = False
+    hitl_enabled: bool = False
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
@@ -122,4 +129,8 @@ def get_settings() -> Settings:
         dispatch_state_machine_enabled=_env_bool("DISPATCH_STATE_MACHINE_ENABLED"),
         audit_tables_enabled=_env_bool("AUDIT_TABLES_ENABLED"),
         plan_reviewer_enabled=_env_bool("PLAN_REVIEWER_ENABLED"),
+        otel_enabled=_env_bool("OTEL_ENABLED"),
+        agent_contracts_enabled=_env_bool("AGENT_CONTRACTS_ENABLED"),
+        dynamic_topology_enabled=_env_bool("DYNAMIC_TOPOLOGY_ENABLED"),
+        hitl_enabled=_env_bool("HITL_ENABLED"),
     )

@@ -9,6 +9,7 @@ import re
 from pydantic import BaseModel, Field
 
 from app.agents._prompt import session_context_payload
+from app.agents._routing_rules import enforce_dependencies, infer_intent as _infer_intent_core
 from app.config import get_settings
 from app.platform.skill_executor import SkillExecutor
 from app.platform.skill_registry import get_skill_registry
@@ -218,32 +219,7 @@ def _is_alarm_overview_query(query: str, *, has_station_focus: bool) -> bool:
 
 
 def _infer_intent(query: str) -> str:
-    has_station_focus = _infer_focus_station_query(query) is not None or _contains_any(query, STATION_KEYWORDS)
-    if _is_general_chat_query(query):
-        return "general_chat"
-    if _infer_answer_policy(query)["data_lookup"]:
-        return "station_status" if has_station_focus else "overview"
-    if _is_knowledge_query(query):
-        return "knowledge_qa"
-    if _contains_any(query, EXECUTION_KEYWORDS):
-        return "execution_status"
-    if _contains_any(query, RESOURCE_KEYWORDS):
-        return "resource_dispatch"
-    if _contains_any(query, NOTIFICATION_KEYWORDS):
-        return "notification"
-    if _contains_any(query, PLAN_KEYWORDS):
-        return "plan_generation"
-    if _contains_any(query, RISK_KEYWORDS):
-        return "risk_assessment"
-    if has_station_focus:
-        return "station_status"
-    if _is_alarm_overview_query(query, has_station_focus=has_station_focus):
-        return "alarm_overview"
-    if _contains_any(query, OVERVIEW_KEYWORDS) and _is_water_domain_query(query):
-        return "overview"
-    if _is_water_domain_query(query):
-        return "overview"
-    return "general_chat"
+    return _infer_intent_core(query)
 
 
 def _infer_focus_station_query(query: str) -> str | None:
@@ -316,117 +292,138 @@ def _with_structured_routing(update: dict, state: dict, user_query: str) -> dict
     enriched["routing_decision"] = decision.model_dump(mode="json")
     enriched["safety_level"] = decision.safety_level.value
     enriched["human_confirmation_required"] = bool(update.get("human_confirmation_required")) or decision.human_confirmation_required
+
+    # Dynamic topology profile selection (Task 16.2)
+    if get_settings().dynamic_topology_enabled:
+        from app.agents._topology import select_profile
+
+        answer_policy = state.get("answer_policy") or _infer_answer_policy(user_query)
+        profile_match = select_profile(
+            intent=intent,
+            safety_level=decision.safety_level.value,
+            answer_policy=answer_policy,
+            has_data=bool(state.get("data_summary")),
+            has_risk=state.get("risk_assessment") is not None,
+            has_plan=state.get("emergency_plan") is not None,
+        )
+        enriched["routing_decision"]["topology_profile"] = profile_match.profile_name
+        enriched["routing_decision"]["topology_reason"] = profile_match.reason
+        # Emit topology trace
+        traces_list = enriched.get("execution_traces") or []
+        traces_list.append(make_trace(
+            phase="data_query",
+            title=f"topology profile: {profile_match.profile_name}",
+            detail=profile_match.reason,
+        ))
+        enriched["execution_traces"] = traces_list
+
+    # HITL interrupt for CRITICAL safety level (Task 20.3)
+    if (
+        get_settings().hitl_enabled
+        and decision.safety_level.value == "critical"
+        and enriched.get("next_agent") not in {"__end__", "__interrupt__"}
+    ):
+        import uuid
+
+        approval_id = str(uuid.uuid4())
+        enriched["next_agent"] = "__interrupt__"
+        enriched["human_confirmation_required"] = True
+        enriched["pending_approvals"] = [
+            *(state.get("pending_approvals") or []),
+            {
+                "approval_id": approval_id,
+                "session_id": str(state.get("session_id") or ""),
+                "approval_type": "critical_action_review",
+                "payload_json": {
+                    "original_next_agent": update.get("next_agent", ""),
+                    "intent": intent,
+                    "safety_level": "critical",
+                    "reasoning": str(update.get("supervisor_reasoning") or ""),
+                },
+                "status": "pending",
+            },
+        ]
+        enriched["human_review"] = {
+            "approval_id": approval_id,
+            "status": "pending",
+            "type": "critical_action_review",
+        }
+        traces_list = enriched.get("execution_traces") or []
+        traces_list.append(make_trace(
+            phase="data_query",
+            title="HITL interrupt: critical safety level requires approval",
+            detail=f"approval_id={approval_id}",
+        ))
+        enriched["execution_traces"] = traces_list
+
+    # OTel: record routing decision as span event (Task 9.3)
+    from opentelemetry import trace
+
+    from app.observability.otel import record_routing_decision
+    record_routing_decision(trace.get_current_span(), enriched["routing_decision"])
+
     return enriched
 
 
 def _deterministic_route(state: dict) -> str | None:
+    """Lightweight fallback when neither skill nor LLM can route.
+
+    Uses a declarative intent→agent-chain table instead of if-chains.
+    Each chain lists agents in dependency order; the first incomplete one
+    is returned.
+    """
     query = str(state.get("user_query", ""))
     intent = str(state.get("intent") or _infer_intent(query))
     answer_policy = state.get("answer_policy") or _infer_answer_policy(query)
     has_data = bool(state.get("data_summary"))
-    has_risk = state.get("risk_assessment") is not None
-    has_plan = state.get("emergency_plan") is not None
-    has_resources = bool(state.get("resource_plan"))
-    has_notifications = bool(state.get("notifications"))
-    mentions_data = _contains_any(query, ["水情", "监测", "数据", "态势", "分析", *OVERVIEW_KEYWORDS])
-    mentions_risk = _contains_any(query, RISK_KEYWORDS)
-    mentions_plan = _contains_any(query, PLAN_KEYWORDS)
-    mentions_resource = _contains_any(query, RESOURCE_KEYWORDS)
-    mentions_notification = _contains_any(query, NOTIFICATION_KEYWORDS)
 
+    # No data yet — bootstrap the pipeline.
     if not has_data:
         if intent == "knowledge_qa":
             return "knowledge_retriever"
         if intent == "general_chat":
             return "conversation_assistant"
         return "data_analyst"
+
+    # Pure data query, analysis already complete.
     if answer_policy.get("data_only"):
         return "__end__"
+
+    # Non-analytical intents that bypass the workflow.
     if intent == "general_chat":
         return "conversation_assistant"
     if intent == "knowledge_qa":
         return "knowledge_retriever"
-    if intent == "station_status":
-        if not has_risk:
-            return "risk_assessor"
+
+    # Declarative intent → agent dependency chain.
+    # Walk the chain; return the first agent whose completion check fails.
+    _WORKFLOW_CHAINS: dict[str, list[str]] = {
+        "station_status":    ["data_analyst", "risk_assessor"],
+        "overview":          ["data_analyst", "risk_assessor"],
+        "alarm_overview":    ["data_analyst", "risk_assessor"],
+        "risk_assessment":   ["data_analyst", "risk_assessor"],
+        "plan_generation":   ["data_analyst", "risk_assessor", "plan_generator", "resource_dispatcher", "notification"],
+        "resource_dispatch": ["data_analyst", "risk_assessor", "plan_generator", "resource_dispatcher"],
+        "notification":      ["data_analyst", "risk_assessor", "plan_generator", "notification"],
+        "execution_status":  ["execution_monitor"],
+    }
+    chain = _WORKFLOW_CHAINS.get(intent)
+    if chain:
+        for agent in chain:
+            if not _agent_completed(agent, state):
+                return agent
         return "__end__"
-    if intent == "overview":
-        if not has_risk:
-            return "risk_assessor"
-        return "__end__"
-    if intent == "alarm_overview":
-        if not has_risk:
-            return "risk_assessor"
-        return "__end__"
-    if intent == "risk_assessment":
-        if not has_risk:
-            return "risk_assessor"
-        if mentions_plan and not has_plan:
-            return "plan_generator"
-        return "__end__"
-    if intent == "execution_status":
-        return "execution_monitor"
-    if intent == "resource_dispatch":
-        if not has_risk:
-            return "risk_assessor"
-        if not has_plan:
-            return "plan_generator"
-        if not has_resources:
-            return "resource_dispatcher"
-        return "__end__"
-    if intent == "notification":
-        if not has_risk:
-            return "risk_assessor"
-        if not has_plan:
-            return "plan_generator"
-        if not has_notifications:
-            return "notification"
-        return "__end__"
-    if intent == "plan_generation":
-        if not has_risk:
-            return "risk_assessor"
-        if not has_plan:
-            return "plan_generator"
-        if not has_resources:
-            return "resource_dispatcher"
-        if not has_notifications:
-            return "notification"
-        return "__end__"
-    if mentions_risk and not has_risk:
-        return "risk_assessor"
-    if mentions_plan and not has_risk:
-        return "risk_assessor"
-    if mentions_plan and has_risk and not has_plan:
-        return "plan_generator"
-    if mentions_resource and has_plan and not has_resources:
-        return "resource_dispatcher"
-    if mentions_notification and has_plan and not has_notifications:
-        return "notification"
-    if has_data and has_risk and has_plan and has_resources and has_notifications:
-        return "__end__"
-    if mentions_data:
-        return "__end__" if has_data else "data_analyst"
+
     return None
 
 
 def _agent_completed(agent: str, state: dict) -> bool:
-    if agent == "data_analyst":
-        return bool(state.get("data_summary"))
-    if agent == "risk_assessor":
-        return state.get("risk_assessment") is not None
-    if agent == "plan_generator":
-        return state.get("emergency_plan") is not None
-    if agent == "resource_dispatcher":
-        return bool(state.get("resource_plan"))
-    if agent == "notification":
-        return bool(state.get("notifications"))
-    if agent == "plan_reviewer":
-        return state.get("compliance_result") is not None
-    if agent == "safety_checker":
-        return state.get("safety_check_result") is not None
-    if agent == "execution_monitor":
-        return state.get("execution_progress") is not None
-    return False
+    from app.agents._routing_rules import COMPLETION_FIELD
+
+    field = COMPLETION_FIELD.get(agent)
+    if not field:
+        return False
+    return bool(state.get(field))
 
 
 def _skill_route(state: dict, intent: str) -> dict | None:
@@ -480,46 +477,8 @@ def _skill_route(state: dict, intent: str) -> dict | None:
 
 
 def _guard_model_route(next_agent: str, state: dict, deterministic: str | None) -> tuple[str, str | None]:
-    """Keep LLM routing as the primary path while enforcing workflow preconditions."""
-    has_data = bool(state.get("data_summary"))
-    has_risk = state.get("risk_assessment") is not None
-    has_plan = state.get("emergency_plan") is not None
-    has_resources = bool(state.get("resource_plan"))
-    has_notifications = bool(state.get("notifications"))
-
-    if next_agent in {"conversation_assistant", "knowledge_retriever", "execution_monitor"}:
-        return next_agent, None
-
-    if next_agent == "__end__":
-        if deterministic and deterministic != "__end__":
-            return deterministic, "guarded: workflow still has a required next step"
-        return next_agent, None
-
-    if not has_data:
-        return deterministic or "data_analyst", "guarded: data grounding is required first"
-
-    if next_agent == "data_analyst" and has_data:
-        return deterministic or "__end__", "guarded: data analysis is already complete"
-
-    if next_agent == "risk_assessor" and has_risk:
-        return deterministic or "__end__", "guarded: risk assessment is already complete"
-
-    if next_agent == "plan_generator" and has_plan:
-        return deterministic or "__end__", "guarded: emergency plan is already complete"
-
-    if next_agent == "resource_dispatcher" and has_resources:
-        return deterministic or "__end__", "guarded: resource dispatch is already complete"
-
-    if next_agent == "notification" and has_notifications:
-        return deterministic or "__end__", "guarded: notifications are already complete"
-
-    if next_agent in {"plan_generator", "resource_dispatcher", "notification", "parallel_dispatch"} and not has_risk:
-        return deterministic or "risk_assessor", "guarded: risk assessment is required before planning/dispatch"
-
-    if next_agent in {"resource_dispatcher", "notification", "parallel_dispatch"} and not has_plan:
-        return deterministic or "plan_generator", "guarded: emergency plan is required before dispatch/notification"
-
-    return next_agent, None
+    """Enforce workflow preconditions — delegates to declarative dependency table."""
+    return enforce_dependencies(next_agent, state, deterministic)
 
 
 def _rag_preempt(
@@ -577,6 +536,21 @@ async def supervisor_node(state: dict) -> dict:
             phase="data_query",
             title="检测到纯数据查询，跳过风险评估",
         ))
+        if bool(state.get("data_summary")):
+            traces.append(make_trace(
+                phase="final_response",
+                title="纯数据查询，数据已就绪，直接返回",
+            ))
+            return _with_structured_routing({
+                "next_agent": "__end__",
+                "iteration": iteration,
+                "current_agent": "supervisor",
+                "intent": inferred_intent,
+                "focus_station_query": inferred_focus_station,
+                "answer_policy": answer_policy,
+                "supervisor_reasoning": "data_only: skip analysis",
+                "execution_traces": traces,
+            }, state, user_query)
 
     # General chat should not be handed back to the workflow planner just because
     # an LLM is available; otherwise simple greetings can drift into analysis.
@@ -594,6 +568,8 @@ async def supervisor_node(state: dict) -> dict:
 
     llm = get_llm()
     deterministic = _deterministic_route(state)
+
+    # ── Primary path: skill-based routing ──
     skill_update = _skill_route(state, inferred_intent)
     if skill_update is not None:
         next_agent = str(skill_update["next_agent"])
@@ -616,6 +592,8 @@ async def supervisor_node(state: dict) -> dict:
             "execution_traces": traces,
         })
         return _with_structured_routing(update, state, user_query)
+
+    # ── Deterministic completion check ──
     if deterministic == "__end__" and (
         state.get("risk_assessment") is not None
         or state.get("emergency_plan") is not None
@@ -637,7 +615,7 @@ async def supervisor_node(state: dict) -> dict:
             "execution_traces": traces,
         }, state, user_query)
 
-    # When LLM is unavailable, fall back to deterministic routing immediately.
+    # ── No-LLM fallback: use deterministic routing ──
     if not llm.is_enabled:
         next_agent = deterministic or "__end__"
         preempt = _rag_preempt(
@@ -657,6 +635,7 @@ async def supervisor_node(state: dict) -> dict:
             "execution_traces": traces,
         }, state, user_query)
 
+    # ── LLM fallback with declarative dependency enforcement ──
     prompt = json.dumps({
         "query": state.get("user_query", ""),
         "iteration": iteration,
@@ -707,7 +686,7 @@ async def supervisor_node(state: dict) -> dict:
 
     try:
         decision = SupervisorDecision.model_validate(parsed)
-        next_agent, guard_reason = _guard_model_route(decision.next_agent, state, deterministic)
+        next_agent, guard_reason = enforce_dependencies(decision.next_agent, state, deterministic)
         intent = decision.intent or inferred_intent
         focus_station_query = decision.focus_station_query or inferred_focus_station
         reasoning = decision.reasoning if not guard_reason else f"{decision.reasoning}; {guard_reason}"

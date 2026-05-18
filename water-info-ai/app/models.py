@@ -245,3 +245,36 @@ class KBStatsResponse(BaseModel):
     chunk_count: int
     job_success_rate: float
     model_distribution: dict[str, int] = Field(default_factory=dict)
+
+
+# ── Checkpoint / Resume models (supervisor-autogen-enhancements F4) ───────
+
+
+class CheckpointSummary(BaseModel):
+    checkpoint_id: str
+    last_completed_agent: str
+    created_at: str
+    current_state_summary: dict
+
+
+class ResumeRequest(BaseModel):
+    checkpoint_id: str | None = None
+    override_next_agent: str | None = None
+
+
+class ResumeResponse(BaseModel):
+    status: str
+    run_id: str
+    checkpoint_id: str
+
+
+class ApprovalRequest(BaseModel):
+    decision: str = Field(pattern="^(approve|reject|modify)$")
+    comment: str = ""
+    override_next_agent: str | None = None
+
+
+class ApprovalResponse(BaseModel):
+    status: str
+    approval_id: str
+    resolution: str

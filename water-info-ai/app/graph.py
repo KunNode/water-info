@@ -26,6 +26,8 @@ def _route_from_supervisor(state: dict) -> str:
     next_agent = state.get("next_agent")
     if not next_agent or next_agent == "__end__":
         return "final_response"
+    if next_agent == "__interrupt__":
+        return "__interrupt__"
     return str(next_agent)
 
 
@@ -87,6 +89,7 @@ def build_flood_response_graph(*, checkpointer=None, store=None):
             "plan_reviewer": "plan_reviewer",
             "safety_checker": "safety_checker",
             "final_response": "final_response",
+            "__interrupt__": END,
         },
     )
     graph.add_edge("conversation_assistant", "final_response")

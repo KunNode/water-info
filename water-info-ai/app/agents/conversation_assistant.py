@@ -140,6 +140,7 @@ async def conversation_assistant_node(state: dict) -> dict:
                     "输出 Markdown。"
                 ),
                 temperature=0.5,
+                timeout=30,
             )
             content = getattr(response, "content", "").strip()
             if content:
