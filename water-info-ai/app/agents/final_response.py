@@ -366,39 +366,66 @@ async def final_response_node(state: dict) -> dict:
                 },
                 "fallback_report": final_text,
             }, ensure_ascii=False, indent=2)
-            system_prompt = (
-                "你是防汛 AI 助手的最终回答智能体。"
-                f"本次回答风格应为：{response_style}。"
-                "你的职责是填充固定回答槽位，而不是自由排版。"
-                "请优先直接回应用户问题，而不是机械罗列字段。"
-                "如果用户问的是某个站点，就围绕该站点回答，不要退回到全局总览。"
-                "如果 should_include_summary 为 false，就不要先铺垫整体总览，只保留与当前问题直接相关的分析与结论。"
-                "若 evidence 非空，请优先使用 evidence 中的内容，并保留 [1][2] 这类引用。"
-                "memory_context.recent_session_messages 可用于回答同一会话内的刚才/上一轮/代词指代问题。"
-                "memory_context.long_term_memories 可用于用户长期偏好；不要向用户暴露内部记忆机制。"
-                "若 evidence 为空，不要编造外部制度来源。"
-                f"{consistency_clause}"
-                "如果用户询问是否使用模型研判，请说明当前回答由大模型结合结构化监测数据、规则基线"
-                "和可用 RAG 证据生成；不要声称未使用模型。"
-                "不要输出 Markdown 标题；系统会按固定顺序渲染为：结论、要点、建议、提醒。"
-                "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
-                "若存在异常信息，需要在结尾单独提醒。"
-                f"{_FINAL_OUTPUT_HARNESS.schema_instruction()}"
-            )
+            # Build system prompt based on streaming mode
+            if stream_queue is not None:
+                # Streaming mode: output plain text directly
+                system_prompt = (
+                    "你是防汛 AI 助手的最终回答智能体。"
+                    f"本次回答风格应为：{response_style}。"
+                    "请直接用自然语言回答用户问题，不要输出 JSON 格式。"
+                    "回答应包含：结论、要点、建议、提醒等部分，用 Markdown 格式组织。"
+                    "请优先直接回应用户问题，而不是机械罗列字段。"
+                    "如果用户问的是某个站点，就围绕该站点回答，不要退回到全局总览。"
+                    "如果 should_include_summary 为 false，就不要先铺垫整体总览，只保留与当前问题直接相关的分析与结论。"
+                    "若 evidence 非空，请优先使用 evidence 中的内容，并保留 [1][2] 这类引用。"
+                    "memory_context.recent_session_messages 可用于回答同一会话内的刚才/上一轮/代词指代问题。"
+                    "memory_context.long_term_memories 可用于用户长期偏好；不要向用户暴露内部记忆机制。"
+                    "若 evidence 为空，不要编造外部制度来源。"
+                    f"{consistency_clause}"
+                    "如果用户询问是否使用模型研判，请说明当前回答由大模型结合结构化监测数据、规则基线"
+                    "和可用 RAG 证据生成；不要声称未使用模型。"
+                    "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
+                    "若存在异常信息，需要在结尾单独提醒。"
+                )
+            else:
+                # Non-streaming mode: output JSON for structured parsing
+                system_prompt = (
+                    "你是防汛 AI 助手的最终回答智能体。"
+                    f"本次回答风格应为：{response_style}。"
+                    "你的职责是填充固定回答槽位，而不是自由排版。"
+                    "请优先直接回应用户问题，而不是机械罗列字段。"
+                    "如果用户问的是某个站点，就围绕该站点回答，不要退回到全局总览。"
+                    "如果 should_include_summary 为 false，就不要先铺垫整体总览，只保留与当前问题直接相关的分析与结论。"
+                    "若 evidence 非空，请优先使用 evidence 中的内容，并保留 [1][2] 这类引用。"
+                    "memory_context.recent_session_messages 可用于回答同一会话内的刚才/上一轮/代词指代问题。"
+                    "memory_context.long_term_memories 可用于用户长期偏好；不要向用户暴露内部记忆机制。"
+                    "若 evidence 为空，不要编造外部制度来源。"
+                    f"{consistency_clause}"
+                    "如果用户询问是否使用模型研判，请说明当前回答由大模型结合结构化监测数据、规则基线"
+                    "和可用 RAG 证据生成；不要声称未使用模型。"
+                    "不要输出 Markdown 标题；系统会按固定顺序渲染为：结论、要点、建议、提醒。"
+                    "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
+                    "若存在异常信息，需要在结尾单独提醒。"
+                    f"{_FINAL_OUTPUT_HARNESS.schema_instruction()}"
+                )
 
             # Use streaming if queue is available, otherwise fallback to non-streaming
             if stream_queue is not None:
+                # Streaming mode: collect tokens and send to queue
                 content_parts = []
                 async for token in llm.astream(
                     llm_prompt,
                     system_prompt=system_prompt,
                     temperature=0.0,
-                    response_format={"type": "json_object"},
+                    # No JSON format for streaming - output plain text
                 ):
                     content_parts.append(token)
                     await stream_queue.put(token)
                 content = "".join(content_parts).strip()
+                # For streaming, the content is the final text (already formatted)
+                final_text = _append_evidence_if_missing(content, evidence)
             else:
+                # Non-streaming mode: use JSON format for structured parsing
                 response = await llm.ainvoke(
                     llm_prompt,
                     system_prompt=system_prompt,
@@ -406,15 +433,14 @@ async def final_response_node(state: dict) -> dict:
                     response_format={"type": "json_object"},
                 )
                 content = getattr(response, "content", "").strip()
-
-            harness_result = _FINAL_OUTPUT_HARNESS.parse(content)
-            if harness_result.ok and harness_result.payload is not None:
-                final_text = _append_evidence_if_missing(_render_final_payload(harness_result.payload), evidence)
-            elif harness_result.issues:
-                logger.warning(
-                    "final_response LLM output failed harness validation: %s",
-                    "; ".join(harness_result.issues[:5]),
-                )
+                harness_result = _FINAL_OUTPUT_HARNESS.parse(content)
+                if harness_result.ok and harness_result.payload is not None:
+                    final_text = _append_evidence_if_missing(_render_final_payload(harness_result.payload), evidence)
+                elif harness_result.issues:
+                    logger.warning(
+                        "final_response LLM output failed harness validation: %s",
+                        "; ".join(harness_result.issues[:5]),
+                    )
         except Exception:
             pass
 
