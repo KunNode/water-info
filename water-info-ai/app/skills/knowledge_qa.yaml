@@ -1,0 +1,12 @@
+{
+  "id": "knowledge_qa",
+  "name": "知识库问答",
+  "version": "1.0",
+  "trigger_intents": ["knowledge_qa"],
+  "required_inputs": ["user_query"],
+  "required_tools": ["search_knowledge_base"],
+  "agent_sequence": ["knowledge_retriever"],
+  "output_schema": "KnowledgeRetrieverOutput",
+  "quality_gates": [],
+  "fallback_strategy": "degrade"
+}

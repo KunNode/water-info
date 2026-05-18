@@ -1,0 +1,112 @@
+{
+  "audit_rows": [],
+  "message_metadata": {
+    "agent": "memory_writer",
+    "execution_traces": [
+      {
+        "detail": "",
+        "metadata": {},
+        "phase": "final_response",
+        "status": "completed",
+        "title": "最终回答生成",
+        "tool_name": null
+      }
+    ],
+    "reasoning_steps": [
+      {
+        "content": "",
+        "id": "thought-0",
+        "kind": "thought",
+        "status": "success",
+        "title": "最终回答生成"
+      }
+    ],
+    "tool_calls": [],
+    "version": 1
+  },
+  "sse_records": [
+    {
+      "sessionId": "regression-general-chat",
+      "type": "session_init"
+    },
+    {
+      "agent": "memory_loader",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "memory_loader",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "data_query",
+      "status": "completed",
+      "title": "意图识别: general_chat",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "conversation_assistant",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "conversation_assistant",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "final_response",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "final_response",
+      "content": "你好，我是防汛 AI 助手。\n\n我可以陪你一起看站点状态、研判风险、生成预案，也可以先回答你想了解的内容。如果你愿意，我们可以从某个站点、某段河道，或者当前整体水情开始。",
+      "response": "你好，我是防汛 AI 助手。\n\n我可以陪你一起看站点状态、研判风险、生成预案，也可以先回答你想了解的内容。如果你愿意，我们可以从某个站点、某段河道，或者当前整体水情开始。",
+      "type": "agent_message"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "final_response",
+      "status": "completed",
+      "title": "最终回答生成",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "final_response",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "memory_writer",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "memory_writer",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "__done__",
+      "status": "done",
+      "type": "agent_update"
+    }
+  ]
+}

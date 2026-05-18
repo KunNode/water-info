@@ -1,4 +1,4 @@
-ARG DOCKER_REGISTRY_PREFIX=docker.m.daocloud.io/library/
+ARG DOCKER_REGISTRY_PREFIX=docker.1panel.live/library/
 
 # ---- Build Stage ----
 FROM ${DOCKER_REGISTRY_PREFIX}maven:3.9-eclipse-temurin-17 AS builder

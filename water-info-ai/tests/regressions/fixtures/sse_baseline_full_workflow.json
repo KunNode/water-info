@@ -1,0 +1,309 @@
+{
+  "audit_rows": [],
+  "message_metadata": {
+    "agent": "memory_writer",
+    "execution_traces": [
+      {
+        "detail": "",
+        "metadata": {},
+        "phase": "final_response",
+        "status": "completed",
+        "title": "最终回答生成",
+        "tool_name": null
+      }
+    ],
+    "reasoning_steps": [
+      {
+        "content": "",
+        "id": "thought-0",
+        "kind": "thought",
+        "status": "success",
+        "title": "最终回答生成"
+      }
+    ],
+    "tool_calls": [],
+    "version": 1
+  },
+  "sse_records": [
+    {
+      "sessionId": "regression-full-workflow",
+      "type": "session_init"
+    },
+    {
+      "agent": "memory_loader",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "memory_loader",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "data_query",
+      "status": "completed",
+      "title": "意图识别: plan_generation",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "data_analyst",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {
+        "duration_ms": 24,
+        "input_summary": "",
+        "output_summary": "5 个站点, 2 条告警"
+      },
+      "phase": "tool_call",
+      "status": "completed",
+      "title": "获取全局水情概览",
+      "tool_name": "get_flood_situation_overview",
+      "type": "trace_update"
+    },
+    {
+      "agent": "data_analyst",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "data_query",
+      "status": "completed",
+      "title": "意图识别: plan_generation",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "risk_assessor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "details": [
+        "北闸站水位接近警戒线",
+        "未来 24 小时仍有降雨"
+      ],
+      "level": "high",
+      "type": "risk_update"
+    },
+    {
+      "detail": "综合评分 72.0",
+      "metadata": {
+        "duration_ms": 12
+      },
+      "phase": "risk_assessment",
+      "status": "completed",
+      "title": "风险评估完成",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "risk_assessor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "data_query",
+      "status": "completed",
+      "title": "意图识别: plan_generation",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "plan_generator",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "completed": 0,
+      "failed": 0,
+      "name": "城区防汛响应预案",
+      "status": "draft",
+      "total": 2,
+      "type": "plan_update"
+    },
+    {
+      "detail": "2 项措施",
+      "metadata": {
+        "duration_ms": 18
+      },
+      "phase": "plan_generation",
+      "status": "completed",
+      "title": "预案生成完成",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "plan_generator",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "data_query",
+      "status": "completed",
+      "title": "意图识别: plan_generation",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "resource_dispatcher",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {
+        "duration_ms": 9
+      },
+      "phase": "resource_dispatch",
+      "status": "completed",
+      "title": "资源调度完成: 1 项",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "resource_dispatcher",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "data_query",
+      "status": "completed",
+      "title": "意图识别: plan_generation",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "notification",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "notification",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "final_response",
+      "status": "completed",
+      "title": "工作流完成，准备生成最终回答",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "final_response",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "final_response",
+      "content": "综合研判：风险等级: high。\n\n已生成预案 城区防汛响应预案，包含 2 项措施、1 项资源调度、1 条通知。",
+      "response": "综合研判：风险等级: high。\n\n已生成预案 城区防汛响应预案，包含 2 项措施、1 项资源调度、1 条通知。",
+      "type": "agent_message"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "final_response",
+      "status": "completed",
+      "title": "最终回答生成",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "final_response",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "memory_writer",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "memory_writer",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "__done__",
+      "status": "done",
+      "type": "agent_update"
+    }
+  ]
+}

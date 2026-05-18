@@ -1,5 +1,5 @@
 # Build stage
-ARG DOCKER_REGISTRY_PREFIX=docker.m.daocloud.io/library/
+ARG DOCKER_REGISTRY_PREFIX=docker.1panel.live/library/
 FROM ${DOCKER_REGISTRY_PREFIX}node:20-alpine AS build
 WORKDIR /app
 

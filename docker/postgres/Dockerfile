@@ -1,4 +1,4 @@
-ARG DOCKER_REGISTRY_PREFIX=docker.m.daocloud.io/library/
+ARG DOCKER_REGISTRY_PREFIX=docker.1panel.live/library/
 FROM ${DOCKER_REGISTRY_PREFIX}alpine:3.20
 
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \

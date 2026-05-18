@@ -39,12 +39,12 @@ generated AS (
       greatest(
         0,
         m.base_value
-          + m.amplitude * sin((extract(epoch FROM clock_timestamp()) / 60.0 + m.phase) / 7.0)
+          + m.amplitude * sin((extract(epoch FROM clock_timestamp() AT TIME ZONE 'Asia/Shanghai') / 60.0 + m.phase) / 7.0)
           + (random() - 0.5) * m.jitter
       )::numeric,
       3
     ) AS value,
-    clock_timestamp() AS observed_at
+    (clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AS observed_at
   FROM metric_seed m
   JOIN station s ON s.code = m.station_code
 )

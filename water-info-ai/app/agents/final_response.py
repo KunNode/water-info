@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -11,7 +12,7 @@ from app.agents.output_validator import validate_final_response
 from app.agents._prompt import session_context_payload
 from app.rag.service import format_evidence_markdown
 from app.services.llm import get_llm
-from app.state import to_plain_data
+from app.state import get_stream_queue, to_plain_data
 from app.tools.trace import make_trace
 from app.utils.llm_output_harness import StructuredOutputHarness
 
@@ -325,6 +326,7 @@ async def final_response_node(state: dict) -> dict:
     pre_report = validate_final_response(final_text, state)
 
     llm = get_llm()
+    stream_queue = get_stream_queue()
     if llm.is_enabled and not draft and not answer_policy.get("data_only") and not is_plan_response:
         try:
             response_style = "自然、友好的助手对话"
@@ -344,28 +346,50 @@ async def final_response_node(state: dict) -> dict:
             if must_satisfy:
                 consistency_clause += f"特别注意修正以下问题：{'；'.join(must_satisfy)}。"
 
-            response = await llm.ainvoke(
-                json.dumps({
-                    "user_query": state.get("user_query", ""),
-                    "intent": intent,
-                    "focus_station": to_plain_data(focus_station),
-                    "data_summary": state.get("data_summary", ""),
-                    "should_include_summary": _should_include_summary(state),
-                    "risk_assessment": to_plain_data(state.get("risk_assessment")),
-                    "emergency_plan": to_plain_data(state.get("emergency_plan")),
-                    "resource_plan": to_plain_data(state.get("resource_plan", [])),
-                    "notifications": to_plain_data(state.get("notifications", [])),
-                    "evidence": to_plain_data(evidence),
-                    "memory_context": session_context_payload(state),
-                    "error": state.get("error"),
-                    "must_satisfy": must_satisfy,
-                    "llm_context": {
-                        "final_response_generated_by_llm": True,
-                        "grounding_sources": ["structured_monitoring_data", "risk_rules", "rag_evidence_if_available"],
-                    },
-                    "fallback_report": final_text,
-                }, ensure_ascii=False, indent=2),
-                system_prompt=(
+            llm_prompt = json.dumps({
+                "user_query": state.get("user_query", ""),
+                "intent": intent,
+                "focus_station": to_plain_data(focus_station),
+                "data_summary": state.get("data_summary", ""),
+                "should_include_summary": _should_include_summary(state),
+                "risk_assessment": to_plain_data(state.get("risk_assessment")),
+                "emergency_plan": to_plain_data(state.get("emergency_plan")),
+                "resource_plan": to_plain_data(state.get("resource_plan", [])),
+                "notifications": to_plain_data(state.get("notifications", [])),
+                "evidence": to_plain_data(evidence),
+                "memory_context": session_context_payload(state),
+                "error": state.get("error"),
+                "must_satisfy": must_satisfy,
+                "llm_context": {
+                    "final_response_generated_by_llm": True,
+                    "grounding_sources": ["structured_monitoring_data", "risk_rules", "rag_evidence_if_available"],
+                },
+                "fallback_report": final_text,
+            }, ensure_ascii=False, indent=2)
+            # Build system prompt based on streaming mode
+            if stream_queue is not None:
+                # Streaming mode: output plain text directly
+                system_prompt = (
+                    "你是防汛 AI 助手的最终回答智能体。"
+                    f"本次回答风格应为：{response_style}。"
+                    "请直接用自然语言回答用户问题，不要输出 JSON 格式。"
+                    "回答应包含：结论、要点、建议、提醒等部分，用 Markdown 格式组织。"
+                    "请优先直接回应用户问题，而不是机械罗列字段。"
+                    "如果用户问的是某个站点，就围绕该站点回答，不要退回到全局总览。"
+                    "如果 should_include_summary 为 false，就不要先铺垫整体总览，只保留与当前问题直接相关的分析与结论。"
+                    "若 evidence 非空，请优先使用 evidence 中的内容，并保留 [1][2] 这类引用。"
+                    "memory_context.recent_session_messages 可用于回答同一会话内的刚才/上一轮/代词指代问题。"
+                    "memory_context.long_term_memories 可用于用户长期偏好；不要向用户暴露内部记忆机制。"
+                    "若 evidence 为空，不要编造外部制度来源。"
+                    f"{consistency_clause}"
+                    "如果用户询问是否使用模型研判，请说明当前回答由大模型结合结构化监测数据、规则基线"
+                    "和可用 RAG 证据生成；不要声称未使用模型。"
+                    "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
+                    "若存在异常信息，需要在结尾单独提醒。"
+                )
+            else:
+                # Non-streaming mode: output JSON for structured parsing
+                system_prompt = (
                     "你是防汛 AI 助手的最终回答智能体。"
                     f"本次回答风格应为：{response_style}。"
                     "你的职责是填充固定回答槽位，而不是自由排版。"
@@ -383,19 +407,40 @@ async def final_response_node(state: dict) -> dict:
                     "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
                     "若存在异常信息，需要在结尾单独提醒。"
                     f"{_FINAL_OUTPUT_HARNESS.schema_instruction()}"
-                ),
-                temperature=0.0,
-                response_format={"type": "json_object"},
-            )
-            content = getattr(response, "content", "").strip()
-            harness_result = _FINAL_OUTPUT_HARNESS.parse(content)
-            if harness_result.ok and harness_result.payload is not None:
-                final_text = _append_evidence_if_missing(_render_final_payload(harness_result.payload), evidence)
-            elif harness_result.issues:
-                logger.warning(
-                    "final_response LLM output failed harness validation: %s",
-                    "; ".join(harness_result.issues[:5]),
                 )
+
+            # Use streaming if queue is available, otherwise fallback to non-streaming
+            if stream_queue is not None:
+                # Streaming mode: collect tokens and send to queue
+                content_parts = []
+                async for token in llm.astream(
+                    llm_prompt,
+                    system_prompt=system_prompt,
+                    temperature=0.0,
+                    # No JSON format for streaming - output plain text
+                ):
+                    content_parts.append(token)
+                    await stream_queue.put(token)
+                content = "".join(content_parts).strip()
+                # For streaming, the content is the final text (already formatted)
+                final_text = _append_evidence_if_missing(content, evidence)
+            else:
+                # Non-streaming mode: use JSON format for structured parsing
+                response = await llm.ainvoke(
+                    llm_prompt,
+                    system_prompt=system_prompt,
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
+                )
+                content = getattr(response, "content", "").strip()
+                harness_result = _FINAL_OUTPUT_HARNESS.parse(content)
+                if harness_result.ok and harness_result.payload is not None:
+                    final_text = _append_evidence_if_missing(_render_final_payload(harness_result.payload), evidence)
+                elif harness_result.issues:
+                    logger.warning(
+                        "final_response LLM output failed harness validation: %s",
+                        "; ".join(harness_result.issues[:5]),
+                    )
         except Exception:
             pass
 

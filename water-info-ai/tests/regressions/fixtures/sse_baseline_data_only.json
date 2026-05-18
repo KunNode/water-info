@@ -1,0 +1,153 @@
+{
+  "audit_rows": [],
+  "message_metadata": {
+    "agent": "memory_writer",
+    "execution_traces": [
+      {
+        "detail": "",
+        "metadata": {},
+        "phase": "final_response",
+        "status": "completed",
+        "title": "最终回答生成",
+        "tool_name": null
+      }
+    ],
+    "reasoning_steps": [
+      {
+        "content": "",
+        "id": "thought-0",
+        "kind": "thought",
+        "status": "success",
+        "title": "最终回答生成"
+      }
+    ],
+    "tool_calls": [],
+    "version": 1
+  },
+  "sse_records": [
+    {
+      "sessionId": "regression-data-only",
+      "type": "session_init"
+    },
+    {
+      "agent": "memory_loader",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "memory_loader",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "焦点站点: 北闸站",
+      "metadata": {},
+      "phase": "data_query",
+      "status": "completed",
+      "title": "意图识别: station_status",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "data_query",
+      "status": "completed",
+      "title": "检测到纯数据查询，跳过风险评估",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "data_analyst",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {
+        "duration_ms": 18,
+        "input_summary": "station_id=BZ-01, metric_type=WATER_LEVEL, limit=1",
+        "output_summary": "获取到 1 条水位观测记录"
+      },
+      "phase": "tool_call",
+      "status": "completed",
+      "title": "查询北闸站最新观测数据",
+      "tool_name": "get_recent_observations",
+      "type": "trace_update"
+    },
+    {
+      "agent": "data_analyst",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "data_query",
+      "status": "completed",
+      "title": "意图识别: station_status",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "supervisor",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "final_response",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "final_response",
+      "content": "北闸站 最新 1 条水位数据\n\n| 时间 | 指标 | 数值 | 单位 | 质量 |\n| --- | --- | ---: | --- | --- |\n| <TIMESTAMP> | 水位 | 4.248 | m | OK |",
+      "response": "北闸站 最新 1 条水位数据\n\n| 时间 | 指标 | 数值 | 单位 | 质量 |\n| --- | --- | ---: | --- | --- |\n| <TIMESTAMP> | 水位 | 4.248 | m | OK |",
+      "type": "agent_message"
+    },
+    {
+      "detail": "",
+      "metadata": {},
+      "phase": "final_response",
+      "status": "completed",
+      "title": "最终回答生成",
+      "tool_name": null,
+      "type": "trace_update"
+    },
+    {
+      "agent": "final_response",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "memory_writer",
+      "status": "active",
+      "type": "agent_update"
+    },
+    {
+      "agent": "memory_writer",
+      "status": "done",
+      "type": "agent_update"
+    },
+    {
+      "agent": "__done__",
+      "status": "done",
+      "type": "agent_update"
+    }
+  ]
+}
