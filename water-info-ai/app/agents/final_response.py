@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -20,6 +21,71 @@ logger = logging.getLogger(__name__)
 
 _EVIDENCE_HEADING = "## 证据片段"
 _PLAN_RESPONSE_INTENTS = {"plan_generation"}
+_SECTION_RE = re.compile(r"^##\s+", re.MULTILINE)
+
+
+def _deduplicate_sections(text: str) -> str:
+    """Remove repeated sections from LLM output.
+
+    When the LLM generates multiple versions of the same response
+    (e.g. multiple '## 结论' blocks), keep only the first occurrence
+    of each section through to the next section header.
+    """
+    # Find all section header positions
+    headers = list(_SECTION_RE.finditer(text))
+    if len(headers) <= 1:
+        return text
+
+    # Collect unique section names in order; if a name repeats, truncate there
+    seen_starts: dict[str, int] = {}
+    for match in headers:
+        # Get the text from this header to the next line break as the section name
+        line_end = text.find("\n", match.start())
+        if line_end == -1:
+            line_end = len(text)
+        header_line = text[match.start():line_end].strip()
+        if header_line in seen_starts:
+            # Duplicate found — truncate at this header
+            return text[:match.start()].rstrip()
+        seen_starts[header_line] = match.start()
+
+    return text
+
+
+def _has_duplicate_sections(text: str) -> bool:
+    """Quick check whether text contains repeated section headers."""
+    headers = list(_SECTION_RE.finditer(text))
+    if len(headers) <= 1:
+        return False
+    seen: set[str] = set()
+    for match in headers:
+        line_end = text.find("\n", match.start())
+        if line_end == -1:
+            line_end = len(text)
+        header_line = text[match.start():line_end].strip()
+        if header_line in seen:
+            return True
+        seen.add(header_line)
+    return False
+
+
+async def _normalize_response(llm, raw_text: str) -> str:
+    """Call LLM to de-duplicate and consolidate a response that has repeated sections."""
+    try:
+        response = await llm.ainvoke(
+            raw_text,
+            system_prompt=(
+                "以下防汛助手回答包含重复内容（相同章节出现了多次）。"
+                "请合并去重，只保留一份最完整、最准确的回答。"
+                "保留 Markdown 格式、数据引用 [1][2] 和关键数据。"
+                "不要添加新内容，不要改变结论和数据。直接输出去重后的回答。"
+            ),
+            temperature=0.0,
+        )
+        content = getattr(response, "content", "").strip()
+        return content if content else _deduplicate_sections(raw_text)
+    except Exception:
+        return _deduplicate_sections(raw_text)
 
 
 class FinalResponsePayload(BaseModel):
@@ -311,12 +377,18 @@ async def final_response_node(state: dict) -> dict:
     answer_policy = state.get("answer_policy") or {}
     is_plan_response = intent in _PLAN_RESPONSE_INTENTS and state.get("emergency_plan") is not None
 
+    # Analytical intents where risk_assessment must take precedence over RAG draft
+    _ANALYTICAL_INTENTS = {"risk_assessment", "station_status", "overview", "alarm_overview"}
+    has_risk_assessment = state.get("risk_assessment") is not None
+
     if is_plan_response:
         final_text = _build_plan_response(state)
-    elif draft:
+    elif draft and not (intent in _ANALYTICAL_INTENTS and has_risk_assessment):
         # Upstream agent (conversation_assistant / knowledge_retriever answer mode) already
         # produced the answer text. Use it as-is, skip the heavy LLM rewrite, but still run
         # validation and unified evidence appending so the heading appears at most once.
+        # EXCEPT: when analytical intent has risk_assessment, the draft from RAG preflight
+        # may not reflect the computed risk level — fall through to LLM rewrite instead.
         final_text = _append_evidence_if_missing(draft, evidence)
     elif answer_policy.get("data_only") and state.get("data_summary"):
         final_text = str(state.get("data_summary") or "").strip()
@@ -327,7 +399,8 @@ async def final_response_node(state: dict) -> dict:
 
     llm = get_llm()
     stream_queue = get_stream_queue()
-    if llm.is_enabled and not draft and not answer_policy.get("data_only") and not is_plan_response:
+    draft_overridden = draft and intent in _ANALYTICAL_INTENTS and has_risk_assessment
+    if llm.is_enabled and (not draft or draft_overridden) and not answer_policy.get("data_only") and not is_plan_response:
         try:
             response_style = "自然、友好的助手对话"
             if intent in {"plan_generation", "resource_dispatch", "notification"}:
@@ -386,6 +459,7 @@ async def final_response_node(state: dict) -> dict:
                     "和可用 RAG 证据生成；不要声称未使用模型。"
                     "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
                     "若存在异常信息，需要在结尾单独提醒。"
+                    "【重要】只输出一份完整回答。结论、要点、建议、提醒各出现一次，绝对不要重复任何章节。"
                 )
             else:
                 # Non-streaming mode: output JSON for structured parsing
@@ -411,18 +485,24 @@ async def final_response_node(state: dict) -> dict:
 
             # Use streaming if queue is available, otherwise fallback to non-streaming
             if stream_queue is not None:
-                # Streaming mode: collect tokens and send to queue
-                content_parts = []
-                async for token in llm.astream(
+                # Generate first (non-streaming), then stream normalized result to client.
+                # This ensures the client sees a clean, de-duplicated response.
+                response = await llm.ainvoke(
                     llm_prompt,
                     system_prompt=system_prompt,
                     temperature=0.0,
-                    # No JSON format for streaming - output plain text
-                ):
-                    content_parts.append(token)
-                    await stream_queue.put(token)
-                content = "".join(content_parts).strip()
-                # For streaming, the content is the final text (already formatted)
+                )
+                content = getattr(response, "content", "").strip()
+                # Normalize: de-duplicate repeated sections if present
+                if _has_duplicate_sections(content):
+                    logger.info("Detected duplicate sections, normalizing via LLM")
+                    content = await _normalize_response(llm, content)
+                else:
+                    content = _deduplicate_sections(content)
+                # Stream the normalized content to client
+                for i in range(0, len(content), 20):
+                    chunk = content[i:i + 20]
+                    await stream_queue.put(chunk)
                 final_text = _append_evidence_if_missing(content, evidence)
             else:
                 # Non-streaming mode: use JSON format for structured parsing
