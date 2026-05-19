@@ -14,6 +14,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- ============================================================
 
 DELETE FROM sys_audit_log;
+DELETE FROM resource_dispatch;
+DELETE FROM resource;
 DELETE FROM alarm;
 DELETE FROM observation;
 DELETE FROM threshold_rule;
@@ -496,5 +498,48 @@ INSERT INTO resource_allocation (plan_id, resource_type, resource_name, quantity
 DELETE FROM notification_record WHERE plan_id = 'EP-CP-20260415-001';
 INSERT INTO notification_record (plan_id, target, channel, content, status, sent_at) VALUES
   ('EP-CP-20260415-001', '城区社区网格员', 'wechat', '【通知】翠屏城区部分区域积水较深，请引导居民避开积水路段，注意出行安全', 'pending', NULL);
+
+-- ============================================================
+-- Resource: 物资、人员、车辆
+-- ============================================================
+
+INSERT INTO resource (id, type, name, quantity, unit, location, status, attributes, description) VALUES
+  -- 物资 MATERIAL
+  ('res-001', 'MATERIAL', '防汛编织袋', 50000, '个', '翠屏市防汛物资仓库', 'AVAILABLE', '{"spec": "50×80cm", "material": "聚丙烯"}', '标准防汛编织袋，用于堤坝加固和临时围堰'),
+  ('res-002', 'MATERIAL', '砂石料', 800, '方', '翠屏市防汛物资仓库', 'AVAILABLE', '{"grade": "中砂"}', '防汛抢险用砂石料'),
+  ('res-003', 'MATERIAL', '土工布', 3000, '平方米', '翠屏市防汛物资仓库', 'AVAILABLE', '{"weight": "200g/m²"}', '防汛防渗土工布'),
+  ('res-004', 'MATERIAL', '救生衣', 500, '件', '翠屏市应急救援中心', 'AVAILABLE', '{"standard": "GB4303"}', '标准救生衣，适用于水上救援'),
+  ('res-005', 'MATERIAL', '救生圈', 200, '个', '翠屏市应急救援中心', 'AVAILABLE', '{"diameter": "720mm"}', '标准救生圈'),
+  ('res-006', 'MATERIAL', '强光手电', 300, '支', '翠屏市应急救援中心', 'AVAILABLE', '{"lumen": 1000}', '防水强光手电筒，夜间巡查照明'),
+  ('res-007', 'MATERIAL', '防汛帐篷', 30, '顶', '翠屏市防汛物资仓库', 'AVAILABLE', '{"capacity": "10人"}', '应急安置帐篷'),
+  ('res-008', 'MATERIAL', '移动发电机', 8, '台', '翠屏市设备仓库', 'AVAILABLE', '{"power": "50kW"}', '柴油移动发电机组'),
+  ('res-009', 'MATERIAL', '对讲机', 60, '台', '翠屏市应急救援中心', 'AVAILABLE', '{"range": "5km"}', '防水对讲机，保障现场通讯'),
+  ('res-010', 'MATERIAL', '铅丝笼', 1200, '个', '翠屏市防汛物资仓库', 'AVAILABLE', '{"size": "2×1×1m"}', '河道护岸抢险用铅丝笼'),
+  ('res-011', 'MATERIAL', '防汛沙袋', 20000, '个', '翠屏北岸物资点', 'AVAILABLE', '{"weight": "30kg"}', '预装沙袋，快速部署'),
+  ('res-012', 'MATERIAL', '排水软管', 500, '米', '翠屏市设备仓库', 'AVAILABLE', '{"diameter": "200mm"}', '应急排水软管'),
+  ('res-013', 'MATERIAL', '警示带', 2000, '米', '翠屏市应急救援中心', 'AVAILABLE', '{"color": "红白"}', '安全警示隔离带'),
+  ('res-014', 'MATERIAL', '应急食品', 1000, '份', '翠屏市应急物资储备库', 'AVAILABLE', '{"shelf_life": "2年"}', '压缩饼干、饮用水等应急食品'),
+  ('res-015', 'MATERIAL', '医疗急救箱', 20, '套', '翠屏市应急救援中心', 'AVAILABLE', '{"type": "综合急救"}', '外伤处理、常用药品'),
+
+  -- 人员 PERSONNEL
+  ('res-101', 'PERSONNEL', '防汛抢险突击队', 120, '人', '翠屏市应急救援中心', 'AVAILABLE', '{"team": "突击一队", "skill": "堤坝抢险"}', '专业防汛抢险突击队，24小时待命'),
+  ('res-102', 'PERSONNEL', '防汛抢险突击二队', 80, '人', '翠屏北岸防汛站', 'AVAILABLE', '{"team": "突击二队", "skill": "水上救援"}', '水上救援专业队'),
+  ('res-103', 'PERSONNEL', '民兵应急分队', 200, '人', '翠屏市人武部', 'AVAILABLE', '{"team": "民兵应急", "skill": "综合应急"}', '民兵应急分队，负责群众转移和物资搬运'),
+  ('res-104', 'PERSONNEL', '医疗救护组', 15, '人', '翠屏市人民医院', 'AVAILABLE', '{"team": "医疗救护", "skill": "急救"}', '现场医疗救护人员'),
+  ('res-105', 'PERSONNEL', '水利技术专家组', 8, '人', '翠屏市水利局', 'AVAILABLE', '{"team": "专家组", "skill": "水情研判"}', '水利工程技术人员，负责险情研判和技术指导'),
+  ('res-106', 'PERSONNEL', '电力抢修队', 25, '人', '翠屏市供电公司', 'AVAILABLE', '{"team": "电力抢修", "skill": "电力恢复"}', '电力设施应急抢修人员'),
+  ('res-107', 'PERSONNEL', '通信保障组', 10, '人', '翠屏市应急管理局', 'AVAILABLE', '{"team": "通信保障", "skill": "应急通信"}', '应急通信保障人员'),
+
+  -- 车辆 VEHICLE
+  ('res-201', 'VEHICLE', '防汛指挥车', 3, '辆', '翠屏市应急管理局', 'AVAILABLE', '{"plate_prefix": "应急", "type": "越野指挥车"}', '防汛指挥调度专用车辆'),
+  ('res-202', 'VEHICLE', '大型排水泵车', 4, '辆', '翠屏市设备仓库', 'AVAILABLE', '{"capacity": "1000m³/h", "plate_prefix": "排水"}', '大型移动排水泵车'),
+  ('res-203', 'VEHICLE', '冲锋舟', 6, '艘', '翠屏市应急救援中心', 'AVAILABLE', '{"capacity": "8人", "engine": "30HP"}', '橡皮冲锋舟，用于水上搜救和人员转移'),
+  ('res-204', 'VEHICLE', '运输卡车', 10, '辆', '翠屏市运输公司', 'AVAILABLE', '{"capacity": "10吨", "plate_prefix": "运输"}', '防汛物资运输卡车'),
+  ('res-205', 'VEHICLE', '挖掘机', 3, '辆', '翠屏市市政工程处', 'AVAILABLE', '{"type": "履带式"}', '堤坝抢险清障用挖掘机'),
+  ('res-206', 'VEHICLE', '装载机', 2, '辆', '翠屏市市政工程处', 'AVAILABLE', '{"type": "轮式"}', '砂石料装载转运'),
+  ('res-207', 'VEHICLE', '应急照明车', 2, '辆', '翠屏市应急救援中心', 'AVAILABLE', '{"light_area": "5000m²"}', '夜间抢险照明保障车'),
+  ('res-208', 'VEHICLE', '救护车', 2, '辆', '翠屏市人民医院', 'AVAILABLE', '{"type": "急救型"}', '现场医疗急救转运车'),
+  ('res-209', 'VEHICLE', '无人机', 3, '架', '翠屏市应急管理局', 'AVAILABLE', '{"type": "多旋翼", "range": "10km", "camera": "红外+可见光"}', '防汛巡查侦察无人机'),
+  ('res-210', 'VEHICLE', '橡皮艇', 8, '艘', '翠屏北岸防汛站', 'AVAILABLE', '{"capacity": "4人"}', '小型橡皮艇，用于浅水区域巡查');
 
 COMMIT;
