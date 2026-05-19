@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.agents.output_validator import validate_final_response
 from app.agents._prompt import session_context_payload
-from app.rag.service import format_evidence_markdown
 from app.services.llm import get_llm
 from app.state import get_stream_queue, to_plain_data
 from app.tools.trace import make_trace
@@ -19,7 +18,6 @@ from app.utils.llm_output_harness import StructuredOutputHarness
 
 logger = logging.getLogger(__name__)
 
-_EVIDENCE_HEADING = "## 证据片段"
 _PLAN_RESPONSE_INTENTS = {"plan_generation"}
 _SECTION_RE = re.compile(r"^##\s+", re.MULTILINE)
 
@@ -108,17 +106,6 @@ _FINAL_OUTPUT_HARNESS = StructuredOutputHarness(
     FinalResponsePayload,
     name="FinalResponsePayload",
 )
-
-
-def _append_evidence_if_missing(text: str, evidence) -> str:
-    if not evidence:
-        return text
-    if _EVIDENCE_HEADING in text:
-        return text
-    block = format_evidence_markdown(evidence)
-    if not block:
-        return text
-    return f"{text}\n\n{block}".strip()
 
 
 def _risk_level_text(assessment) -> str:
@@ -253,7 +240,7 @@ def _build_plan_response(state: dict) -> str:
     if error:
         reminders.append(f"本次处理还捕获到一个异常：{error}")
     sections.append("## 执行提醒\n" + "\n".join(f"- {item}" for item in reminders))
-    return _append_evidence_if_missing("\n\n".join(sections).strip(), evidence)
+    return "\n\n".join(sections).strip()
 
 
 def _build_fallback_payload(state: dict) -> FinalResponsePayload:
@@ -361,8 +348,7 @@ def _build_fallback_payload(state: dict) -> FinalResponsePayload:
 def _build_fallback_response(state: dict) -> str:
     if state.get("intent") in _PLAN_RESPONSE_INTENTS and state.get("emergency_plan"):
         return _build_plan_response(state)
-    text = _render_final_payload(_build_fallback_payload(state))
-    return _append_evidence_if_missing(text, state.get("evidence") or [])
+    return _render_final_payload(_build_fallback_payload(state))
 
 
 async def final_response_node(state: dict) -> dict:
@@ -389,7 +375,7 @@ async def final_response_node(state: dict) -> dict:
         # validation and unified evidence appending so the heading appears at most once.
         # EXCEPT: when analytical intent has risk_assessment, the draft from RAG preflight
         # may not reflect the computed risk level — fall through to LLM rewrite instead.
-        final_text = _append_evidence_if_missing(draft, evidence)
+        final_text = draft
     elif answer_policy.get("data_only") and state.get("data_summary"):
         final_text = str(state.get("data_summary") or "").strip()
     else:
@@ -450,14 +436,13 @@ async def final_response_node(state: dict) -> dict:
                     "请优先直接回应用户问题，而不是机械罗列字段。"
                     "如果用户问的是某个站点，就围绕该站点回答，不要退回到全局总览。"
                     "如果 should_include_summary 为 false，就不要先铺垫整体总览，只保留与当前问题直接相关的分析与结论。"
-                    "若 evidence 非空，请优先使用 evidence 中的内容，并保留 [1][2] 这类引用。"
+                    "若 evidence 非空，可作为参考依据融入正文中，但不要单独列出证据片段章节，也不要输出 ## 证据片段。"
                     "memory_context.recent_session_messages 可用于回答同一会话内的刚才/上一轮/代词指代问题。"
                     "memory_context.long_term_memories 可用于用户长期偏好；不要向用户暴露内部记忆机制。"
                     "若 evidence 为空，不要编造外部制度来源。"
                     f"{consistency_clause}"
                     "如果用户询问是否使用模型研判，请说明当前回答由大模型结合结构化监测数据、规则基线"
                     "和可用 RAG 证据生成；不要声称未使用模型。"
-                    "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
                     "若存在异常信息，需要在结尾单独提醒。"
                     "【重要】只输出一份完整回答。结论、要点、建议、提醒各出现一次，绝对不要重复任何章节。"
                 )
@@ -470,7 +455,7 @@ async def final_response_node(state: dict) -> dict:
                     "请优先直接回应用户问题，而不是机械罗列字段。"
                     "如果用户问的是某个站点，就围绕该站点回答，不要退回到全局总览。"
                     "如果 should_include_summary 为 false，就不要先铺垫整体总览，只保留与当前问题直接相关的分析与结论。"
-                    "若 evidence 非空，请优先使用 evidence 中的内容，并保留 [1][2] 这类引用。"
+                    "若 evidence 非空，可作为参考依据融入正文中，但不要单独列出证据片段章节，也不要输出 ## 证据片段。"
                     "memory_context.recent_session_messages 可用于回答同一会话内的刚才/上一轮/代词指代问题。"
                     "memory_context.long_term_memories 可用于用户长期偏好；不要向用户暴露内部记忆机制。"
                     "若 evidence 为空，不要编造外部制度来源。"
@@ -478,7 +463,6 @@ async def final_response_node(state: dict) -> dict:
                     "如果用户询问是否使用模型研判，请说明当前回答由大模型结合结构化监测数据、规则基线"
                     "和可用 RAG 证据生成；不要声称未使用模型。"
                     "不要输出 Markdown 标题；系统会按固定顺序渲染为：结论、要点、建议、提醒。"
-                    "证据片段会由系统统一在结尾追加，正文不要再写 ## 证据片段 这一节。"
                     "若存在异常信息，需要在结尾单独提醒。"
                     f"{_FINAL_OUTPUT_HARNESS.schema_instruction()}"
                 )
@@ -503,7 +487,7 @@ async def final_response_node(state: dict) -> dict:
                 for i in range(0, len(content), 20):
                     chunk = content[i:i + 20]
                     await stream_queue.put(chunk)
-                final_text = _append_evidence_if_missing(content, evidence)
+                final_text = content
             else:
                 # Non-streaming mode: use JSON format for structured parsing
                 response = await llm.ainvoke(
@@ -515,7 +499,7 @@ async def final_response_node(state: dict) -> dict:
                 content = getattr(response, "content", "").strip()
                 harness_result = _FINAL_OUTPUT_HARNESS.parse(content)
                 if harness_result.ok and harness_result.payload is not None:
-                    final_text = _append_evidence_if_missing(_render_final_payload(harness_result.payload), evidence)
+                    final_text = _render_final_payload(harness_result.payload)
                 elif harness_result.issues:
                     logger.warning(
                         "final_response LLM output failed harness validation: %s",
@@ -552,7 +536,7 @@ async def final_response_node(state: dict) -> dict:
                     repair_result = _FINAL_OUTPUT_HARNESS.parse(repaired)
                     if not repair_result.ok or repair_result.payload is None:
                         raise ValueError("final response repair did not satisfy harness")
-                    candidate = _append_evidence_if_missing(_render_final_payload(repair_result.payload), evidence)
+                    candidate = _render_final_payload(repair_result.payload)
                     if validate_final_response(candidate, state).ok:
                         final_text = candidate
             except Exception:

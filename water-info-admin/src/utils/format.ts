@@ -13,6 +13,10 @@ export function formatTime(date: string | Date): string {
   return formatDate(date, 'HH:mm:ss')
 }
 
+export function formatApiDateTime(date: string | Date): string {
+  return dayjs(date).format('YYYY-MM-DDTHH:mm:ss')
+}
+
 export function formatNumber(num: number | null | undefined, digits = 2): string {
   if (num === null || num === undefined) return '-'
   return Number(num).toFixed(digits)
@@ -42,6 +46,9 @@ export const metricTypeMap: Record<string, string> = {
   WATER_LEVEL: '水位',
   RAINFALL: '降雨量',
   FLOW: '流量',
+  RESERVOIR_LEVEL: '库水位',
+  GATE_OPENING: '闸门开度',
+  PUMP_POWER: '泵站功率',
 }
 
 export const alarmLevelMap: Record<string, { label: string; color: string }> = {

@@ -81,6 +81,9 @@ const metricUnits: Record<MetricType, string> = {
   WATER_LEVEL: 'm',
   RAINFALL: 'mm',
   FLOW: 'm³/s',
+  RESERVOIR_LEVEL: 'm',
+  GATE_OPENING: 'm',
+  PUMP_POWER: 'kW',
 }
 
 function buildObservationKey(stationId: string, metricType: MetricType) {

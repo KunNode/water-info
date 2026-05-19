@@ -96,7 +96,7 @@ export interface SensorQuery {
 }
 
 // ─── Observation ───
-export type MetricType = 'WATER_LEVEL' | 'RAINFALL' | 'FLOW'
+export type MetricType = 'WATER_LEVEL' | 'RAINFALL' | 'FLOW' | 'RESERVOIR_LEVEL' | 'GATE_OPENING' | 'PUMP_POWER'
 export type QualityFlag = 'GOOD' | 'FAIR' | 'SUSPECT' | 'MISSING'
 
 export interface Observation {
@@ -472,6 +472,7 @@ export interface PlanAction {
 
 export interface PlanResource {
   id?: string
+  __rowKey?: string
   type: string
   name: string
   quantity: number
@@ -480,6 +481,7 @@ export interface PlanResource {
 
 export interface PlanNotification {
   id?: string
+  __rowKey?: string
   channel: string
   target: string
   message: string

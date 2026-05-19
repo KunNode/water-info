@@ -176,7 +176,7 @@
         <!-- AI 综合研判 -->
         <section class="card">
           <div class="card__head">
-            <div class="card__title">AI Assessment <span class="card__chs">AI 综合研判</span></div>
+            <div class="card__title">Assessment <span class="card__chs">综合研判</span></div>
             <div class="card__meta">{{ aiAssessment ? aiAssessment.timeLabel : '待机' }}</div>
           </div>
           <div class="ai" v-if="aiAssessment">
@@ -245,7 +245,7 @@ import { getSensors } from '@/api/sensor'
 import { getAlarms } from '@/api/alarm'
 import { getLatestObservations, getObservations, type LatestObservationBatchItem } from '@/api/observation'
 import { useSituationStore } from '@/stores/situation'
-import { alarmLevelMap, metricTypeMap, stationTypeMap } from '@/utils/format'
+import { alarmLevelMap, formatApiDateTime, metricTypeMap, stationTypeMap } from '@/utils/format'
 import type { Alarm, Station, MetricType } from '@/types'
 import type { StationMarker } from '@/composables/useLakeMap'
 import LakeStage from './components/LakeStage.vue'
@@ -528,6 +528,9 @@ const metricUnits: Record<MetricType, string> = {
   WATER_LEVEL: 'm',
   RAINFALL: 'mm',
   FLOW: 'm³/s',
+  RESERVOIR_LEVEL: 'm',
+  GATE_OPENING: 'm',
+  PUMP_POWER: 'kW',
 }
 
 function buildObservationKey(stationId: string, metricType: MetricType) {
@@ -566,8 +569,8 @@ async function loadData() {
     recentAlarms.value = (alarmsRes.data?.records || []).slice(0, 6)
 
     const today = new Date()
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString()
-    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString()
+    const startOfDay = formatApiDateTime(new Date(today.getFullYear(), today.getMonth(), today.getDate()))
+    const endOfDay = formatApiDateTime(new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59))
     const obsRes = await getObservations({ page: 1, size: 1, start: startOfDay, end: endOfDay })
     stats.value.obsToday = obsRes.data?.total || 0
 
@@ -677,13 +680,13 @@ async function loadWaterLevelTrend() {
     allStations.find((s) => s.code === 'ST_WL_CP_01') || allStations.find((s) => s.type === 'WATER_LEVEL')
   if (!wlStation || !waterLevelChart) return
   const now = new Date()
-  const start = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+  const start = formatApiDateTime(new Date(now.getTime() - 24 * 60 * 60 * 1000))
   try {
     const res = await getObservations({
       stationId: wlStation.id,
       metricType: 'WATER_LEVEL',
       start,
-      end: now.toISOString(),
+      end: formatApiDateTime(now),
       page: 1,
       size: 200,
     })
@@ -718,8 +721,8 @@ async function loadRainfallTrend() {
         getObservations({
           stationId: s.id,
           metricType: 'RAINFALL',
-          start: start.toISOString(),
-          end: now.toISOString(),
+          start: formatApiDateTime(start),
+          end: formatApiDateTime(now),
           page: 1,
           size: 500,
         }),
@@ -1368,6 +1371,9 @@ onUnmounted(() => {
   background: linear-gradient(180deg, rgba(47, 123, 255, 0.08), rgba(11, 18, 32, 0.4));
   border: 1px solid rgba(73, 225, 255, 0.18);
   border-radius: 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 
   &__head {
     display: flex;
@@ -1439,6 +1445,11 @@ onUnmounted(() => {
     font-size: 11px;
     font-family: var(--bs-display-mono);
   }
+
+  &::-webkit-scrollbar { width: 4px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb { background: rgba(73, 225, 255, 0.25); border-radius: 4px; }
+  &::-webkit-scrollbar-thumb:hover { background: rgba(73, 225, 255, 0.45); }
 }
 
 /* ============== Ranking ============== */

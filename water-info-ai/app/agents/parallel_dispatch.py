@@ -48,5 +48,14 @@ async def parallel_dispatch_node(state: FloodResponseState) -> dict:
             merged["notifications"] = notification_result["notifications"]
         merged["messages"].extend(notification_result.get("messages", []))
 
+    # 将调度后的资源和通知同步写回预案对象
+    plan = state.get("emergency_plan")
+    if plan is not None:
+        if "resource_plan" in merged:
+            plan.resources = merged["resource_plan"]
+        if "notifications" in merged:
+            plan.notifications = merged["notifications"]
+        merged["emergency_plan"] = plan
+
     logger.info("并行调度完成")
     return merged

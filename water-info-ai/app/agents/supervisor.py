@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, Field
 
@@ -20,6 +23,19 @@ from app.tools.trace import make_trace
 from app.utils.json_parser import extract_json
 
 _RAG_GROUNDING_RISK = {RiskLevel.MODERATE, RiskLevel.HIGH, RiskLevel.CRITICAL}
+
+# Declarative intent → agent dependency chain.
+# Walk the chain; return the first agent whose completion check fails.
+_WORKFLOW_CHAINS: dict[str, list[str]] = {
+    "station_status":    ["data_analyst", "risk_analysis_parallel"],
+    "overview":          ["data_analyst", "risk_analysis_parallel"],
+    "alarm_overview":    ["data_analyst", "risk_analysis_parallel"],
+    "risk_assessment":   ["data_analyst", "risk_analysis_parallel"],
+    "plan_generation":   ["data_analyst", "risk_analysis_parallel", "plan_generator", "validation_parallel", "parallel_dispatch"],
+    "resource_dispatch": ["data_analyst", "risk_analysis_parallel", "plan_generator", "resource_dispatcher"],
+    "notification":      ["data_analyst", "risk_analysis_parallel", "plan_generator", "notification"],
+    "execution_status":  ["execution_monitor"],
+}
 
 
 def _normalize_query_hash(query: str) -> str:
@@ -398,18 +414,6 @@ def _deterministic_route(state: dict) -> str | None:
     if intent == "knowledge_qa":
         return "knowledge_retriever"
 
-    # Declarative intent → agent dependency chain.
-    # Walk the chain; return the first agent whose completion check fails.
-    _WORKFLOW_CHAINS: dict[str, list[str]] = {
-        "station_status":    ["data_analyst", "risk_analysis_parallel"],
-        "overview":          ["data_analyst", "risk_analysis_parallel"],
-        "alarm_overview":    ["data_analyst", "risk_analysis_parallel"],
-        "risk_assessment":   ["data_analyst", "risk_analysis_parallel"],
-        "plan_generation":   ["data_analyst", "risk_analysis_parallel", "plan_generator", "validation_parallel", "parallel_dispatch"],
-        "resource_dispatch": ["data_analyst", "risk_analysis_parallel", "plan_generator", "resource_dispatcher"],
-        "notification":      ["data_analyst", "risk_analysis_parallel", "plan_generator", "notification"],
-        "execution_status":  ["execution_monitor"],
-    }
     chain = _WORKFLOW_CHAINS.get(intent)
     if chain:
         for agent in chain:
@@ -721,7 +725,18 @@ async def supervisor_node(state: dict) -> dict:
     try:
         decision = SupervisorDecision.model_validate(parsed)
         next_agent, guard_reason = enforce_dependencies(decision.next_agent, state, deterministic)
-        intent = decision.intent or inferred_intent
+        # Preserve original intent if the workflow chain is still in progress;
+        # the LLM may re-classify mid-workflow (e.g. plan_generation → risk_assessment)
+        # which would skip downstream nodes like plan_generator.
+        existing_intent = state.get("intent")
+        if existing_intent and existing_intent in _WORKFLOW_CHAINS:
+            chain = _WORKFLOW_CHAINS[existing_intent]
+            if not all(_agent_completed(a, state) for a in chain):
+                intent = existing_intent
+            else:
+                intent = decision.intent or inferred_intent
+        else:
+            intent = decision.intent or inferred_intent
         focus_station_query = decision.focus_station_query or inferred_focus_station
         reasoning = decision.reasoning if not guard_reason else f"{decision.reasoning}; {guard_reason}"
     except Exception:

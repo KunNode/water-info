@@ -1222,14 +1222,26 @@ class DatabaseService:
 
     async def get_plan_resources(self, plan_id: str) -> list[dict]:
         return await self._fetch("""
-            SELECT id, resource_type, resource_name, quantity, source_location,
-                   target_location, eta_minutes, created_at
+            SELECT id,
+                   resource_type AS type,
+                   resource_name AS name,
+                   quantity,
+                   source_location AS location,
+                   target_location,
+                   eta_minutes,
+                   created_at
             FROM resource_allocation WHERE plan_id = $1
         """, plan_id)
 
     async def get_plan_notifications(self, plan_id: str) -> list[dict]:
         return await self._fetch("""
-            SELECT id, target, channel, content, status, sent_at, created_at
+            SELECT id,
+                   target,
+                   channel,
+                   content AS message,
+                   status,
+                   sent_at,
+                   created_at
             FROM notification_record WHERE plan_id = $1
         """, plan_id)
 
