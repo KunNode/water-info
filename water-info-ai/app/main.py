@@ -75,10 +75,6 @@ HEADER_USER_ID = "X-User-Id"
 HEADER_USERNAME = "X-Username"
 STREAM_KEEPALIVE_INTERVAL = 15
 
-# Cancel events for in-flight plan executions (plan_id -> asyncio.Event)
-_plan_cancel_events: dict[str, asyncio.Event] = {}
-
-
 def _get_user_from_request(request: Request) -> tuple[str, str]:
     """Extract user identity from request headers."""
     user_id = request.headers.get(HEADER_USER_ID, "")
@@ -124,6 +120,15 @@ async def _persist_result(session_id: str, graph_state: dict) -> None:
     plan = graph_state.get("emergency_plan")
     db = get_db_service()
 
+    def _plain_list(items):
+        result = []
+        for item in items or []:
+            if hasattr(item, "__dataclass_fields__"):
+                result.append(asdict(item))
+            elif isinstance(item, dict):
+                result.append(item)
+        return result
+
     # Always update snapshot with current state
     assessment = graph_state.get("risk_assessment")
     risk_level = _risk_level_value(assessment)
@@ -167,8 +172,8 @@ async def _persist_result(session_id: str, graph_state: dict) -> None:
             summary=(graph_state.get("final_response") or plan.summary or "")[:2000],
             actions=[asdict(action) for action in plan.actions],
         )
-        resources = [asdict(resource) for resource in graph_state.get("resource_plan", [])]
-        notifications = [asdict(record) for record in graph_state.get("notifications", [])]
+        resources = _plain_list(graph_state.get("resource_plan") or getattr(plan, "resources", []))
+        notifications = _plain_list(graph_state.get("notifications") or getattr(plan, "notifications", []))
         if resources:
             await db.save_resource_allocations(plan.plan_id, resources)
         if notifications:
@@ -472,48 +477,25 @@ def _serialize_kb_document(row: dict) -> dict:
     }
 
 
-async def _do_execute_plan(plan_id: str, actions: list[dict]) -> None:
+async def _sync_plan_status_from_actions(plan_id: str) -> None:
     db = get_db_service()
-    platform = get_platform_client()
-    cancel_event = _plan_cancel_events.get(plan_id)
-    failed = 0
-    cancelled = False
-    for action in actions:
-        action_id = action.get("action_id", "")
-        # Check cancel flag
-        if cancel_event and cancel_event.is_set():
-            cancelled = True
-            break
-        # Skip actions already manually updated to a terminal state
-        current = await db.get_action_status(plan_id, action_id)
-        if current in ("completed", "failed"):
-            if current == "failed":
-                failed += 1
-            continue
-        try:
-            await db.update_action_status(plan_id, action_id, "in_progress")
-            if action.get("action_type") == "notification":
-                try:
-                    for alarm in (await db.get_active_alarms())[:10]:
-                        await platform.acknowledge_alarm(str(alarm["id"]))
-                except Exception as exc:
-                    logger.warning("[%s] alarm ack failed: %s", plan_id, exc)
-            await db.update_action_status(plan_id, action_id, "completed")
-        except Exception as exc:
-            logger.warning("[%s] action %s failed: %s", plan_id, action_id, exc)
-            try:
-                await db.update_action_status(plan_id, action_id, "failed")
-            except Exception:
-                pass
-            failed += 1
-    # Clean up cancel event
-    _plan_cancel_events.pop(plan_id, None)
-    if cancelled:
-        await db.update_plan_status(plan_id, "cancelled")
-    elif failed > 0:
-        await db.update_plan_status(plan_id, "failed")
-    else:
+    actions = await db.get_plan_actions(plan_id)
+    if not actions:
+        return
+
+    statuses = [str(action.get("status") or "") for action in actions]
+    if all(status == "completed" for status in statuses):
         await db.update_plan_status(plan_id, "completed")
+        return
+
+    if any(status == "failed" for status in statuses) and not any(
+        status in {"pending", "in_progress"} for status in statuses
+    ):
+        await db.update_plan_status(plan_id, "failed")
+        return
+
+    if any(status in {"pending", "in_progress"} for status in statuses):
+        await db.update_plan_status(plan_id, "executing")
 
 
 # ── lifespan ──────────────────────────────────────────────────────────────────
@@ -1109,18 +1091,13 @@ async def execute_plan(plan_id: str, background_tasks: BackgroundTasks, request:
         # Reset actions if re-executing from a terminal state
         if status in ("failed", "cancelled"):
             await db.reset_plan_actions(plan_id)
-        actions = await db.get_plan_actions(plan_id)
-        if request and request.action_ids:
-            actions = [a for a in actions if a.get("action_id") in request.action_ids]
-        # Register cancel event (cleared on success or explicit cancel)
-        _plan_cancel_events[plan_id] = asyncio.Event()
         await db.update_plan_status(plan_id, "executing")
-        background_tasks.add_task(_do_execute_plan, plan_id, actions)
+        actions = await db.get_plan_actions(plan_id)
         return PlanExecuteResponse(
             plan_id=plan_id,
             status="executing",
             executed_actions=len(actions),
-            message=f"预案已开始执行，共 {len(actions)} 项措施",
+            message="预案已开始执行，等待逐项推进措施状态",
         )
     except HTTPException:
         raise
@@ -1167,6 +1144,7 @@ async def update_action_status_during_execution(plan_id: str, action_id: str, bo
         if plan["status"] != "executing":
             raise HTTPException(status_code=409, detail="仅执行中的预案可修改行动状态")
         await db.update_action_status(plan_id, action_id, new_status)
+        await _sync_plan_status_from_actions(plan_id)
         return {"plan_id": plan_id, "action_id": action_id, "status": new_status}
     except HTTPException:
         raise
@@ -1184,12 +1162,7 @@ async def cancel_plan(plan_id: str):
             raise HTTPException(status_code=404, detail="预案不存在")
         if plan["status"] != "executing":
             raise HTTPException(status_code=409, detail="仅执行中的预案可取消")
-        cancel_event = _plan_cancel_events.get(plan_id)
-        if cancel_event:
-            cancel_event.set()
-        else:
-            # Background task not tracked; set status directly
-            await db.update_plan_status(plan_id, "cancelled")
+        await db.update_plan_status(plan_id, "cancelled")
         return {"plan_id": plan_id, "status": "cancelling"}
     except HTTPException:
         raise

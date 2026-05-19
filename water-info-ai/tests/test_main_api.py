@@ -73,6 +73,100 @@ def _build_db_mock():
     )
 
 
+def _build_execution_db_mock():
+    state = {
+        "plan": {
+            "plan_id": "plan-001",
+            "status": "approved",
+            "plan_name": "测试预案",
+            "risk_level": "high",
+            "trigger_conditions": "test",
+            "session_id": "s-001",
+            "summary": "test",
+            "version": 0,
+            "created_at": "2026-05-19T00:00:00Z",
+            "updated_at": "2026-05-19T00:00:00Z",
+        },
+        "actions": [
+            {"action_id": "a-1", "action_type": "task", "description": "行动 1", "priority": 1, "responsible_dept": "水利局", "deadline_minutes": 30, "status": "pending", "created_at": "2026-05-19T00:00:00Z"},
+            {"action_id": "a-2", "action_type": "task", "description": "行动 2", "priority": 2, "responsible_dept": "应急局", "deadline_minutes": 60, "status": "pending", "created_at": "2026-05-19T00:00:00Z"},
+        ],
+        "resources": [
+            {"id": 1, "type": "人员", "name": "抢险队", "quantity": 12, "location": "市应急仓库", "target_location": "城区河段", "eta_minutes": 25, "created_at": "2026-05-19T00:00:00Z"},
+        ],
+        "notifications": [
+            {"id": 7, "target": "应急办", "channel": "sms", "message": "请立即进入防汛待命状态。", "status": "pending", "sent_at": None, "created_at": "2026-05-19T00:00:00Z"},
+        ],
+    }
+
+    async def get_emergency_plan(plan_id: str):
+        return state["plan"] if plan_id == "plan-001" else None
+
+    async def get_plan_actions(plan_id: str):
+        return state["actions"] if plan_id == "plan-001" else []
+
+    async def get_plan_resources(plan_id: str):
+        return state["resources"] if plan_id == "plan-001" else []
+
+    async def get_plan_notifications(plan_id: str):
+        return state["notifications"] if plan_id == "plan-001" else []
+
+    async def update_plan_status(plan_id: str, status: str):
+        if plan_id == "plan-001":
+            state["plan"]["status"] = status
+
+    async def update_action_status(plan_id: str, action_id: str, status: str):
+        if plan_id != "plan-001":
+            return
+        for action in state["actions"]:
+            if action["action_id"] == action_id:
+                action["status"] = status
+
+    async def reset_plan_actions(plan_id: str):
+        if plan_id != "plan-001":
+            return
+        for action in state["actions"]:
+            action["status"] = "pending"
+
+    return SimpleNamespace(
+        _get_pool=AsyncMock(return_value=object()),
+        ensure_plan_tables=AsyncMock(),
+        ensure_conversation_tables=AsyncMock(),
+        ensure_kb_tables=AsyncMock(),
+        close=AsyncMock(),
+        ensure_or_create_session=AsyncMock(),
+        save_conversation_message=AsyncMock(),
+        update_message_content=AsyncMock(),
+        get_conversation_messages=AsyncMock(return_value=[]),
+        save_conversation_snapshot=AsyncMock(),
+        save_emergency_plan=AsyncMock(),
+        save_resource_allocations=AsyncMock(),
+        save_notifications=AsyncMock(),
+        list_kb_documents=AsyncMock(return_value=[]),
+        get_kb_document=AsyncMock(return_value=None),
+        soft_delete_kb_document=AsyncMock(return_value=True),
+        get_kb_stats=AsyncMock(return_value={
+            "document_count": 0,
+            "ready_document_count": 0,
+            "chunk_count": 0,
+            "job_success_rate": 0.0,
+            "model_distribution": {},
+        }),
+        create_kb_ingest_job=AsyncMock(return_value="job-001"),
+        list_memory_items=AsyncMock(return_value=[]),
+        update_memory_item=AsyncMock(return_value=None),
+        delete_memory_item=AsyncMock(return_value=True),
+        get_emergency_plan=AsyncMock(side_effect=get_emergency_plan),
+        get_plan_actions=AsyncMock(side_effect=get_plan_actions),
+        get_plan_resources=AsyncMock(side_effect=get_plan_resources),
+        get_plan_notifications=AsyncMock(side_effect=get_plan_notifications),
+        update_plan_status=AsyncMock(side_effect=update_plan_status),
+        update_action_status=AsyncMock(side_effect=update_action_status),
+        reset_plan_actions=AsyncMock(side_effect=reset_plan_actions),
+        state=state,
+    )
+
+
 def _build_session_mock(history: list[dict] | None = None):
     return SimpleNamespace(
         get_history=AsyncMock(return_value=history or []),
@@ -110,6 +204,45 @@ def test_health_endpoint_returns_service_metadata():
     db_mock.ensure_kb_tables.assert_awaited_once()
     db_mock.close.assert_awaited_once()
     session_mock.close.assert_awaited_once()
+
+
+def test_execute_plan_stays_in_executing_until_actions_complete():
+    db_mock = _build_execution_db_mock()
+    with _patched_client(db_mock=db_mock) as (client, _db_mock, _session_mock, _graph):
+        execute_response = client.post("/api/v1/plans/plan-001/execute")
+        assert execute_response.status_code == 200
+        assert execute_response.json()["status"] == "executing"
+        assert execute_response.json()["executed_actions"] == 2
+        assert db_mock.state["plan"]["status"] == "executing"
+        assert all(action["status"] == "pending" for action in db_mock.state["actions"])
+
+        first_action = client.patch(
+            "/api/v1/plans/plan-001/actions/a-1",
+            json={"status": "completed"},
+        )
+        assert first_action.status_code == 200
+        assert db_mock.state["plan"]["status"] == "executing"
+
+        second_action = client.patch(
+            "/api/v1/plans/plan-001/actions/a-2",
+            json={"status": "completed"},
+        )
+        assert second_action.status_code == 200
+        assert db_mock.state["plan"]["status"] == "completed"
+        assert all(action["status"] == "completed" for action in db_mock.state["actions"])
+
+
+def test_plan_detail_returns_frontend_shaped_resources_and_notifications():
+    db_mock = _build_execution_db_mock()
+    with _patched_client(db_mock=db_mock) as (client, _db_mock, _session_mock, _graph):
+        response = client.get("/api/v1/plans/plan-001")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["resources"][0]["type"] == "人员"
+    assert payload["resources"][0]["name"] == "抢险队"
+    assert payload["resources"][0]["location"] == "市应急仓库"
+    assert payload["notifications"][0]["message"] == "请立即进入防汛待命状态。"
 
 
 def test_stream_events_do_not_duplicate_final_response_content():
@@ -421,6 +554,63 @@ def test_flood_query_endpoint_returns_aggregated_result_and_persists_turns():
     assert db_mock.save_conversation_message.await_count == 2
 
 
+def test_flood_query_persists_plan_embedded_resources_and_notifications():
+    plan = EmergencyPlan(
+        plan_id="EP-002",
+        plan_name="城区防汛预案",
+        risk_level=RiskLevel.HIGH,
+        trigger_conditions="水位接近警戒线",
+        actions=[
+            EmergencyAction(
+                action_id="A-001",
+                action_type="patrol",
+                description="加密巡查",
+                priority=1,
+                responsible_dept="防汛办",
+                deadline_minutes=30,
+            ),
+        ],
+        resources=[
+            ResourceAllocation(
+                resource_type="personnel",
+                resource_name="抢险队",
+                quantity=12,
+                source_location="市应急仓库",
+                target_location="城区河段",
+                eta_minutes=25,
+            )
+        ],
+        notifications=[
+            NotificationRecord(
+                target="应急办",
+                channel="sms",
+                content="请立即进入防汛待命状态。",
+            )
+        ],
+        summary="立即启动高风险响应。",
+    )
+    final_state = {
+        "final_response": "已完成防汛研判并生成响应预案。",
+        "risk_assessment": RiskAssessment(
+            risk_level=RiskLevel.HIGH,
+            risk_score=82.5,
+            key_risks=["河道水位持续上涨"],
+        ),
+        "emergency_plan": plan,
+    }
+    graph = StubGraph(final_state=final_state)
+
+    with _patched_client(graph=graph) as (client, db_mock, _session_mock, _graph):
+        response = client.post(
+            "/api/v1/flood/query",
+            json={"query": "分析当前水情并生成预案", "session_id": "session-002"},
+        )
+
+    assert response.status_code == 200
+    db_mock.save_resource_allocations.assert_awaited_once()
+    db_mock.save_notifications.assert_awaited_once()
+
+
 def test_flood_query_uses_database_history_when_redis_history_is_empty():
     db_mock = _build_db_mock()
     db_mock.get_conversation_messages = AsyncMock(return_value=[
@@ -446,6 +636,20 @@ def test_flood_query_uses_database_history_when_redis_history_is_empty():
     ]
     session_mock.save_turn.assert_any_await("session-db-history", "user", "继续刚才的问题")
     session_mock.save_turn.assert_any_await("session-db-history", "assistant", "我会延续上一轮北闸站上下文。")
+
+
+def test_plan_detail_returns_frontend_shaped_resources_and_notifications():
+    db_mock = _build_execution_db_mock()
+
+    with _patched_client(db_mock=db_mock) as (client, _db, _session, _graph):
+        response = client.get("/api/v1/plans/plan-001")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["resources"][0]["type"] == "人员"
+    assert payload["resources"][0]["name"] == "抢险队"
+    assert payload["resources"][0]["location"] == "市应急仓库"
+    assert payload["notifications"][0]["message"] == "请立即进入防汛待命状态。"
 
 
 def test_flood_query_does_not_persist_plan_for_non_plan_manual_query():

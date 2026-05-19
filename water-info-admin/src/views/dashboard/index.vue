@@ -121,7 +121,7 @@ import { getAlarms } from '@/api/alarm'
 import { getStations } from '@/api/station'
 import { getSensors } from '@/api/sensor'
 import { getObservations } from '@/api/observation'
-import { formatDate, alarmLevelMap, stationTypeMap } from '@/utils/format'
+import { formatApiDateTime, formatDate, alarmLevelMap, stationTypeMap } from '@/utils/format'
 import type { Alarm } from '@/types'
 
 interface StatsCard {
@@ -208,8 +208,8 @@ async function loadData() {
     }
 
     const today = new Date()
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString()
-    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString()
+    const startOfDay = formatApiDateTime(new Date(today.getFullYear(), today.getMonth(), today.getDate()))
+    const endOfDay = formatApiDateTime(new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59))
     const observationsRes = await getObservations({ page: 1, size: 1, start: startOfDay, end: endOfDay })
     if (observationsRes.data?.total !== undefined) {
       statsCards.value[3].value = String(observationsRes.data.total)
@@ -220,8 +220,8 @@ async function loadData() {
       updateWaterLevelChart(stationsRes.data?.records || []),
       updateRainfallChart(stationsRes.data?.records || []),
     ])
-  } catch {
-    // best effort
+  } catch (err) {
+    console.error('[dashboard] loadData failed:', err)
   }
 }
 
@@ -266,12 +266,12 @@ async function updateWaterLevelChart(stations: any[]) {
     return
   }
   const now = new Date()
-  const start = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+  const start = formatApiDateTime(new Date(now.getTime() - 24 * 60 * 60 * 1000))
   const res = await getObservations({
     stationId: station.id,
     metricType: 'WATER_LEVEL',
     start,
-    end: now.toISOString(),
+    end: formatApiDateTime(now),
     page: 1,
     size: 240,
   })
@@ -334,8 +334,8 @@ async function updateRainfallChart(stations: any[]) {
       getObservations({
         stationId: s.id,
         metricType: 'RAINFALL',
-        start: start.toISOString(),
-        end: now.toISOString(),
+        start: formatApiDateTime(start),
+        end: formatApiDateTime(now),
         page: 1,
         size: 500,
       }),

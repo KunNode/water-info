@@ -185,7 +185,7 @@
             应急行动列表 ({{ displayActions.length }})
             <span v-if="isExecutingCurrentPlan" style="font-size: 12px; color: #e6a23c; margin-left: 8px">执行中 · 每 3 秒刷新</span>
           </div>
-          <el-table :data="displayActions" border size="small" class="mb-4" empty-text="暂无应急行动">
+          <el-table :data="displayActions" row-key="action_id" border size="small" class="mb-4" empty-text="暂无应急行动">
             <el-table-column type="index" label="#" width="50" align="center" />
             <el-table-column prop="description" label="行动描述" />
             <el-table-column prop="priority" label="优先级" width="90" align="center" />
@@ -193,16 +193,19 @@
             <el-table-column label="状态" width="140" align="center">
               <template #default="{ row }">
                 <el-select
-                  v-if="isExecutingCurrentPlan"
+                  v-if="canEditActionStatuses"
                   :model-value="row.status"
                   size="small"
                   style="width: 120px"
-                  @change="(val: string) => handleActionStatusChange(row.action_id, val)"
+                  :disabled="actionStatusSavingId === getActionRowId(row)"
+                  @change="(val: string) => handleActionStatusChange(getActionRowId(row), val)"
                 >
-                  <el-option label="待执行" value="pending" />
-                  <el-option label="执行中" value="in_progress" />
-                  <el-option label="已完成" value="completed" />
-                  <el-option label="已失败" value="failed" />
+                  <el-option
+                    v-for="option in actionStatusOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
                 </el-select>
                 <el-tag v-else :type="actionStatusTagType(row.status)" size="small">
                   {{ actionStatusLabel(row.status) }}
@@ -245,7 +248,7 @@
             应急行动列表 ({{ draftPlan.actions?.length || 0 }})
             <el-button size="small" type="primary" class="section-add-btn" @click="addAction">新增行</el-button>
           </div>
-          <el-table :data="draftPlan.actions || []" border size="small" class="mb-4" empty-text="暂无应急行动">
+          <el-table :data="draftPlan.actions || []" row-key="id" border size="small" class="mb-4" empty-text="暂无应急行动">
             <el-table-column type="index" label="#" width="50" align="center" />
             <el-table-column label="行动描述" min-width="180">
               <template #default="{ row }">
@@ -264,7 +267,14 @@
             </el-table-column>
             <el-table-column label="状态" width="100" align="center">
               <template #default="{ row }">
-                <el-input v-model="row.status" size="small" />
+                <el-select v-model="row.status" size="small" style="width: 100%">
+                  <el-option
+                    v-for="option in actionStatusOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="70" align="center">
@@ -278,7 +288,7 @@
             资源清单 ({{ draftPlan.resources?.length || 0 }})
             <el-button size="small" type="primary" class="section-add-btn" @click="addResource">新增行</el-button>
           </div>
-          <el-table :data="draftPlan.resources || []" border size="small" class="mb-4" empty-text="暂无资源项">
+          <el-table :data="draftPlan.resources || []" :row-key="getResourceRowKey" border size="small" class="mb-4" empty-text="暂无资源项">
             <el-table-column type="index" label="#" width="50" align="center" />
             <el-table-column label="资源类型" width="120">
               <template #default="{ row }">
@@ -311,7 +321,7 @@
             通知方案 ({{ draftPlan.notifications?.length || 0 }})
             <el-button size="small" type="primary" class="section-add-btn" @click="addNotification">新增行</el-button>
           </div>
-          <el-table :data="draftPlan.notifications || []" border size="small" class="mb-4" empty-text="暂无通知方案">
+          <el-table :data="draftPlan.notifications || []" :row-key="getNotificationRowKey" border size="small" class="mb-4" empty-text="暂无通知方案">
             <el-table-column type="index" label="#" width="50" align="center" />
             <el-table-column label="渠道" width="100" align="center">
               <template #default="{ row }">
@@ -330,7 +340,14 @@
             </el-table-column>
             <el-table-column label="状态" width="100" align="center">
               <template #default="{ row }">
-                <el-input v-model="row.status" size="small" />
+                <el-select v-model="row.status" size="small" style="width: 100%">
+                  <el-option
+                    v-for="option in notificationStatusOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="70" align="center">
@@ -539,6 +556,9 @@ const canExecuteCurrentPlan = computed(() => {
 const canCancelCurrentPlan = computed(() => {
   return !!currentPlan.value && isReviewer.value && currentPlan.value.status === 'executing'
 })
+const canEditActionStatuses = computed(() => {
+  return !!currentPlan.value && isReviewer.value
+})
 const isExecutingCurrentPlan = computed(() => {
   return !!currentPlan.value && currentPlan.value.status === 'executing'
 })
@@ -577,6 +597,19 @@ const actionStatusLabel = (status: string): string => {
   }
   return map[status] || status || '未知'
 }
+
+const actionStatusOptions = [
+  { label: '待执行', value: 'pending' },
+  { label: '执行中', value: 'in_progress' },
+  { label: '已完成', value: 'completed' },
+  { label: '已失败', value: 'failed' },
+] as const
+
+const notificationStatusOptions = [
+  { label: '待发送', value: 'pending' },
+  { label: '已发送', value: 'sent' },
+  { label: '发送失败', value: 'failed' },
+] as const
 
 const fetchData = async () => {
   loading.value = true
@@ -738,7 +771,7 @@ const removeAction = (index: number) => {
 const addResource = () => {
   if (!draftPlan.value) return
   if (!draftPlan.value.resources) draftPlan.value.resources = []
-  draftPlan.value.resources.push({ type: '', name: '', quantity: 0, location: '' })
+  draftPlan.value.resources.push({ __rowKey: `resource-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, type: '', name: '', quantity: 0, location: '' })
 }
 
 const removeResource = (index: number) => {
@@ -749,12 +782,26 @@ const removeResource = (index: number) => {
 const addNotification = () => {
   if (!draftPlan.value) return
   if (!draftPlan.value.notifications) draftPlan.value.notifications = []
-  draftPlan.value.notifications.push({ channel: '', target: '', message: '', status: 'pending' })
+  draftPlan.value.notifications.push({
+    __rowKey: `notification-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    channel: '',
+    target: '',
+    message: '',
+    status: 'pending',
+  })
 }
 
 const removeNotification = (index: number) => {
   if (!draftPlan.value?.notifications) return
   draftPlan.value.notifications.splice(index, 1)
+}
+
+const getResourceRowKey = (row: { id?: string; __rowKey?: string }) => {
+  return row.id || row.__rowKey || ''
+}
+
+const getNotificationRowKey = (row: { id?: string; __rowKey?: string }) => {
+  return row.id || row.__rowKey || ''
 }
 
 const handleSave = async () => {
@@ -932,6 +979,29 @@ const loadAudits = async () => {
   }
 }
 
+const actionStatusSavingId = ref<string | null>(null)
+
+const getActionRowId = (row: { id?: string; action_id?: string }) => {
+  return row.action_id || row.id || ''
+}
+
+const syncActionStatusLocally = (actionId: string, newStatus: string) => {
+  const progressAction = progressData.value.find((item) => item.action_id === actionId)
+  if (progressAction) {
+    progressAction.status = newStatus as ActionProgress['status']
+  }
+
+  const planAction = currentPlan.value?.actions.find((item) => item.id === actionId)
+  if (planAction) {
+    planAction.status = newStatus
+  }
+
+  const draftAction = draftPlan.value?.actions.find((item) => item.id === actionId)
+  if (draftAction) {
+    draftAction.status = newStatus
+  }
+}
+
 
 
 const handleExecute = (row: FloodPlan) => {
@@ -1003,20 +1073,25 @@ const cancelCurrentPlan = async () => {
 }
 
 const handleActionStatusChange = async (actionId: string, newStatus: string) => {
-  if (!currentPlan.value) return
+  if (!currentPlan.value || !actionId || actionStatusSavingId.value === actionId) return
+  const currentAction =
+    progressData.value.find((item) => item.action_id === actionId)
+    || currentPlan.value.actions.find((item) => item.id === actionId)
+  if (!currentAction || currentAction.status === newStatus) return
+
+  actionStatusSavingId.value = actionId
   try {
     await updateActionStatus(currentPlan.value.id, actionId, newStatus)
-    // Update local progress data
-    const action = progressData.value.find((a) => a.action_id === actionId)
-    if (action) {
-      action.status = newStatus as ActionProgress['status']
-    }
+    syncActionStatusLocally(actionId, newStatus)
+    ElMessage.success('行动状态已更新')
   } catch (err: unknown) {
     if (err instanceof Error) {
       ElMessage.error(err.message || '更新行动状态失败')
     } else {
       ElMessage.error('更新行动状态失败')
     }
+  } finally {
+    actionStatusSavingId.value = null
   }
 }
 

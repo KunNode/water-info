@@ -551,7 +551,7 @@ class DatabaseService:
             SELECT action_id, action_type, description, priority, responsible_dept,
                    deadline_minutes, status, created_at
             FROM emergency_action WHERE plan_id = $1
-            ORDER BY priority ASC
+            ORDER BY priority ASC, created_at ASC, action_id ASC
         """, plan_id)
 
     async def get_plan_resources(self, plan_id: str) -> list[dict]:

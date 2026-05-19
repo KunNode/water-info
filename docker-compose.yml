@@ -9,6 +9,7 @@ services:
     container_name: water-postgres
     restart: unless-stopped
     environment:
+      TZ: Asia/Shanghai
       POSTGRES_DB: water_info
       POSTGRES_USER: root
       POSTGRES_PASSWORD: ${PG_PASSWORD:-123456}
@@ -54,6 +55,7 @@ services:
       redis:
         condition: service_healthy
     environment:
+      TZ: Asia/Shanghai
       SPRING_PROFILES_ACTIVE: prod
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/water_info
       SPRING_DATASOURCE_USERNAME: root
@@ -76,7 +78,7 @@ services:
       retries: 10
       start_period: 30s
 
-  # ─── AI Service (轻量版) ───
+  # ─── AI Service ───
   ai:
     build:
       context: ./water-info-ai
@@ -93,6 +95,7 @@ services:
     env_file:
       - ./water-info-ai/.env
     environment:
+      TZ: Asia/Shanghai
       PG_HOST: postgres
       PG_PORT: 5432
       PG_DATABASE: water_info
@@ -128,8 +131,6 @@ services:
         DOCKER_REGISTRY_PREFIX: ${DOCKER_REGISTRY_PREFIX:-docker.1panel.live/library/}
     container_name: water-admin
     restart: unless-stopped
-    depends_on:
-      - platform
     ports:
       - "5175:80"
 
